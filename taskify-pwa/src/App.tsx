@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+=import React, { useEffect, useMemo, useRef, useState } from "react";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -55,7 +55,186 @@ function nextOccurrence(currentISO: string, rule: Recurrence): string | null {
     }
   }
 }
+/* ---------- Recurrence helpers & UI ---------- */
+function labelOf(r: Recurrence): string {
+  switch (r.type) {
+    case "none":
+      return "None";
+    case "daily":
+      return "Daily";
+    case "weekly":
+      return `Weekly on ${r.days.map((d) => WD_SHORT[d]).join(", ") || "(none)"}`;
+    case "every":
+      return `Every ${r.n} ${r.unit === "day" ? "day(s)" : "week(s)"}`;
+    case "monthlyDay":
+      return `Monthly on day ${r.day}`;
+  }
+}
 
+/* A focused modal that contains the full advanced picker */
+function RecurrenceModal({
+  initial,
+  onClose,
+  onApply,
+}: {
+  initial: Recurrence;
+  onClose: () => void;
+  onApply: (r: Recurrence) => void;
+}) {
+  const [value, setValue] = useState<Recurrence>(initial);
+
+  return (
+    <Modal onClose={onClose} title="Advanced recurrence">
+      <RecurrencePicker value={value} onChange={setValue} />
+      <div className="mt-4 flex justify-end gap-2">
+        <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+          onClick={() => onApply(value)}
+        >
+          Apply
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/* Full-featured recurrence picker (weekly multi-select, every N days/weeks, monthly) */
+function RecurrencePicker({
+  value,
+  onChange,
+}: {
+  value: Recurrence;
+  onChange: (r: Recurrence) => void;
+}) {
+  const [weekly, setWeekly] = useState<Set<Weekday>>(new Set());
+  const [everyN, setEveryN] = useState(2);
+  const [unit, setUnit] = useState<"day" | "week">("day");
+  const [monthDay, setMonthDay] = useState(15);
+
+  useEffect(() => {
+    // hydrate UI from incoming value
+    switch (value.type) {
+      case "weekly":
+        setWeekly(new Set(value.days));
+        break;
+      case "every":
+        setEveryN(value.n);
+        setUnit(value.unit);
+        break;
+      case "monthlyDay":
+        setMonthDay(value.day);
+        break;
+      default:
+        setWeekly(new Set());
+    }
+  }, [value]);
+
+  function setNone() {
+    onChange({ type: "none" });
+  }
+  function setDaily() {
+    onChange({ type: "daily" });
+  }
+  function toggleDay(d: Weekday) {
+    const next = new Set(weekly);
+    next.has(d) ? next.delete(d) : next.add(d);
+    setWeekly(next);
+    const sorted = Array.from(next).sort((a, b) => a - b);
+    onChange(sorted.length ? { type: "weekly", days: sorted } : { type: "none" });
+  }
+  function applyEvery() {
+    onChange({ type: "every", n: Math.max(1, everyN || 1), unit });
+  }
+  function applyMonthly() {
+    onChange({ type: "monthlyDay", day: Math.min(28, Math.max(1, monthDay)) });
+  }
+
+  return (
+    <div className="space-y-5">
+      <section>
+        <div className="text-sm font-medium mb-2">Preset</div>
+        <div className="flex gap-2">
+          <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={setNone}>
+            None
+          </button>
+          <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={setDaily}>
+            Daily
+          </button>
+        </div>
+      </section>
+
+      <section>
+        <div className="text-sm font-medium mb-2">Weekly</div>
+        <div className="grid grid-cols-3 gap-2">
+          {(Array.from({ length: 7 }, (_, i) => i as Weekday)).map((d) => {
+            const on = weekly.has(d);
+            return (
+              <button
+                key={d}
+                onClick={() => toggleDay(d)}
+                className={`px-2 py-2 rounded-xl ${
+                  on ? "bg-emerald-600" : "bg-neutral-800"
+                }`}
+              >
+                {WD_SHORT[d]}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section>
+        <div className="text-sm font-medium mb-2">Every N</div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={30}
+            value={everyN}
+            onChange={(e) => setEveryN(parseInt(e.target.value || "1", 10))}
+            className="w-20 px-2 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+          />
+          <select
+            value={unit}
+            onChange={(e) => setUnit(e.target.value as "day" | "week")}
+            className="px-2 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+          >
+            <option value="day">Days</option>
+            <option value="week">Weeks</option>
+          </select>
+          <button className="ml-2 px-3 py-2 rounded-xl bg-neutral-800" onClick={applyEvery}>
+            Apply
+          </button>
+        </div>
+      </section>
+
+      <section>
+        <div className="text-sm font-medium mb-2">Monthly</div>
+        <div className="flex items-center gap-2">
+          {/* simple “wheel” style with a long select list */}
+          <select
+            value={monthDay}
+            onChange={(e) => setMonthDay(parseInt(e.target.value, 10))}
+            className="px-2 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+            size={5}
+          >
+            {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+              <option key={d} value={d}>
+                Day {d}
+              </option>
+            ))}
+          </select>
+          <button className="ml-2 px-3 py-2 rounded-xl bg-neutral-800" onClick={applyMonthly}>
+            Apply
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
 /* ================= Local storage ================= */
 function useLocalTasks() {
   const [tasks, setTasks] = useState<Task[]>(() => {
@@ -523,33 +702,127 @@ function IconButton({
 }
 
 /* Edit modal (title + note only for now) */
-function EditModal({ task, onCancel, onDelete, onSave }: {
-  task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void;
+function EditModal({
+  task,
+  onCancel,
+  onDelete,
+  onSave,
+}: {
+  task: Task;
+  onCancel: () => void;
+  onDelete: () => void;
+  onSave: (t: Task) => void;
 }) {
   const [title, setTitle] = useState(task.title);
   const [note, setNote] = useState(task.note || "");
+  const [rule, setRule] = useState<Recurrence>(task.recurrence ?? R_NONE);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
   return (
     <Modal onClose={onCancel} title="Edit task">
-      <div className="space-y-3">
-        <input value={title} onChange={e=>setTitle(e.target.value)}
-               className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Title"/>
-        <textarea value={note} onChange={e=>setNote(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" rows={3}
-                  placeholder="Notes (optional)"/>
+      <div className="space-y-4">
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+          placeholder="Title"
+        />
+
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+          rows={3}
+          placeholder="Notes (optional)"
+        />
+
+        {/* Recurrence section */}
+        <div className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-medium">Recurrence</div>
+            <div className="ml-auto text-xs text-neutral-400">
+              {labelOf(rule)}
+            </div>
+          </div>
+
+          <div className="mt-2 flex gap-2">
+            {/* quick presets for convenience */}
+            <button
+              className="px-3 py-2 rounded-xl bg-neutral-800"
+              onClick={() => setRule(R_NONE)}
+            >
+              None
+            </button>
+            <button
+              className="px-3 py-2 rounded-xl bg-neutral-800"
+              onClick={() => setRule({ type: "daily" })}
+            >
+              Daily
+            </button>
+            <button
+              className="px-3 py-2 rounded-xl bg-neutral-800"
+              onClick={() => setRule({ type: "weekly", days: [1, 2, 3, 4, 5] })}
+            >
+              Mon–Fri
+            </button>
+            <button
+              className="px-3 py-2 rounded-xl bg-neutral-800"
+              onClick={() => setRule({ type: "weekly", days: [0, 6] })}
+            >
+              Weekends
+            </button>
+
+            <button
+              className="ml-auto px-3 py-2 rounded-xl bg-neutral-800"
+              onClick={() => setShowAdvanced(true)}
+              title="Advanced recurrence…"
+            >
+              Advanced…
+            </button>
+          </div>
+        </div>
+
         <div className="pt-2 flex justify-between">
-          <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
+          <button
+            className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600"
+            onClick={onDelete}
+          >
+            Delete
+          </button>
           <div className="space-x-2">
-            <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
-            <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
-                    onClick={()=>onSave({...task, title, note: note || undefined})}>
+            <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>
+              Cancel
+            </button>
+            <button
+              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+              onClick={() =>
+                onSave({
+                  ...task,
+                  title,
+                  note: note || undefined,
+                  recurrence: rule.type === "none" ? undefined : rule,
+                })
+              }
+            >
               Save
             </button>
           </div>
         </div>
       </div>
+
+      {showAdvanced && (
+        <RecurrenceModal
+          initial={rule}
+          onClose={() => setShowAdvanced(false)}
+          onApply={(r) => {
+            setRule(r);
+            setShowAdvanced(false);
+          }}
+        />
+      )}
     </Modal>
   );
-}
+}==
 
 function Modal({ children, onClose, title }: React.PropsWithChildren<{ onClose: ()=>void; title?: string }>) {
   return (

@@ -413,18 +413,24 @@ function Card({ task, onComplete, onEdit, onDelete }: {
       onDragStart={onDragStart}
     >
       <div className="flex items-start gap-2">
+        {/* Unchecked circular complete button */}
         <button
           onClick={onComplete}
-          className="px-2 py-1 rounded bg-emerald-600/80 hover:bg-emerald-600 text-sm"
-          title="Complete"
+          aria-label="Complete task"
+          title="Mark complete"
+          className="flex items-center justify-center w-8 h-8 rounded-full border border-neutral-600 text-neutral-300 hover:text-emerald-500 hover:border-emerald-500 transition"
         >
-          ✓
+          <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none">
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
+          </svg>
         </button>
+
         <div className="flex-1 cursor-pointer" onClick={onEdit}>
           <div className="text-sm font-medium leading-5">{task.title}</div>
           {!!task.note && <div className="text-xs text-neutral-400">{task.note}</div>}
         </div>
-        {/* Subtle icon actions: hidden until hover/focus */}
+
+        {/* Circular edit/delete buttons */}
         <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
           <IconButton label="Edit" onClick={onEdit}>✎</IconButton>
           <IconButton label="Delete" onClick={onDelete} intent="danger">🗑</IconButton>
@@ -434,12 +440,12 @@ function Card({ task, onComplete, onEdit, onDelete }: {
   );
 }
 
-/* Small, low-emphasis icon button */
+/* Circular, low-emphasis icon button */
 function IconButton({
   children, onClick, label, intent
 }: React.PropsWithChildren<{ onClick: ()=>void; label: string; intent?: "danger"|"success" }>) {
   const base =
-    "px-2 py-1 rounded text-xs border border-transparent bg-neutral-700/40 hover:bg-neutral-700/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500";
+    "w-8 h-8 rounded-full inline-flex items-center justify-center text-xs border border-transparent bg-neutral-700/40 hover:bg-neutral-700/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500";
   const danger = " bg-rose-700/30 hover:bg-rose-700/50";
   const success = " bg-emerald-700/30 hover:bg-emerald-700/50";
   const cls = base + (intent==="danger" ? danger : intent==="success" ? success : "");

@@ -11,13 +11,16 @@ type Recurrence =
   | { type: "every"; n: number; unit: "day" | "week" }
   | { type: "monthlyDay"; day: number };
 
+type Bucket = "day" | "bounty";
+
 type Task = {
   id: string;
   title: string;
   note?: string;
-  dueISO: string;              // midnight ISO (which “day column” it’s on)
+  dueISO: string;              // midnight ISO if bucket==="day"
+  bucket?: Bucket;             // default "day"; "bounty" goes to the Bounties column
   completed?: boolean;
-  completedAt?: string;        // ISO timestamp when completed
+  completedAt?: string;
   recurrence?: Recurrence;
 };
 
@@ -72,18 +75,18 @@ export default function App() {
   // Add form
   const [newTitle, setNewTitle] = useState("");
   const [quickRule, setQuickRule] = useState<"none"|"daily"|"weeklyMonFri"|"weeklyWeekends"|"every2d"|"custom">("none");
-  const [activeDay, setActiveDay] = useState<Weekday>(new Date().getDay() as Weekday);
+  const [target, setTarget] = useState<{kind: "day"; day: Weekday} | {kind: "bounty"}>({kind:"day", day: new Date().getDay() as Weekday});
 
-  // Advanced recurrence modal (still available via “Custom…” or Edit)
+  // Advanced recurrence modal
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [advancedRule, setAdvancedRule] = useState<Recurrence>(R_NONE);
 
   // Edit modal
   const [editing, setEditing] = useState<Task|null>(null);
 
-  // NOTE: Preserve the order tasks appear in the array (no sorting),
-  // so manual reordering is respected.
-  const byDay = useMemo(() => groupByDayPreserveOrder(tasks.filter(t => !t.completed)), [tasks]);
+  // Preserve array order (no sorting) to support manual reordering
+  const dayMap = useMemo(() => groupByDayPreserveOrder(tasks.filter(t => !t.completed && (t.bucket ?? "day") === "day")), [tasks]);
+  const bounties = useMemo(() => tasks.filter(t => !t.completed && (t.bucket ?? "day") === "bounty"), [tasks]);
   const completed = useMemo(() => (
     tasks.filter(t => !!t.completed)
          .sort((a,b)=> (b.completedAt||"").localeCompare(a.completedAt||""))
@@ -117,81 +120,66 @@ export default function App() {
     }
   }
 
-  function addTask(day: Weekday) {
+  function addTask() {
     const title = newTitle.trim(); if (!title) return;
     const rule = resolveQuickRule();
-    const t: Task = {
+    const base: Task = {
       id: crypto.randomUUID(),
       title,
-      dueISO: isoForWeekday(day),
+      dueISO: isoForWeekday((target.kind === "day" ? target.day : (new Date().getDay() as Weekday))), // placeholder for bounty
+      bucket: target.kind === "bounty" ? "bounty" : "day",
       completed: false,
       recurrence: rule.type === "none" ? undefined : rule
     };
-    setTasks(prev => [...prev, t]);
+    setTasks(prev => [...prev, base]);
     setNewTitle(""); setQuickRule("none");
   }
 
-  function rescheduleTask(id: string, day: Weekday) {
-    const newISO = isoForWeekday(day);
-    setTasks(prev => prev.map(t => t.id===id ? { ...t, dueISO: newISO } : t));
-  }
+  // Reorder/move between day and bounty
+  type DropTarget =
+    | { kind: "day"; day: Weekday; index: number }
+    | { kind: "bounty"; index: number };
 
-  // Reorder within a day OR move+insert into a day at an index
-  function moveTaskToDayAndIndex(id: string, day: Weekday, targetIndex: number) {
+  function moveTaskTo(id: string, drop: DropTarget) {
     setTasks(prev => {
       const curIdx = prev.findIndex(t => t.id === id);
       if (curIdx === -1) return prev;
       const moving = prev[curIdx];
 
-      // Build list of indices for tasks in the destination day (excluding the moving one)
-      const destDayIndices: number[] = [];
-      for (let i = 0; i < prev.length; i++) {
-        if (i === curIdx) continue;
-        const t = prev[i];
-        const wd = new Date(t.dueISO).getDay() as Weekday;
-        if (wd === day && !t.completed) destDayIndices.push(i);
-      }
-
-      // Clamp targetIndex
-      const clamped = Math.max(0, Math.min(destDayIndices.length, targetIndex));
-
-      // Compute global insert position: before the dest task at destDayIndices[clamped]
       const next = prev.slice();
-      // Remove moving
       next.splice(curIdx, 1);
-      // Recompute indices after removal
-      const destDayIndicesAfter: number[] = [];
-      for (let i = 0; i < next.length; i++) {
-        const t = next[i];
-        const wd = new Date(t.dueISO).getDay() as Weekday;
-        if (wd === day && !t.completed) destDayIndicesAfter.push(i);
-      }
-      const insertAt = (clamped >= destDayIndicesAfter.length)
-        ? (destDayIndicesAfter.length ? destDayIndicesAfter[destDayIndicesAfter.length - 1] + 1 : findLastIndexBeforeNextDayBlock(next, day) + 1)
-        : destDayIndicesAfter[clamped];
 
-      const updatedMoving: Task = {
+      const isBounty = drop.kind === "bounty";
+
+      const insertAt = computeInsertIndex(next, drop);
+      const updated: Task = {
         ...moving,
-        // If moving to a different day, update dueISO. If same day, keep.
-        dueISO: (new Date(moving.dueISO).getDay() === day) ? moving.dueISO : isoForWeekday(day)
+        bucket: isBounty ? "bounty" : "day",
+        dueISO: isBounty
+          ? moving.dueISO // keep whatever; bucket drives column
+          : isoForWeekday(drop.day)
       };
-
-      next.splice(insertAt, 0, updatedMoving);
+      next.splice(insertAt, 0, updated);
       return next;
     });
   }
 
-  // Helps find an insertion point at end of existing day block, else at end of array
-  function findLastIndexBeforeNextDayBlock(arr: Task[], day: Weekday): number {
-    let last = -1;
-    for (let i = 0; i < arr.length; i++) {
-      const wd = new Date(arr[i].dueISO).getDay() as Weekday;
-      if (wd === day && !arr[i].completed) last = i;
+  function computeInsertIndex(arr: Task[], drop: DropTarget): number {
+    let indices: number[] = [];
+    if (drop.kind === "bounty") {
+      for (let i=0;i<arr.length;i++) if ((arr[i].bucket ?? "day") === "bounty" && !arr[i].completed) indices.push(i);
+    } else {
+      for (let i=0;i<arr.length;i++) {
+        const t = arr[i];
+        if ((t.bucket ?? "day") === "day" && !t.completed && (new Date(t.dueISO).getDay() as Weekday) === drop.day) {
+          indices.push(i);
+        }
+      }
     }
-    return last;
+    const clamped = Math.max(0, Math.min(indices.length, drop.index));
+    return (clamped >= indices.length) ? (indices.length ? indices[indices.length-1] + 1 : arr.length) : indices[clamped];
   }
 
-  // Mark complete → keep original task (completed=true, completedAt=now) + spawn next if recurring
   function completeTask(id: string) {
     setTasks(prev => {
       const cur = prev.find(t => t.id === id);
@@ -200,7 +188,10 @@ export default function App() {
       const now = new Date().toISOString();
       const updated = prev.map(t => t.id===id ? { ...t, completed: true, completedAt: now } : t);
 
-      const nextISO = cur.recurrence ? nextOccurrence(cur.dueISO, cur.recurrence) : null;
+      const nextISO = (cur.bucket ?? "day") === "day" && cur.recurrence
+        ? nextOccurrence(cur.dueISO, cur.recurrence)
+        : null;
+
       if (nextISO) {
         const clone: Task = { ...cur, id: crypto.randomUUID(), completed: false, completedAt: undefined, dueISO: nextISO };
         return [...updated, clone];
@@ -229,7 +220,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4 overflow-x-hidden">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <header className="flex items-center gap-3 mb-6">
@@ -259,12 +250,19 @@ export default function App() {
                 placeholder="New task…"
                 className="flex-1 min-w-[220px] px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
               />
+
+              {/* where to add: Day or Bounties */}
               <select
-                value={activeDay}
-                onChange={e=>setActiveDay(Number(e.target.value) as Weekday)}
+                value={target.kind === "day" ? `day:${target.day}` : "bounty"}
+                onChange={(e)=>{
+                  const v = e.target.value;
+                  if (v === "bounty") setTarget({kind:"bounty"});
+                  else setTarget({kind:"day", day: Number(v.split(":")[1]) as Weekday});
+                }}
                 className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               >
-                {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
+                {WD_SHORT.map((d,i)=>(<option key={i} value={`day:${i}`}>{d}</option>))}
+                <option value="bounty">Bounties</option>
               </select>
 
               {/* Quick recurrence */}
@@ -286,25 +284,33 @@ export default function App() {
                 <option value="custom">Custom…</option>
               </select>
 
-              <button onClick={()=>addTask(activeDay)}
+              <button onClick={addTask}
                       className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium">
                 Add
               </button>
             </div>
 
             {/* Board */}
-            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-8">
               {(Array.from({length:7}, (_,i)=>i as Weekday)).map(day => (
-                <Column
+                <DayColumn
                   key={day}
                   day={day}
-                  items={byDay.get(day) || []}
-                  onDropToIndex={(id, targetIndex)=> moveTaskToDayAndIndex(id, day, targetIndex)}
+                  items={dayMap.get(day) || []}
+                  onDropToIndex={(id, idx)=> moveTaskTo(id, {kind:"day", day, index: idx})}
                   onComplete={completeTask}
                   onEdit={setEditing}
                   onDelete={deleteTask}
                 />
               ))}
+              <GenericColumn
+                label="Bounties"
+                items={bounties}
+                onDropToIndex={(id, idx)=> moveTaskTo(id, {kind:"bounty", index: idx})}
+                onComplete={completeTask}
+                onEdit={setEditing}
+                onDelete={deleteTask}
+              />
             </div>
           </>
         ) : (
@@ -331,7 +337,7 @@ export default function App() {
                       <div className="flex-1">
                         <div className="text-sm font-medium">{t.title}</div>
                         <div className="text-xs text-neutral-400">
-                          Due {WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}
+                          {(t.bucket ?? "day") === "day" ? `Due ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}` : "Bounty"}
                           {t.completedAt ? ` • Completed ${new Date(t.completedAt).toLocaleString()}` : ""}
                         </div>
                         {!!t.note && <div className="text-xs text-neutral-400 mt-1">{t.note}</div>}
@@ -350,7 +356,7 @@ export default function App() {
         )}
       </div>
 
-      {/* Advanced recurrence modal (opened via “Custom…” or inside Edit) */}
+      {/* Advanced recurrence modal */}
       {showAdvanced && (
         <Modal onClose={()=>setShowAdvanced(false)} title="Custom recurrence">
           <RecurrencePicker value={advancedRule} onChange={setAdvancedRule} />
@@ -375,9 +381,9 @@ export default function App() {
   );
 }
 
-/* ===== Subcomponents ===== */
+/* ===== Subcomponents & utils ===== */
 
-// PRESERVE original order of tasks array (no sorting)
+// PRESERVE original array order
 function groupByDayPreserveOrder(tasks: Task[]) {
   const m = new Map<Weekday, Task[]>();
   for (const t of tasks) {
@@ -398,12 +404,34 @@ function labelOf(r: Recurrence): string {
   }
 }
 
-function Column({
+function DayColumn({
   day, items, onDropToIndex, onComplete, onEdit, onDelete
 }: {
   day: Weekday;
   items: Task[];
-  onDropToIndex: (id: string, targetIndex: number) => void; // insert at index within this day
+  onDropToIndex: (id: string, targetIndex: number) => void;
+  onComplete: (id: string)=>void;
+  onEdit: (t: Task)=>void;
+  onDelete: (id: string)=>void;
+}) {
+  return (
+    <GenericColumn
+      label={WD_SHORT[day]}
+      items={items}
+      onDropToIndex={onDropToIndex}
+      onComplete={onComplete}
+      onEdit={onEdit}
+      onDelete={onDelete}
+    />
+  );
+}
+
+function GenericColumn({
+  label, items, onDropToIndex, onComplete, onEdit, onDelete
+}: {
+  label: string;
+  items: Task[];
+  onDropToIndex: (id: string, targetIndex: number) => void;
   onComplete: (id: string)=>void;
   onEdit: (t: Task)=>void;
   onDelete: (id: string)=>void;
@@ -411,7 +439,6 @@ function Column({
   const colRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // compute the insertion index based on cursor Y vs card midpoints
   function computeIndex(clientY: number): number {
     const list = listRef.current;
     if (!list) return items.length;
@@ -437,234 +464,7 @@ function Column({
         onDropToIndex(id, idx);
       }}
     >
-      <div className="font-semibold text-neutral-200 mb-2">{WD_SHORT[day]}</div>
+      <div className="font-semibold text-neutral-200 mb-2">{label}</div>
       <div ref={listRef} className="space-y-2">
         {items.map((t) => (
           <Card
-            key={t.id}
-            task={t}
-            onComplete={()=>onComplete(t.id)}
-            onEdit={()=>onEdit(t)}
-            onDelete={()=>onDelete(t.id)}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Card({ task, onComplete, onEdit, onDelete }: {
-  task: Task; onComplete: ()=>void; onEdit: ()=>void; onDelete: ()=>void;
-}) {
-  const cardRef = useRef<HTMLDivElement>(null);
-
-  function onDragStart(e: React.DragEvent) {
-    e.dataTransfer.setData("text/task-id", task.id);
-    e.dataTransfer.effectAllowed = "move";
-  }
-
-  // Swipe: right => complete, left => delete (less sensitive: 180px)
-  useEffect(()=>{
-    const THRESH = 250;
-    const el = cardRef.current!;
-    let startX = 0, dx = 0;
-
-    const onTouchStart = (e: TouchEvent) => { startX = e.touches[0].clientX; dx = 0; };
-    const onTouchMove = (e: TouchEvent) => {
-      dx = e.touches[0].clientX - startX;
-      el.style.transform = `translateX(${dx}px)`;
-      el.style.opacity = String(Math.max(0.4, 1 - Math.abs(dx)/320));
-    };
-    const onTouchEnd = () => {
-      if (dx > THRESH) onComplete();
-      else if (dx < -THRESH) onDelete();
-      el.style.transform = ""; el.style.opacity = "";
-    };
-    el.addEventListener("touchstart", onTouchStart, {passive:true});
-    el.addEventListener("touchmove", onTouchMove, {passive:true});
-    el.addEventListener("touchend", onTouchEnd);
-    return ()=>{
-      el.removeEventListener("touchstart", onTouchStart);
-      el.removeEventListener("touchmove", onTouchMove);
-      el.removeEventListener("touchend", onTouchEnd);
-    };
-  }, [onComplete, onDelete]);
-
-  return (
-    <div
-      ref={cardRef}
-      className="group relative p-3 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
-      draggable
-      onDragStart={onDragStart}
-    >
-      <div className="flex items-start gap-2">
-        {/* Unchecked circular complete button */}
-        <button
-          onClick={onComplete}
-          aria-label="Complete task"
-          title="Mark complete"
-          className="flex items-center justify-center w-8 h-8 rounded-full border border-neutral-600 text-neutral-300 hover:text-emerald-500 hover:border-emerald-500 transition"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none">
-            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
-          </svg>
-        </button>
-
-        <div className="flex-1 cursor-pointer" onClick={onEdit}>
-          <div className="text-sm font-medium leading-5">{task.title}</div>
-          {!!task.note && <div className="text-xs text-neutral-400">{task.note}</div>}
-        </div>
-
-        {/* Circular edit/delete buttons */}
-        <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-          <IconButton label="Edit" onClick={onEdit}>✎</IconButton>
-          <IconButton label="Delete" onClick={onDelete} intent="danger">🗑</IconButton>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* Circular, low-emphasis icon button */
-function IconButton({
-  children, onClick, label, intent
-}: React.PropsWithChildren<{ onClick: ()=>void; label: string; intent?: "danger"|"success" }>) {
-  const base =
-    "w-8 h-8 rounded-full inline-flex items-center justify-center text-xs border border-transparent bg-neutral-700/40 hover:bg-neutral-700/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500";
-  const danger = " bg-rose-700/30 hover:bg-rose-700/50";
-  const success = " bg-emerald-700/30 hover:bg-emerald-700/50";
-  const cls = base + (intent==="danger" ? danger : intent==="success" ? success : "");
-  return (
-    <button aria-label={label} title={label} className={cls} onClick={onClick}>
-      {children}
-    </button>
-  );
-}
-
-/* ===== Modals ===== */
-function Modal({ children, onClose, title }: React.PropsWithChildren<{ onClose: ()=>void; title?: string }>) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-[min(680px,92vw)] max-h-[80vh] overflow-auto bg-neutral-900 border border-neutral-700 rounded-2xl p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="text-lg font-semibold">{title}</div>
-          <button className="ml-auto px-3 py-1 rounded bg-neutral-800" onClick={onClose}>Close</button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function RecurrencePicker({ value, onChange }: { value: Recurrence; onChange: (r: Recurrence)=>void }) {
-  const [weekly, setWeekly] = useState<Set<Weekday>>(new Set());
-  const [everyN, setEveryN] = useState(2);
-  const [unit, setUnit] = useState<"day"|"week">("day");
-  const [monthDay, setMonthDay] = useState(15);
-
-  useEffect(()=>{
-    switch (value.type) {
-      case "weekly": setWeekly(new Set(value.days)); break;
-      case "every": setEveryN(value.n); setUnit(value.unit); break;
-      case "monthlyDay": setMonthDay(value.day); break;
-      default: setWeekly(new Set());
-    }
-  }, [value]);
-
-  function toggleDay(d: Weekday) {
-    const next = new Set(weekly);
-    next.has(d) ? next.delete(d) : next.add(d);
-    setWeekly(next);
-    const sorted = Array.from(next).sort((a,b)=>a-b);
-    onChange(sorted.length ? { type: "weekly", days: sorted } : R_NONE);
-  }
-
-  return (
-    <div className="space-y-4">
-      <section>
-        <div className="text-sm font-medium mb-2">Preset</div>
-        <div className="flex gap-2">
-          <button className="px-3 py-2 rounded bg-neutral-800" onClick={()=>onChange(R_NONE)}>None</button>
-          <button className="px-3 py-2 rounded bg-neutral-800" onClick={()=>onChange({type:"daily"})}>Daily</button>
-        </div>
-      </section>
-
-      <section>
-        <div className="text-sm font-medium mb-2">Weekly</div>
-        <div className="grid grid-cols-3 gap-2">
-          {(Array.from({length:7}, (_,i)=>i as Weekday)).map(d => {
-            const on = weekly.has(d);
-            return (
-              <button key={d} onClick={()=>toggleDay(d)}
-                      className={`px-2 py-2 rounded ${on? "bg-emerald-600":"bg-neutral-800"}`}>{WD_SHORT[d]}</button>
-            );
-          })}
-        </div>
-      </section>
-
-      <section>
-        <div className="text-sm font-medium mb-2">Every N</div>
-        <div className="flex items-center gap-2">
-          <input type="number" min={2} max={30} value={everyN}
-                 onChange={e=>setEveryN(parseInt(e.target.value||"2",10))}
-                 className="w-20 px-2 py-2 rounded bg-neutral-900 border border-neutral-800"/>
-          <select value={unit} onChange={e=>setUnit(e.target.value as "day"|"week")}
-                  className="px-2 py-2 rounded bg-neutral-900 border border-neutral-800">
-            <option value="day">Days</option><option value="week">Weeks</option>
-          </select>
-          <button className="ml-2 px-3 py-2 rounded bg-neutral-800"
-                  onClick={()=>onChange({ type:"every", n: everyN, unit })}>Apply</button>
-        </div>
-      </section>
-
-      <section>
-        <div className="text-sm font-medium mb-2">Monthly</div>
-        <div className="flex items-center gap-2">
-          <input type="range" min={1} max={28} value={monthDay}
-                 onChange={e=>setMonthDay(parseInt(e.target.value,10))}/>
-          <div>Day {monthDay}</div>
-          <button className="ml-2 px-3 py-2 rounded bg-neutral-800"
-                  onClick={()=>onChange({ type:"monthlyDay", day: monthDay })}>Apply</button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function EditModal({ task, onCancel, onDelete, onSave, onOpenAdvanced }: {
-  task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void; onOpenAdvanced: ()=>void;
-}) {
-  const [title, setTitle] = useState(task.title);
-  const [note, setNote] = useState(task.note || "");
-  const [rule, setRule] = useState<Recurrence>(task.recurrence ?? R_NONE);
-
-  return (
-    <Modal onClose={onCancel} title="Edit task">
-      <div className="space-y-3">
-        <input value={title} onChange={e=>setTitle(e.target.value)}
-               className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-               placeholder="Title"/>
-        <textarea value={note} onChange={e=>setNote(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                  rows={3} placeholder="Notes (optional)"/>
-        <div>
-          <div className="text-sm mb-2 flex items-center gap-2">
-            <span>Recurrence</span>
-            <button className="px-2 py-1 text-xs rounded bg-neutral-800" onClick={onOpenAdvanced}>Open advanced…</button>
-          </div>
-          <RecurrencePicker value={rule} onChange={setRule}/>
-        </div>
-        <div className="pt-2 flex justify-between">
-          <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
-          <div className="space-x-2">
-            <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
-            <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
-                    onClick={()=>onSave({...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule})}>
-              Save
-            </button>
-          </div>
-        </div>
-      </div>
-    </Modal>
-  );
-}

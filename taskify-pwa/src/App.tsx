@@ -465,7 +465,7 @@ function Card({ task, onComplete, onEdit, onDelete }: {
 
   // Swipe: right => complete, left => delete (less sensitive: 180px)
   useEffect(()=>{
-    const THRESH = 180;
+    const THRESH = 250;
     const el = cardRef.current!;
     let startX = 0, dx = 0;
 

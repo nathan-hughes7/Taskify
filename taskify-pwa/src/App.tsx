@@ -77,6 +77,10 @@ export default function App() {
   const [activeDay, setActiveDay] = useState<Weekday>(new Date().getDay() as Weekday);
   const [quickRule, setQuickRule] = useState<"none"|"daily"|"weeklyMonFri"|"weeklyWeekends"|"every2d">("none");
 
+  // NEW: advanced recurrence for Add bar
+  const [addCustomRule, setAddCustomRule] = useState<Recurrence>(R_NONE);
+  const [showAddAdvanced, setShowAddAdvanced] = useState(false);
+
   // edit modal
   const [editing, setEditing] = useState<Task|null>(null);
 
@@ -120,17 +124,24 @@ export default function App() {
 
   function addTask(day: Weekday, column: "day"|"bounties" = "day") {
     const title = newTitle.trim(); if (!title) return;
-    const rule = resolveQuickRule();
+    // Prefer custom advanced rule if set; otherwise use quick preset
+    const candidate = addCustomRule.type !== "none" ? addCustomRule : resolveQuickRule();
+    const rule = candidate.type === "none" ? undefined : candidate;
+
     const t: Task = {
       id: crypto.randomUUID(),
       title,
       dueISO: isoForWeekday(day),
       completed: false,
-      recurrence: rule.type === "none" ? undefined : rule,
+      recurrence: rule,
       column
     };
     setTasks(prev => [...prev, t]);
-    setNewTitle(""); setQuickRule("none");
+
+    // reset inputs
+    setNewTitle("");
+    setQuickRule("none");
+    setAddCustomRule(R_NONE);
   }
 
   function completeTask(id: string) {
@@ -152,7 +163,7 @@ export default function App() {
     const t = tasks.find(x => x.id === id); if (!t) return;
     setUndoTask(t);
     setTasks(prev => prev.filter(x => x.id !== id));
-    setTimeout(() => setUndoTask(null), 5000); // 👈 Undo duration (ms)
+    setTimeout(() => setUndoTask(null), 5000); // Undo duration (ms)
   }
   function undoDelete() { if (undoTask) { setTasks(prev => [...prev, undoTask]); setUndoTask(null); } }
 
@@ -214,6 +225,8 @@ export default function App() {
                       className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800">
                 {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
               </select>
+
+              {/* Quick presets */}
               <select value={quickRule} onChange={e=>setQuickRule(e.target.value as any)}
                       className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800">
                 <option value="none">No recurrence</option>
@@ -222,6 +235,19 @@ export default function App() {
                 <option value="weeklyWeekends">Weekends</option>
                 <option value="every2d">Every 2 days</option>
               </select>
+
+              {/* Advanced… button + current custom label (if any) */}
+              <button
+                className="px-3 py-2 rounded-2xl bg-neutral-800 border border-neutral-700"
+                onClick={()=>setShowAddAdvanced(true)}
+                title="Advanced recurrence…"
+              >
+                Custom…
+              </button>
+              {addCustomRule.type !== "none" && (
+                <span className="text-xs text-neutral-400">({labelOf(addCustomRule)})</span>
+              )}
+
               <button onClick={()=>addTask(activeDay)} className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium">Add</button>
               <button onClick={()=>addTask(0,"bounties")} className="px-4 py-2 rounded-2xl bg-blue-600 hover:bg-blue-500 font-medium">Add to Bounties</button>
             </div>
@@ -323,6 +349,15 @@ export default function App() {
           onCancel={()=>setEditing(null)}
           onDelete={()=>{ deleteTask(editing.id); setEditing(null); }}
           onSave={saveEdit}
+        />
+      )}
+
+      {/* Add bar Advanced recurrence modal */}
+      {showAddAdvanced && (
+        <RecurrenceModal
+          initial={addCustomRule}
+          onClose={()=>setShowAddAdvanced(false)}
+          onApply={(r)=>{ setAddCustomRule(r); setShowAddAdvanced(false); }}
         />
       )}
     </div>

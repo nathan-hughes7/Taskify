@@ -2,7 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 /* ===== Types ===== */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+type ColumnKey = Weekday | "bounty";
 const WD_SHORT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"] as const;
+const COLUMN_LABEL: Record<ColumnKey,string> = {
+  0:"Sun",1:"Mon",2:"Tue",3:"Wed",4:"Thu",5:"Fri",6:"Sat","bounty":"Bounties"
+};
 
 type Recurrence =
   | { type: "none" }
@@ -11,14 +15,12 @@ type Recurrence =
   | { type: "every"; n: number; unit: "day" | "week" }
   | { type: "monthlyDay"; day: number };
 
-type Bucket = "day" | "bounty";
-
 type Task = {
   id: string;
   title: string;
   note?: string;
-  dueISO: string;              // midnight ISO if bucket==="day"
-  bucket?: Bucket;             // default "day"; "bounty" goes to the Bounties column
+  dueISO: string;              // used for day columns
+  bucket?: "bounty";           // when present, lives in Bounties column
   completed?: boolean;
   completedAt?: string;
   recurrence?: Recurrence;
@@ -75,7 +77,7 @@ export default function App() {
   // Add form
   const [newTitle, setNewTitle] = useState("");
   const [quickRule, setQuickRule] = useState<"none"|"daily"|"weeklyMonFri"|"weeklyWeekends"|"every2d"|"custom">("none");
-  const [target, setTarget] = useState<{kind: "day"; day: Weekday} | {kind: "bounty"}>({kind:"day", day: new Date().getDay() as Weekday});
+  const [activeColumn, setActiveColumn] = useState<ColumnKey>((new Date().getDay() as Weekday));
 
   // Advanced recurrence modal
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -84,9 +86,14 @@ export default function App() {
   // Edit modal
   const [editing, setEditing] = useState<Task|null>(null);
 
-  // Preserve array order (no sorting) to support manual reordering
-  const dayMap = useMemo(() => groupByDayPreserveOrder(tasks.filter(t => !t.completed && (t.bucket ?? "day") === "day")), [tasks]);
-  const bounties = useMemo(() => tasks.filter(t => !t.completed && (t.bucket ?? "day") === "bounty"), [tasks]);
+  // Undo snackbar
+  const [undoVisible, setUndoVisible] = useState(false);
+  const undoTimer = useRef<number | null>(null);
+  const lastSnapshot = useRef<Task[] | null>(null);
+  const lastDeletedTitle = useRef<string>("");
+
+  // Preserve array order (important for reordering)
+  const columns = useMemo(() => groupByColumnPreserveOrder(tasks.filter(t => !t.completed)), [tasks]);
   const completed = useMemo(() => (
     tasks.filter(t => !!t.completed)
          .sort((a,b)=> (b.completedAt||"").localeCompare(a.completedAt||""))
@@ -120,66 +127,62 @@ export default function App() {
     }
   }
 
-  function addTask() {
+  function addTask(col: ColumnKey) {
     const title = newTitle.trim(); if (!title) return;
     const rule = resolveQuickRule();
     const base: Task = {
       id: crypto.randomUUID(),
       title,
-      dueISO: isoForWeekday((target.kind === "day" ? target.day : (new Date().getDay() as Weekday))), // placeholder for bounty
-      bucket: target.kind === "bounty" ? "bounty" : "day",
+      dueISO: typeof col === "number" ? isoForWeekday(col) : startOfDay(new Date()).toISOString(),
       completed: false,
       recurrence: rule.type === "none" ? undefined : rule
     };
-    setTasks(prev => [...prev, base]);
+    const t = col === "bounty" ? { ...base, bucket: "bounty" as const } : base;
+    setTasks(prev => [...prev, t]);
     setNewTitle(""); setQuickRule("none");
   }
 
-  // Reorder/move between day and bounty
-  type DropTarget =
-    | { kind: "day"; day: Weekday; index: number }
-    | { kind: "bounty"; index: number };
-
-  function moveTaskTo(id: string, drop: DropTarget) {
+  // Move/insert within a column (and handle moving across columns)
+  function moveTaskToColumnIndex(id: string, column: ColumnKey, targetIndex: number) {
     setTasks(prev => {
-      const curIdx = prev.findIndex(t => t.id === id);
-      if (curIdx === -1) return prev;
-      const moving = prev[curIdx];
+      const idx = prev.findIndex(t => t.id === id);
+      if (idx === -1) return prev;
+      const moving = prev[idx];
 
       const next = prev.slice();
-      next.splice(curIdx, 1);
+      next.splice(idx, 1);
 
-      const isBounty = drop.kind === "bounty";
+      // Build list of indices for tasks in destination column after removal
+      const destIdxs: number[] = [];
+      for (let i = 0; i < next.length; i++) {
+        const t = next[i];
+        const key: ColumnKey = t.bucket === "bounty" ? "bounty" : (new Date(t.dueISO).getDay() as Weekday);
+        if (!t.completed && key === column) destIdxs.push(i);
+      }
+      const clamped = Math.max(0, Math.min(destIdxs.length, targetIndex));
 
-      const insertAt = computeInsertIndex(next, drop);
+      // global insert position
+      const insertAt = (clamped >= destIdxs.length)
+        ? (destIdxs.length ? destIdxs[destIdxs.length - 1] + 1 : next.length)
+        : destIdxs[clamped];
+
       const updated: Task = {
         ...moving,
-        bucket: isBounty ? "bounty" : "day",
-        dueISO: isBounty
-          ? moving.dueISO // keep whatever; bucket drives column
-          : isoForWeekday(drop.day)
+        bucket: column === "bounty" ? "bounty" : undefined,
+        dueISO: column === "bounty"
+          ? moving.dueISO
+          : isoForWeekday(column as Weekday)
       };
       next.splice(insertAt, 0, updated);
       return next;
     });
   }
 
-  function computeInsertIndex(arr: Task[], drop: DropTarget): number {
-    let indices: number[] = [];
-    if (drop.kind === "bounty") {
-      for (let i=0;i<arr.length;i++) if ((arr[i].bucket ?? "day") === "bounty" && !arr[i].completed) indices.push(i);
-    } else {
-      for (let i=0;i<arr.length;i++) {
-        const t = arr[i];
-        if ((t.bucket ?? "day") === "day" && !t.completed && (new Date(t.dueISO).getDay() as Weekday) === drop.day) {
-          indices.push(i);
-        }
-      }
-    }
-    const clamped = Math.max(0, Math.min(indices.length, drop.index));
-    return (clamped >= indices.length) ? (indices.length ? indices[indices.length-1] + 1 : arr.length) : indices[clamped];
+  function rescheduleTaskToDay(id: string, day: Weekday) {
+    setTasks(prev => prev.map(t => t.id===id ? ({ ...t, bucket: undefined, dueISO: isoForWeekday(day) }) : t));
   }
 
+  // Complete → may spawn next instance
   function completeTask(id: string) {
     setTasks(prev => {
       const cur = prev.find(t => t.id === id);
@@ -188,12 +191,17 @@ export default function App() {
       const now = new Date().toISOString();
       const updated = prev.map(t => t.id===id ? { ...t, completed: true, completedAt: now } : t);
 
-      const nextISO = (cur.bucket ?? "day") === "day" && cur.recurrence
-        ? nextOccurrence(cur.dueISO, cur.recurrence)
-        : null;
-
+      const baseISO = cur.bucket === "bounty" ? startOfDay(new Date()).toISOString() : cur.dueISO;
+      const nextISO = cur.recurrence ? nextOccurrence(baseISO, cur.recurrence) : null;
       if (nextISO) {
-        const clone: Task = { ...cur, id: crypto.randomUUID(), completed: false, completedAt: undefined, dueISO: nextISO };
+        const clone: Task = {
+          ...cur,
+          id: crypto.randomUUID(),
+          completed: false,
+          completedAt: undefined,
+          bucket: cur.bucket, // keep bounty status
+          dueISO: nextISO
+        };
         return [...updated, clone];
       }
       return updated;
@@ -201,13 +209,29 @@ export default function App() {
     burst();
   }
 
+  function deleteTask(id: string) {
+    // snapshot + snackbar
+    lastSnapshot.current = tasks;
+    const victim = tasks.find(t => t.id === id);
+    lastDeletedTitle.current = victim?.title ?? "Task";
+    setTasks(prev => prev.filter(t => t.id !== id));
+
+    setUndoVisible(true);
+    if (undoTimer.current) window.clearTimeout(undoTimer.current);
+    undoTimer.current = window.setTimeout(() => setUndoVisible(false), 4000);
+  }
+
+  function undoDelete() {
+    if (lastSnapshot.current) setTasks(lastSnapshot.current);
+    lastSnapshot.current = null;
+    setUndoVisible(false);
+    if (undoTimer.current) window.clearTimeout(undoTimer.current);
+    undoTimer.current = null;
+  }
+
   function restoreTask(id: string) {
     setTasks(prev => prev.map(t => t.id===id ? { ...t, completed: false, completedAt: undefined } : t));
     setView("board");
-  }
-
-  function deleteTask(id: string) {
-    setTasks(prev => prev.filter(t => t.id !== id));
   }
 
   function clearCompleted() {
@@ -219,8 +243,11 @@ export default function App() {
     setEditing(null);
   }
 
+  // Column order: Sun..Sat, Bounties
+  const COLUMN_ORDER: ColumnKey[] = [0,1,2,3,4,5,6,"bounty"];
+
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4 overflow-x-hidden">
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <header className="flex items-center gap-3 mb-6">
@@ -251,17 +278,18 @@ export default function App() {
                 className="flex-1 min-w-[220px] px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
               />
 
-              {/* where to add: Day or Bounties */}
+              {/* Column selector (days + Bounties) */}
               <select
-                value={target.kind === "day" ? `day:${target.day}` : "bounty"}
-                onChange={(e)=>{
+                value={String(activeColumn)}
+                onChange={e=>{
                   const v = e.target.value;
-                  if (v === "bounty") setTarget({kind:"bounty"});
-                  else setTarget({kind:"day", day: Number(v.split(":")[1]) as Weekday});
+                  setActiveColumn(v === "bounty" ? "bounty" : (Number(v) as Weekday));
                 }}
                 className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               >
-                {WD_SHORT.map((d,i)=>(<option key={i} value={`day:${i}`}>{d}</option>))}
+                {([0,1,2,3,4,5,6] as Weekday[]).map(d => (
+                  <option key={d} value={d}>{WD_SHORT[d]}</option>
+                ))}
                 <option value="bounty">Bounties</option>
               </select>
 
@@ -284,7 +312,7 @@ export default function App() {
                 <option value="custom">Custom…</option>
               </select>
 
-              <button onClick={addTask}
+              <button onClick={()=>addTask(activeColumn)}
                       className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium">
                 Add
               </button>
@@ -292,25 +320,18 @@ export default function App() {
 
             {/* Board */}
             <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-8">
-              {(Array.from({length:7}, (_,i)=>i as Weekday)).map(day => (
-                <DayColumn
-                  key={day}
-                  day={day}
-                  items={dayMap.get(day) || []}
-                  onDropToIndex={(id, idx)=> moveTaskTo(id, {kind:"day", day, index: idx})}
+              {COLUMN_ORDER.map(colKey => (
+                <Column
+                  key={String(colKey)}
+                  columnKey={colKey}
+                  title={COLUMN_LABEL[colKey]}
+                  items={columns.get(colKey) || []}
+                  onDropToIndex={(id, idx)=> moveTaskToColumnIndex(id, colKey, idx)}
                   onComplete={completeTask}
                   onEdit={setEditing}
                   onDelete={deleteTask}
                 />
               ))}
-              <GenericColumn
-                label="Bounties"
-                items={bounties}
-                onDropToIndex={(id, idx)=> moveTaskTo(id, {kind:"bounty", index: idx})}
-                onComplete={completeTask}
-                onEdit={setEditing}
-                onDelete={deleteTask}
-              />
             </div>
           </>
         ) : (
@@ -337,7 +358,9 @@ export default function App() {
                       <div className="flex-1">
                         <div className="text-sm font-medium">{t.title}</div>
                         <div className="text-xs text-neutral-400">
-                          {(t.bucket ?? "day") === "day" ? `Due ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}` : "Bounty"}
+                          {t.bucket === "bounty"
+                            ? "Bounty"
+                            : `Due ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`}
                           {t.completedAt ? ` • Completed ${new Date(t.completedAt).toLocaleString()}` : ""}
                         </div>
                         {!!t.note && <div className="text-xs text-neutral-400 mt-1">{t.note}</div>}
@@ -355,6 +378,19 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {/* Undo snackbar */}
+      {undoVisible && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 bg-neutral-900 text-neutral-100 border border-neutral-700 rounded-full shadow px-4 py-2 flex items-center gap-3">
+          <span>Deleted “{lastDeletedTitle.current}”</span>
+          <button
+            className="px-3 py-1 rounded-full bg-neutral-800 hover:bg-neutral-700"
+            onClick={undoDelete}
+          >
+            Undo
+          </button>
+        </div>
+      )}
 
       {/* Advanced recurrence modal */}
       {showAdvanced && (
@@ -381,15 +417,13 @@ export default function App() {
   );
 }
 
-/* ===== Subcomponents & utils ===== */
-
-// PRESERVE original array order
-function groupByDayPreserveOrder(tasks: Task[]) {
-  const m = new Map<Weekday, Task[]>();
+/* ===== Grouping (preserve order) ===== */
+function groupByColumnPreserveOrder(tasks: Task[]) {
+  const m = new Map<ColumnKey, Task[]>();
   for (const t of tasks) {
-    const wd = new Date(t.dueISO).getDay() as Weekday;
-    if (!m.has(wd)) m.set(wd, []);
-    m.get(wd)!.push(t);
+    const key: ColumnKey = t.bucket === "bounty" ? "bounty" : (new Date(t.dueISO).getDay() as Weekday);
+    if (!m.has(key)) m.set(key, []);
+    m.get(key)!.push(t);
   }
   return m;
 }
@@ -404,32 +438,11 @@ function labelOf(r: Recurrence): string {
   }
 }
 
-function DayColumn({
-  day, items, onDropToIndex, onComplete, onEdit, onDelete
+function Column({
+  columnKey, title, items, onDropToIndex, onComplete, onEdit, onDelete
 }: {
-  day: Weekday;
-  items: Task[];
-  onDropToIndex: (id: string, targetIndex: number) => void;
-  onComplete: (id: string)=>void;
-  onEdit: (t: Task)=>void;
-  onDelete: (id: string)=>void;
-}) {
-  return (
-    <GenericColumn
-      label={WD_SHORT[day]}
-      items={items}
-      onDropToIndex={onDropToIndex}
-      onComplete={onComplete}
-      onEdit={onEdit}
-      onDelete={onDelete}
-    />
-  );
-}
-
-function GenericColumn({
-  label, items, onDropToIndex, onComplete, onEdit, onDelete
-}: {
-  label: string;
+  columnKey: ColumnKey;
+  title: string;
   items: Task[];
   onDropToIndex: (id: string, targetIndex: number) => void;
   onComplete: (id: string)=>void;
@@ -464,7 +477,69 @@ function GenericColumn({
         onDropToIndex(id, idx);
       }}
     >
-      <div className="font-semibold text-neutral-200 mb-2">{label}</div>
+      <div className="font-semibold text-neutral-200 mb-2">{title}</div>
       <div ref={listRef} className="space-y-2">
         {items.map((t) => (
           <Card
+            key={t.id}
+            task={t}
+            onComplete={()=>onComplete(t.id)}
+            onEdit={()=>onEdit(t)}
+            onDelete={()=>onDelete(t.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Card({ task, onComplete, onEdit, onDelete }: {
+  task: Task; onComplete: ()=>void; onEdit: ()=>void; onDelete: ()=>void;
+}) {
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  function onDragStart(e: React.DragEvent) {
+    e.dataTransfer.setData("text/task-id", task.id);
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  // Swipe: right => complete, left => delete (less sensitive: 180px)
+  // Also prevent horizontal page/board pan with touch-action and left-edge guard.
+  useEffect(()=>{
+    const THRESH = 180;
+    const EDGE_GUARD = 24; // ignore swipes starting within 24px of card's left edge
+    const el = cardRef.current!;
+    let startX = 0, dx = 0, enabled = true;
+
+    const onTouchStart = (e: TouchEvent) => {
+      const rect = el.getBoundingClientRect();
+      startX = e.touches[0].clientX; dx = 0;
+      enabled = (startX - rect.left) >= EDGE_GUARD; // avoid iOS back-swipe from screen edge
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (!enabled) return;
+      dx = e.touches[0].clientX - startX;
+      el.style.transform = `translateX(${dx}px)`;
+      el.style.opacity = String(Math.max(0.4, 1 - Math.abs(dx)/320));
+    };
+    const onTouchEnd = () => {
+      if (enabled) {
+        if (dx > THRESH) onComplete();
+        else if (dx < -THRESH) onDelete();
+      }
+      el.style.transform = ""; el.style.opacity = "";
+    };
+    el.addEventListener("touchstart", onTouchStart, {passive:true});
+    el.addEventListener("touchmove", onTouchMove, {passive:true});
+    el.addEventListener("touchend", onTouchEnd);
+    return ()=>{
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [onComplete, onDelete]);
+
+  return (
+    <div
+      ref={cardRef}
+      className="group relative p-3

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+type DayChoice = Weekday | "bounties";
 const WD_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
 type Recurrence =
@@ -15,7 +16,7 @@ type Task = {
   id: string;
   title: string;
   note?: string;
-  dueISO: string;            // midnight ISO that places task in a weekday column
+  dueISO: string;
   completed?: boolean;
   completedAt?: string;
   recurrence?: Recurrence;
@@ -74,10 +75,12 @@ export default function App() {
 
   // add bar
   const [newTitle, setNewTitle] = useState("");
-  const [activeDay, setActiveDay] = useState<Weekday>(new Date().getDay() as Weekday);
-  const [quickRule, setQuickRule] = useState<"none"|"daily"|"weeklyMonFri"|"weeklyWeekends"|"every2d">("none");
+  const [dayChoice, setDayChoice] = useState<DayChoice>(new Date().getDay() as Weekday);
 
-  // NEW: advanced recurrence for Add bar
+  // recurrence select (with Custom… option)
+  const [quickRule, setQuickRule] = useState<
+    "none"|"daily"|"weeklyMonFri"|"weeklyWeekends"|"every2d"|"custom"
+  >("none");
   const [addCustomRule, setAddCustomRule] = useState<Recurrence>(R_NONE);
   const [showAddAdvanced, setShowAddAdvanced] = useState(false);
 
@@ -87,7 +90,7 @@ export default function App() {
   // undo snackbar
   const [undoTask, setUndoTask] = useState<Task|null>(null);
 
-  // confetti (lightweight)
+  // confetti
   const confettiRef = useRef<HTMLDivElement>(null);
   function burst() {
     const el = confettiRef.current; if (!el) return;
@@ -119,22 +122,25 @@ export default function App() {
       case "weeklyMonFri": return { type: "weekly", days: [1,2,3,4,5] };
       case "weeklyWeekends": return { type: "weekly", days: [0,6] };
       case "every2d": return { type: "every", n: 2, unit: "day" };
+      case "custom": return addCustomRule;
     }
   }
 
-  function addTask(day: Weekday, column: "day"|"bounties" = "day") {
+  function addTask() {
     const title = newTitle.trim(); if (!title) return;
-    // Prefer custom advanced rule if set; otherwise use quick preset
-    const candidate = addCustomRule.type !== "none" ? addCustomRule : resolveQuickRule();
-    const rule = candidate.type === "none" ? undefined : candidate;
+    const candidate = resolveQuickRule();
+    const recurrence = candidate.type === "none" ? undefined : candidate;
+
+    const isBounties = dayChoice === "bounties";
+    const dueISO = isBounties ? isoForWeekday(0) : isoForWeekday(dayChoice as Weekday);
 
     const t: Task = {
       id: crypto.randomUUID(),
       title,
-      dueISO: isoForWeekday(day),
+      dueISO,
       completed: false,
-      recurrence: rule,
-      column
+      recurrence,
+      column: isBounties ? "bounties" : "day",
     };
     setTasks(prev => [...prev, t]);
 
@@ -192,7 +198,7 @@ export default function App() {
       };
       // remove original
       arr.splice(fromIdx, 1);
-      // figure insertion position (global array index) by locating beforeId
+      // figure insertion position by locating beforeId
       let insertIdx = typeof beforeId === "string" ? arr.findIndex(t => t.id === beforeId) : -1;
       if (insertIdx < 0) insertIdx = arr.length;
       arr.splice(insertIdx, 0, updated);
@@ -221,35 +227,45 @@ export default function App() {
             <div className="flex flex-wrap gap-2 items-center mb-5">
               <input value={newTitle} onChange={e=>setNewTitle(e.target.value)} placeholder="New task…"
                      className="flex-1 min-w-[220px] px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none" />
-              <select value={activeDay} onChange={e=>setActiveDay(Number(e.target.value) as Weekday)}
-                      className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800">
+
+              {/* Day selector includes Bounties */}
+              <select
+                value={dayChoice === "bounties" ? "bounties" : String(dayChoice)}
+                onChange={(e)=>{
+                  const v = e.target.value;
+                  setDayChoice(v === "bounties" ? "bounties" : (Number(v) as Weekday));
+                }}
+                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              >
                 {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
+                <option value="bounties">Bounties</option>
               </select>
 
-              {/* Quick presets */}
-              <select value={quickRule} onChange={e=>setQuickRule(e.target.value as any)}
-                      className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800">
+              {/* Recurrence select with Custom… */}
+              <select
+                value={quickRule}
+                onChange={(e)=>{
+                  const v = e.target.value as typeof quickRule;
+                  setQuickRule(v);
+                  if (v === "custom") setShowAddAdvanced(true);
+                }}
+                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                title="Recurrence"
+              >
                 <option value="none">No recurrence</option>
                 <option value="daily">Daily</option>
                 <option value="weeklyMonFri">Mon–Fri</option>
                 <option value="weeklyWeekends">Weekends</option>
                 <option value="every2d">Every 2 days</option>
+                <option value="custom">Custom…</option>
               </select>
 
-              {/* Advanced… button + current custom label (if any) */}
-              <button
-                className="px-3 py-2 rounded-2xl bg-neutral-800 border border-neutral-700"
-                onClick={()=>setShowAddAdvanced(true)}
-                title="Advanced recurrence…"
-              >
-                Custom…
-              </button>
-              {addCustomRule.type !== "none" && (
+              {/* Show chosen custom label inline when custom selected */}
+              {quickRule === "custom" && addCustomRule.type !== "none" && (
                 <span className="text-xs text-neutral-400">({labelOf(addCustomRule)})</span>
               )}
 
-              <button onClick={()=>addTask(activeDay)} className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium">Add</button>
-              <button onClick={()=>addTask(0,"bounties")} className="px-4 py-2 rounded-2xl bg-blue-600 hover:bg-blue-500 font-medium">Add to Bounties</button>
+              <button onClick={addTask} className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium">Add</button>
             </div>
 
             {/* Board */}
@@ -439,11 +455,9 @@ function Card({
   function handleDragStart(e: React.DragEvent) {
     e.dataTransfer.setData("text/task-id", task.id);
     e.dataTransfer.effectAllowed = "move";
-    // Snappier feel for the drag image:
     e.dataTransfer.setDragImage(e.currentTarget as HTMLElement, 0, 0);
   }
   function handleDragOver(e: React.DragEvent) {
-    // Allow drop and show "insert before" indicator when hovering top half
     e.preventDefault();
     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
     const midpoint = rect.top + rect.height / 2;
@@ -474,7 +488,7 @@ function Card({
       dx = t.clientX - startX;
       dy = t.clientY - startY;
 
-      // If mostly horizontal drag, prevent page scroll/overscroll.
+      // If mostly horizontal, prevent page scroll/overscroll.
       if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) e.preventDefault();
 
       el.style.transform = `translateX(${dx}px)`;
@@ -488,7 +502,7 @@ function Card({
       active = false;
     };
 
-    // IMPORTANT: non-passive to allow preventDefault
+    // non-passive so we can preventDefault during horizontal gesture
     el.addEventListener("touchstart", onTouchStart, {passive:false});
     el.addEventListener("touchmove", onTouchMove, {passive:false});
     el.addEventListener("touchend", onTouchEnd, {passive:false});
@@ -622,7 +636,7 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
   );
 }
 
-/* A focused modal that contains the full advanced picker */
+/* Advanced recurrence modal & picker */
 function RecurrenceModal({
   initial,
   onClose,
@@ -645,7 +659,6 @@ function RecurrenceModal({
   );
 }
 
-/* Full-featured recurrence picker (weekly multi-select, every N days/weeks, monthly) */
 function RecurrencePicker({
   value,
   onChange,
@@ -659,20 +672,11 @@ function RecurrencePicker({
   const [monthDay, setMonthDay] = useState(15);
 
   useEffect(() => {
-    // hydrate UI from incoming value
     switch (value.type) {
-      case "weekly":
-        setWeekly(new Set(value.days));
-        break;
-      case "every":
-        setEveryN(value.n);
-        setUnit(value.unit);
-        break;
-      case "monthlyDay":
-        setMonthDay(value.day);
-        break;
-      default:
-        setWeekly(new Set());
+      case "weekly": setWeekly(new Set(value.days)); break;
+      case "every": setEveryN(value.n); setUnit(value.unit); break;
+      case "monthlyDay": setMonthDay(value.day); break;
+      default: setWeekly(new Set());
     }
   }, [value]);
 
@@ -742,7 +746,6 @@ function RecurrencePicker({
       <section>
         <div className="text-sm font-medium mb-2">Monthly</div>
         <div className="flex items-center gap-2">
-          {/* “Wheel” style: tall select */}
           <select
             value={monthDay}
             onChange={(e) => setMonthDay(parseInt(e.target.value, 10))}

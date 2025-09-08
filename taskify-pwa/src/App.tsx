@@ -916,7 +916,20 @@ function Card({
           <div className="text-sm font-medium leading-5 break-words">
             {renderTitleWithLink(task.title, task.note)}
           </div>
-          {!!task.note && <div className="text-xs text-neutral-400 break-words">{autolink(task.note)}</div>}
+          {!!task.note && (
+  <div
+    className="text-xs text-neutral-400 break-words"
+    style={{
+      display: "-webkit-box",
+      WebkitLineClamp: 2,       // number of lines to show in preview
+      WebkitBoxOrient: "vertical",
+      overflow: "hidden"
+    }}
+    title={task.note} // optional: hover to see full note as tooltip (desktop)
+  >
+    {autolink(task.note)}
+  </div>
+)}
         </div>
 
         {/* Circular edit/delete buttons */}

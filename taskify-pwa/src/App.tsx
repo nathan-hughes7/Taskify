@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate } from "nostr-tools";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sun
@@ -30,9 +31,16 @@ type Task = {
 
 type ListColumn = { id: string; name: string };
 
+type BoardBase = {
+  id: string;
+  name: string;
+  // Optional Nostr sharing metadata
+  nostr?: { boardId: string; relays: string[] };
+};
+
 type Board =
-  | { id: string; name: string; kind: "week" } // fixed Sun–Sat + Bounties
-  | { id: string; name: string; kind: "lists"; columns: ListColumn[] }; // multiple customizable columns
+  | (BoardBase & { kind: "week" }) // fixed Sun–Sat + Bounties
+  | (BoardBase & { kind: "lists"; columns: ListColumn[] }); // multiple customizable columns
 
 type Settings = {
   weekStart: Weekday; // 0=Sun, 1=Mon, 6=Sat
@@ -42,6 +50,175 @@ const R_NONE: Recurrence = { type: "none" };
 const LS_TASKS = "taskify_tasks_v4";
 const LS_SETTINGS = "taskify_settings_v2";
 const LS_BOARDS = "taskify_boards_v2";
+const LS_NOSTR_RELAYS = "taskify_nostr_relays_v1";
+const LS_NOSTR_SK = "taskify_nostr_sk_v1";
+
+/* ================= Nostr minimal client ================= */
+type NostrEvent = {
+  id: string;
+  kind: number;
+  pubkey: string;
+  created_at: number;
+  tags: string[][];
+  content: string;
+  sig: string;
+};
+
+type NostrUnsignedEvent = Omit<NostrEvent, "id" | "sig" | "pubkey"> & {
+  pubkey?: string;
+};
+
+declare global {
+  interface Window {
+    nostr?: {
+      getPublicKey: () => Promise<string>;
+      signEvent: (e: NostrUnsignedEvent) => Promise<NostrEvent>;
+    };
+  }
+}
+
+const DEFAULT_RELAYS = [
+  "wss://relay.damus.io",
+  "wss://nos.lol",
+  "wss://relay.snort.social",
+];
+
+function loadDefaultRelays(): string[] {
+  try {
+    const raw = localStorage.getItem(LS_NOSTR_RELAYS);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr) && arr.every((x) => typeof x === "string")) return arr;
+    }
+  } catch {}
+  return DEFAULT_RELAYS;
+}
+
+function saveDefaultRelays(relays: string[]) {
+  localStorage.setItem(LS_NOSTR_RELAYS, JSON.stringify(relays));
+}
+
+type NostrPool = {
+  ensureRelay: (url: string) => void;
+  setRelays: (urls: string[]) => void;
+  subscribe: (
+    relays: string[],
+    filters: any[],
+    onEvent: (ev: NostrEvent, from: string) => void,
+    onEose?: (from: string) => void
+  ) => () => void;
+  publish: (relays: string[], event: NostrUnsignedEvent) => Promise<void>;
+  publishEvent: (relays: string[], event: NostrEvent) => void;
+};
+
+function createNostrPool(): NostrPool {
+  type Relay = {
+    url: string;
+    ws: WebSocket | null;
+    status: "idle" | "opening" | "open" | "closed";
+    queue: any[]; // messages to send when open
+  };
+
+  const relays = new Map<string, Relay>();
+  const subs = new Map<
+    string,
+    {
+      onEvent: (ev: NostrEvent, from: string) => void;
+      onEose?: (from: string) => void;
+    }
+  >();
+
+  function getOrCreate(url: string): Relay {
+    let r = relays.get(url);
+    if (!r) {
+      r = { url, ws: null, status: "idle", queue: [] };
+      relays.set(url, r);
+    }
+    if (r.status === "idle" || r.status === "closed") {
+      try {
+        r.status = "opening";
+        r.ws = new WebSocket(url);
+        r.ws.onopen = () => {
+          r!.status = "open";
+          // flush queue
+          const q = r!.queue.slice();
+          r!.queue.length = 0;
+          for (const msg of q) r!.ws?.send(JSON.stringify(msg));
+        };
+        r.ws.onclose = () => {
+          r!.status = "closed";
+          // try to reopen after a delay
+          setTimeout(() => {
+            if (relays.has(url)) getOrCreate(url);
+          }, 2500);
+        };
+        r.ws.onmessage = (e) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (!Array.isArray(data)) return;
+            const [type, ...rest] = data;
+            if (type === "EVENT") {
+              const [subId, ev] = rest as [string, NostrEvent];
+              const s = subs.get(subId);
+              if (s && ev && typeof ev.kind === "number") s.onEvent(ev, url);
+            } else if (type === "EOSE") {
+              const [subId] = rest as [string];
+              const s = subs.get(subId);
+              if (s?.onEose) s.onEose(url);
+            }
+          } catch {}
+        };
+      } catch {}
+    }
+    return r;
+  }
+
+  function send(url: string, msg: any) {
+    const r = getOrCreate(url);
+    const payload = JSON.stringify(msg);
+    if (r.status === "open" && r.ws?.readyState === WebSocket.OPEN) {
+      try { r.ws.send(payload); } catch { r.queue.push(msg); }
+    } else {
+      r.queue.push(msg);
+    }
+  }
+
+  const api: NostrPool = {
+    ensureRelay(url: string) { getOrCreate(url); },
+    setRelays(urls: string[]) {
+      // open new
+      for (const u of urls) getOrCreate(u);
+      // close removed
+      for (const [u, r] of relays) {
+        if (!urls.includes(u)) {
+          try { r.ws?.close(); } catch {}
+          relays.delete(u);
+        }
+      }
+    },
+    subscribe(relayUrls, filters, onEvent, onEose) {
+      const subId = `taskify-${Math.random().toString(36).slice(2, 10)}`;
+      subs.set(subId, { onEvent, onEose });
+      for (const u of relayUrls) {
+        send(u, ["REQ", subId, ...filters]);
+      }
+      return () => {
+        for (const u of relayUrls) send(u, ["CLOSE", subId]);
+        subs.delete(subId);
+      };
+    },
+    async publish(relayUrls, unsigned) {
+      // This method remains for backward compatibility if needed.
+      const now = Math.floor(Date.now() / 1000);
+      const toSend: any = { ...unsigned, created_at: unsigned.created_at || now };
+      for (const u of relayUrls) send(u, ["EVENT", toSend]);
+    },
+    publishEvent(relayUrls, event) {
+      for (const u of relayUrls) send(u, ["EVENT", event]);
+    }
+  };
+  return api;
+}
 
 /* ================= Date helpers ================= */
 function startOfDay(d: Date) {
@@ -181,6 +358,53 @@ export default function App() {
 
   const [tasks, setTasks] = useTasks();
   const [settings, setSettings] = useSettings();
+  const [defaultRelays, setDefaultRelays] = useState<string[]>(() => loadDefaultRelays());
+  useEffect(() => { saveDefaultRelays(defaultRelays); }, [defaultRelays]);
+
+  // Nostr pool + merge indexes
+  const pool = useMemo(() => createNostrPool(), []);
+  // In-app Nostr key (secp256k1/Schnorr) for signing
+  function hexToBytes(hex: string): Uint8Array {
+    if (!hex) return new Uint8Array();
+    const arr = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < arr.length; i++) arr[i] = parseInt(hex.substr(i * 2, 2), 16);
+    return arr;
+  }
+  function bytesToHex(b: Uint8Array): string {
+    return Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
+  }
+  const [nostrSK, setNostrSK] = useState<Uint8Array>(() => {
+    try {
+      const existing = localStorage.getItem(LS_NOSTR_SK);
+      if (existing && /^[0-9a-fA-F]{64}$/.test(existing)) return hexToBytes(existing);
+    } catch {}
+    const sk = generateSecretKey();
+    try { localStorage.setItem(LS_NOSTR_SK, bytesToHex(sk)); } catch {}
+    return sk;
+  });
+  const [nostrPK, setNostrPK] = useState<string>(() => {
+    try { return getPublicKey(nostrSK); } catch { return ""; }
+  });
+  // allow manual key rotation later if needed
+  const rotateNostrKey = () => {
+    const sk = generateSecretKey();
+    setNostrSK(sk);
+    const pk = getPublicKey(sk);
+    setNostrPK(pk);
+    try { localStorage.setItem(LS_NOSTR_SK, bytesToHex(sk)); } catch {}
+  };
+
+  async function nostrPublish(relays: string[], template: EventTemplate) {
+    const ev = finalizeEvent(template, nostrSK);
+    pool.publishEvent(relays, ev as unknown as NostrEvent);
+  }
+  type NostrIndex = {
+    boardMeta: Map<string, number>; // nostrBoardId -> created_at
+    taskClock: Map<string, Map<string, number>>; // nostrBoardId -> (taskId -> created_at)
+  };
+  const nostrIdxRef = useRef<NostrIndex>({ boardMeta: new Map(), taskClock: new Map() });
+  const boardsRef = useRef<Board[]>(boards);
+  useEffect(() => { boardsRef.current = boards; }, [boards]);
 
   // header view
   const [view, setView] = useState<"board" | "completed">("board");
@@ -301,6 +525,107 @@ export default function App() {
     }
   }
 
+  // --------- Nostr helpers
+  function tagValue(ev: NostrEvent, name: string): string | undefined {
+    const t = ev.tags.find((x) => x[0] === name);
+    return t ? t[1] : undefined;
+  }
+  function isShared(board: Board) { return !!board.nostr?.boardId; }
+  function getBoardRelays(board: Board): string[] {
+    return (board.nostr?.relays?.length ? board.nostr!.relays : defaultRelays).filter(Boolean);
+  }
+  function publishBoardMetadata(board: Board) {
+    if (!board.nostr?.boardId) return;
+    const relays = getBoardRelays(board);
+    const tags: string[][] = [["d", board.nostr.boardId],["b", board.nostr.boardId],["k", board.kind],["name", board.name]];
+    const content = board.kind === "lists" ? JSON.stringify({ columns: board.columns }) : "";
+    nostrPublish(relays, { kind: 30300, tags, content, created_at: Math.floor(Date.now()/1000) });
+  }
+  function publishTaskDeleted(t: Task) {
+    const b = boards.find((x) => x.id === t.boardId);
+    if (!b || !isShared(b) || !b.nostr) return;
+    const relays = getBoardRelays(b);
+    const boardId = b.nostr.boardId;
+    const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
+    const tags: string[][] = [["d", t.id],["b", boardId],["col", String(colTag)],["status","deleted"]];
+    const content = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO });
+    nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
+  }
+  function maybePublishTask(t: Task) {
+    const b = boards.find((x) => x.id === t.boardId);
+    if (!b || !isShared(b) || !b.nostr) return;
+    const relays = getBoardRelays(b);
+    const boardId = b.nostr.boardId;
+    const status = t.completed ? "done" : "open";
+    const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
+    const tags: string[][] = [["d", t.id],["b", boardId],["col", String(colTag)],["status", status]];
+    const content = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO });
+    nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
+  }
+  function applyBoardEvent(ev: NostrEvent) {
+    const d = tagValue(ev, "d");
+    if (!d) return;
+    const boardId = d;
+    const last = nostrIdxRef.current.boardMeta.get(boardId) || 0;
+    if (ev.created_at <= last) return;
+    nostrIdxRef.current.boardMeta.set(boardId, ev.created_at);
+    const kindTag = tagValue(ev, "k");
+    const name = tagValue(ev, "name");
+    let payload: any = {};
+    try { payload = ev.content ? JSON.parse(ev.content) : {}; } catch {}
+    setBoards(prev => prev.map(b => {
+      if (b.nostr?.boardId !== boardId) return b;
+      const nm = name || b.name;
+      if (kindTag === "week") return { id: b.id, name: nm, nostr: b.nostr, kind: "week" } as Board;
+      if (kindTag === "lists") {
+        const cols: ListColumn[] = Array.isArray(payload.columns) ? payload.columns : (b.kind === "lists" ? b.columns : [{ id: crypto.randomUUID(), name: "Items" }]);
+        return { id: b.id, name: nm, nostr: b.nostr, kind: "lists", columns: cols } as Board;
+      }
+      return b;
+    }));
+  }
+  function applyTaskEvent(ev: NostrEvent) {
+    const boardId = tagValue(ev, "b");
+    const taskId = tagValue(ev, "d");
+    if (!boardId || !taskId) return;
+    if (!nostrIdxRef.current.taskClock.has(boardId)) nostrIdxRef.current.taskClock.set(boardId, new Map());
+    const m = nostrIdxRef.current.taskClock.get(boardId)!;
+    const last = m.get(taskId) || 0;
+    if (ev.created_at <= last) return;
+    m.set(taskId, ev.created_at);
+
+    const lb = boardsRef.current.find((b) => b.nostr?.boardId === boardId);
+    if (!lb) return;
+    let payload: any = {};
+    try { payload = ev.content ? JSON.parse(ev.content) : {}; } catch {}
+    const status = tagValue(ev, "status");
+    const col = tagValue(ev, "col");
+    const base: Task = {
+      id: taskId,
+      boardId: lb.id,
+      title: payload.title || "Untitled",
+      note: payload.note || "",
+      dueISO: payload.dueISO || isoForWeekday(0),
+      completed: status === "done",
+      completedAt: payload.completedAt,
+      recurrence: payload.recurrence,
+      hiddenUntilISO: payload.hiddenUntilISO,
+    };
+    if (lb.kind === "week") base.column = col === "bounties" ? "bounties" : "day";
+    else if (lb.kind === "lists") base.columnId = col || (lb.columns[0]?.id || "");
+    setTasks(prev => {
+      const idx = prev.findIndex(x => x.id === taskId && x.boardId === lb.id);
+      if (status === "deleted") {
+        return idx >= 0 ? prev.filter((_,i)=>i!==idx) : prev;
+      }
+      if (idx >= 0) {
+        const copy = prev.slice();
+        copy[idx] = { ...prev[idx], ...base };
+        return copy;
+      } else return [...prev, base];
+    });
+  }
+
   function addTask() {
     const title = newTitle.trim();
     if (!title || !currentBoard) return;
@@ -334,6 +659,8 @@ export default function App() {
     }
 
     setTasks(prev => [...prev, t]);
+    // Publish to Nostr if board is shared
+    try { maybePublishTask(t); } catch {}
     setNewTitle("");
     setQuickRule("none");
     setAddCustomRule(R_NONE);
@@ -345,6 +672,8 @@ export default function App() {
       if (!cur) return prev;
       const now = new Date().toISOString();
       const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now}) : t);
+      const doneOne = updated.find(x => x.id === id);
+      if (doneOne) { try { maybePublishTask(doneOne); } catch {} }
       const nextISO = cur.recurrence ? nextOccurrence(cur.dueISO, cur.recurrence) : null;
       if (nextISO && cur.recurrence) {
         const clone: Task = {
@@ -355,6 +684,7 @@ export default function App() {
           dueISO: nextISO,
           hiddenUntilISO: hiddenUntilForNext(nextISO, cur.recurrence, settings.weekStart),
         };
+        try { maybePublishTask(clone); } catch {}
         return [...updated, clone];
       }
       return updated;
@@ -367,6 +697,7 @@ export default function App() {
     if (!t) return;
     setUndoTask(t);
     setTasks(prev => prev.filter(x => x.id !== id));
+    try { publishTaskDeleted(t); } catch {}
     setTimeout(() => setUndoTask(null), 5000); // undo duration
   }
   function undoDelete() {
@@ -378,11 +709,15 @@ export default function App() {
     setView("board");
   }
   function clearCompleted() {
+    try {
+      for (const t of tasksForBoard) if (t.completed) maybePublishTask(t);
+    } catch {}
     setTasks(prev => prev.filter(t => !t.completed));
   }
 
   function saveEdit(updated: Task) {
     setTasks(prev => prev.map(t => t.id===updated.id ? updated : t));
+    try { maybePublishTask(updated); } catch {}
     setEditing(null);
   }
 
@@ -424,9 +759,40 @@ export default function App() {
       let insertIdx = typeof beforeId === "string" ? arr.findIndex(t => t.id === beforeId) : -1;
       if (insertIdx < 0) insertIdx = arr.length;
       arr.splice(insertIdx, 0, updated);
+      try { maybePublishTask(updated); } catch {}
       return arr;
     });
   }
+
+  // Subscribe to Nostr for all shared boards
+  const nostrBoardsKey = useMemo(() => {
+    const items = boards
+      .filter(b => b.nostr?.boardId)
+      .map(b => ({ id: b.nostr!.boardId, relays: getBoardRelays(b).join(",") }))
+      .sort((a,b) => (a.id + a.relays).localeCompare(b.id + b.relays));
+    return JSON.stringify(items);
+  }, [boards, defaultRelays]);
+
+  useEffect(() => {
+    let parsed: Array<{id:string; relays:string}> = [];
+    try { parsed = JSON.parse(nostrBoardsKey || "[]"); } catch {}
+    const unsubs: Array<() => void> = [];
+    for (const it of parsed) {
+      const rls = it.relays.split(",").filter(Boolean);
+      if (!rls.length) continue;
+      pool.setRelays(rls);
+      const filters = [
+        { kinds: [30300, 30301], "#b": [it.id], limit: 500 },
+        { kinds: [30300], "#d": [it.id], limit: 1 },
+      ];
+      const unsub = pool.subscribe(rls, filters, (ev) => {
+        if (ev.kind === 30300) applyBoardEvent(ev);
+        else if (ev.kind === 30301) applyTaskEvent(ev);
+      });
+      unsubs.push(unsub);
+    }
+    return () => { unsubs.forEach(u => u()); };
+  }, [nostrBoardsKey, pool]);
 
   // reset dayChoice when board changes
   useEffect(() => {
@@ -766,6 +1132,33 @@ export default function App() {
           setSettings={setSettings}
           setBoards={setBoards}
           setCurrentBoardId={setCurrentBoardId}
+          defaultRelays={defaultRelays}
+          setDefaultRelays={setDefaultRelays}
+          pubkeyHex={nostrPK}
+          onShareBoard={(boardId, relayCsv) => {
+            const r = (relayCsv || "").split(",").map(s=>s.trim()).filter(Boolean);
+            const relays = r.length ? r : defaultRelays;
+            setBoards(prev => prev.map(b => {
+              if (b.id !== boardId) return b;
+              const nostrId = b.nostr?.boardId || (/^[0-9a-f-]{8}-[0-9a-f-]{4}-[1-5][0-9a-f-]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(b.id) ? b.id : crypto.randomUUID());
+              const nb: Board = b.kind === "week" ? { ...b, nostr: { boardId: nostrId, relays } } : { ...b, nostr: { boardId: nostrId, relays } };
+              setTimeout(() => publishBoardMetadata(nb), 0);
+              return nb;
+            }));
+          }}
+          onJoinBoard={(nostrId, name, relayCsv) => {
+            const relays = (relayCsv || "").split(",").map(s=>s.trim()).filter(Boolean);
+            const id = nostrId.trim();
+            if (!id) return;
+            const defaultCols: ListColumn[] = [{ id: crypto.randomUUID(), name: "Items" }];
+            const newBoard: Board = { id, name: name || "Shared Board", kind: "lists", columns: defaultCols, nostr: { boardId: id, relays: relays.length ? relays : defaultRelays } };
+            setBoards(prev => [...prev, newBoard]);
+            setCurrentBoardId(id);
+          }}
+          onBoardChanged={(boardId) => {
+            const b = boards.find(x => x.id === boardId);
+            if (b) publishBoardMetadata(b);
+          }}
           onClose={() => setShowSettings(false)}
         />
       )}
@@ -1165,6 +1558,12 @@ function SettingsModal({
   setSettings,
   setBoards,
   setCurrentBoardId,
+  defaultRelays,
+  setDefaultRelays,
+  pubkeyHex,
+  onShareBoard,
+  onJoinBoard,
+  onBoardChanged,
   onClose,
 }: {
   settings: Settings;
@@ -1173,11 +1572,21 @@ function SettingsModal({
   setSettings: (s: Settings) => void;
   setBoards: React.Dispatch<React.SetStateAction<Board[]>>;
   setCurrentBoardId: (id: string) => void;
+  defaultRelays: string[];
+  setDefaultRelays: (rls: string[]) => void;
+  pubkeyHex: string;
+  onShareBoard: (boardId: string, relaysCsv?: string) => void;
+  onJoinBoard: (nostrId: string, name?: string, relaysCsv?: string) => void;
+  onBoardChanged: (boardId: string) => void;
   onClose: () => void;
 }) {
   const [newBoardName, setNewBoardName] = useState("");
   const [selectedBoardId, setSelectedBoardId] = useState(currentBoardId);
   const selectedBoard = boards.find(b => b.id === selectedBoardId)!;
+  const [relaysCsv, setRelaysCsv] = useState("");
+  const [joinId, setJoinId] = useState("");
+  const [joinRelays, setJoinRelays] = useState("");
+  const [joinName, setJoinName] = useState("");
 
   function addBoard() {
     const name = newBoardName.trim();
@@ -1198,6 +1607,8 @@ function SettingsModal({
     const nn = name.trim();
     if (!nn) return;
     setBoards(prev => prev.map(x => x.id === id ? { ...x, name: nn } : x));
+    const sb = boards.find(x => x.id === id);
+    if (sb?.nostr) onBoardChanged(id);
   }
 
   function deleteBoard(id: string) {
@@ -1219,7 +1630,9 @@ function SettingsModal({
     setBoards(prev => prev.map(b => {
       if (b.id !== boardId || b.kind !== "lists") return b;
       const col: ListColumn = { id: crypto.randomUUID(), name: `List ${b.columns.length + 1}` };
-      return { ...b, columns: [...b.columns, col] };
+      const nb = { ...b, columns: [...b.columns, col] } as Board;
+      setTimeout(() => { if (nb.nostr) onBoardChanged(boardId); }, 0);
+      return nb;
     }));
   }
 
@@ -1230,7 +1643,9 @@ function SettingsModal({
     if (!nn) return;
     setBoards(prev => prev.map(b => {
       if (b.id !== boardId || b.kind !== "lists") return b;
-      return { ...b, columns: b.columns.map(c => c.id === colId ? { ...c, name: nn } : c) };
+      const nb = { ...b, columns: b.columns.map(c => c.id === colId ? { ...c, name: nn } : c) } as Board;
+      setTimeout(() => { if (nb.nostr) onBoardChanged(boardId); }, 0);
+      return nb;
     }));
   }
 
@@ -1238,13 +1653,16 @@ function SettingsModal({
     setBoards(prev => prev.map(b => {
       if (b.id !== boardId || b.kind !== "lists") return b;
       if (b.columns.length <= 1) return b; // keep at least one
-      return { ...b, columns: b.columns.filter(c => c.id !== colId) };
+      const nb = { ...b, columns: b.columns.filter(c => c.id !== colId) } as Board;
+      setTimeout(() => { if (nb.nostr) onBoardChanged(boardId); }, 0);
+      return nb;
     }));
   }
 
   return (
     <Modal onClose={onClose} title="Settings">
       <div className="space-y-6">
+        
         {/* Week start */}
         <section>
           <div className="text-sm font-medium mb-2">Week starts on</div>
@@ -1323,6 +1741,77 @@ function SettingsModal({
           ) : (
             <div className="text-xs text-neutral-400 mt-2">The Week board has fixed columns (Sun–Sat, Bounties).</div>
           )}
+        </section>
+
+        {/* Nostr shared boards */}
+        <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="text-sm font-medium">Nostr (Shared boards)</div>
+            <div className="ml-auto" />
+          </div>
+          {/* Public key */}
+          <div className="mb-3">
+            <div className="text-xs text-neutral-400 mb-1">Your Nostr public key (hex)</div>
+            <div className="flex gap-2 items-center">
+              <input readOnly value={pubkeyHex || "(generating…)"}
+                     className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+              <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{if(pubkeyHex) navigator.clipboard?.writeText(pubkeyHex);}}>Copy</button>
+            </div>
+          </div>
+
+          {/* Default relays */}
+          <div className="mb-3">
+            <div className="text-xs text-neutral-400 mb-1">Default relays (CSV)</div>
+            <input
+              value={defaultRelays.join(",")}
+              onChange={(e)=>setDefaultRelays(e.target.value.split(",").map(s=>s.trim()).filter(Boolean))}
+              className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              placeholder="wss://relay1, wss://relay2"
+            />
+          </div>
+
+          {/* Share current board */}
+          <div className="mb-3">
+            <div className="text-sm font-medium">Share current board</div>
+            {selectedBoard?.nostr ? (
+              <div className="mt-2 space-y-2">
+                <div className="text-xs text-neutral-400">Board ID</div>
+                <div className="flex gap-2 items-center">
+                  <input readOnly value={selectedBoard.nostr.boardId}
+                         className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{navigator.clipboard?.writeText(selectedBoard.nostr!.boardId);}}>Copy</button>
+                </div>
+                <div className="text-xs text-neutral-400">Relays (CSV)</div>
+                <input value={(selectedBoard.nostr.relays || []).join(",")} onChange={(e)=>{
+                  const relays = e.target.value.split(",").map(s=>s.trim()).filter(Boolean);
+                  setBoards(prev => prev.map(b => b.id === selectedBoard.id ? ({...b, nostr: { boardId: selectedBoard.nostr!.boardId, relays } }) : b));
+                }} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                <div className="flex gap-2">
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onBoardChanged(selectedBoard.id)}>Republish metadata</button>
+                  <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>{
+                    setBoards(prev => prev.map(b => b.id === selectedBoard.id ? (b.kind === 'week' ? { id: b.id, name: b.name, kind: 'week' } as Board : { id: b.id, name: b.name, kind: 'lists', columns: b.columns } as Board) : b));
+                  }}>Stop sharing</button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-2 space-y-2">
+                <div className="text-xs text-neutral-400">Relays override (optional, CSV)</div>
+                <input value={relaysCsv} onChange={(e)=>setRelaysCsv(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="wss://relay1, wss://relay2"/>
+                <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={()=>onShareBoard(selectedBoard.id, relaysCsv)}>Share this board</button>
+              </div>
+            )}
+          </div>
+
+          {/* Join a shared board */}
+          <div>
+            <div className="text-sm font-medium">Join a shared board</div>
+            <div className="mt-2 space-y-2">
+              <input value={joinId} onChange={e=>setJoinId(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Board ID (d tag)"/>
+              <input value={joinName} onChange={e=>setJoinName(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Local name (optional)"/>
+              <input value={joinRelays} onChange={e=>setJoinRelays(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Relays (optional CSV)"/>
+              <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onJoinBoard(joinId, joinName, joinRelays)}>Join</button>
+            </div>
+          </div>
         </section>
 
         <div className="flex justify-end">

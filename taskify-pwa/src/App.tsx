@@ -83,7 +83,7 @@ export default function App() {
   // undo snackbar
   const [undoTask, setUndoTask] = useState<Task|null>(null);
 
-  // simple confetti (no deps)
+  // confetti (lightweight)
   const confettiRef = useRef<HTMLDivElement>(null);
   function burst() {
     const el = confettiRef.current; if (!el) return;
@@ -167,6 +167,28 @@ export default function App() {
     setEditing(null);
   }
 
+  /* ---------- Drag & Drop: move or reorder ---------- */
+  function moveTask(id: string, target: { type: "day", day: Weekday } | { type: "bounties" }, beforeId?: string) {
+    setTasks(prev => {
+      const arr = [...prev];
+      const fromIdx = arr.findIndex(t => t.id === id);
+      if (fromIdx < 0) return prev;
+      const task = arr[fromIdx];
+      const updated: Task = {
+        ...task,
+        column: target.type === "bounties" ? "bounties" : "day",
+        dueISO: target.type === "bounties" ? isoForWeekday(0) : isoForWeekday(target.day)
+      };
+      // remove original
+      arr.splice(fromIdx, 1);
+      // figure insertion position (global array index) by locating beforeId
+      let insertIdx = typeof beforeId === "string" ? arr.findIndex(t => t.id === beforeId) : -1;
+      if (insertIdx < 0) insertIdx = arr.length;
+      arr.splice(insertIdx, 0, updated);
+      return arr;
+    });
+  }
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
       <div className="max-w-7xl mx-auto">
@@ -207,27 +229,48 @@ export default function App() {
             {/* Board */}
             <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
               {(Array.from({length:7}, (_,i)=>i as Weekday)).map(day => (
-                <Column key={day}
-                        day={day}
-                        items={byDay.get(day) || []}
-                        onComplete={completeTask}
-                        onEdit={setEditing}
-                        onDelete={deleteTask} />
+                <DroppableColumn key={day}
+                  title={WD_SHORT[day]}
+                  onDropCard={(payload) => {
+                    const { id } = payload;
+                    moveTask(id, { type: "day", day });
+                  }}>
+                  {(byDay.get(day) || []).map((t, idx, arr) => (
+                    <Card
+                      key={t.id}
+                      task={t}
+                      onComplete={()=>completeTask(t.id)}
+                      onEdit={()=>setEditing(t)}
+                      onDelete={()=>deleteTask(t.id)}
+                      onDragStart={(id)=>({ id, beforeId: undefined })}
+                      onDropBefore={(dragId)=>moveTask(dragId, { type: "day", day }, t.id)}
+                      isLast={idx === arr.length - 1}
+                    />
+                  ))}
+                </DroppableColumn>
               ))}
 
               {/* Bounties column */}
-              <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 min-h-[18rem]" style={{touchAction:"pan-y"}}>
-                <div className="font-semibold mb-2">Bounties</div>
-                <div className="space-y-2">
-                  {bounties.map(t => (
-                    <Card key={t.id}
-                          task={t}
-                          onComplete={()=>completeTask(t.id)}
-                          onEdit={()=>setEditing(t)}
-                          onDelete={()=>deleteTask(t.id)} />
-                  ))}
-                </div>
-              </div>
+              <DroppableColumn
+                title="Bounties"
+                onDropCard={(payload) => {
+                  const { id } = payload;
+                  moveTask(id, { type: "bounties" });
+                }}
+              >
+                {bounties.map((t, idx, arr) => (
+                  <Card
+                    key={t.id}
+                    task={t}
+                    onComplete={()=>completeTask(t.id)}
+                    onEdit={()=>setEditing(t)}
+                    onDelete={()=>deleteTask(t.id)}
+                    onDragStart={(id)=>({ id, beforeId: undefined })}
+                    onDropBefore={(dragId)=>moveTask(dragId, { type: "bounties" }, t.id)}
+                    isLast={idx === arr.length - 1}
+                  />
+                ))}
+              </DroppableColumn>
             </div>
           </>
         ) : (
@@ -301,37 +344,85 @@ function groupByDayPreserveOrder(tasks: Task[]) {
   return m;
 }
 
-function Column({
-  day, items, onComplete, onEdit, onDelete,
+/* A droppable column that accepts card drops anywhere in the column */
+function DroppableColumn({
+  title,
+  onDropCard,
+  children,
 }: {
-  day: Weekday;
-  items: Task[];
-  onComplete: (id: string)=>void;
-  onEdit: (t: Task)=>void;
-  onDelete: (id: string)=>void;
+  title: string;
+  onDropCard: (payload: { id: string }) => void;
+  children: React.ReactNode;
 }) {
-  const listRef = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current!;
+    const onDragOver = (e: DragEvent) => e.preventDefault();
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+      const id = e.dataTransfer?.getData("text/task-id");
+      if (id) onDropCard({ id });
+    };
+    el.addEventListener("dragover", onDragOver);
+    el.addEventListener("drop", onDrop);
+    return () => {
+      el.removeEventListener("dragover", onDragOver);
+      el.removeEventListener("drop", onDrop);
+    };
+  }, [onDropCard]);
+
   return (
-    <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 min-h-[18rem]"
-         style={{touchAction:"pan-y"}}>
-      <div className="font-semibold mb-2">{WD_SHORT[day]}</div>
-      <div ref={listRef} className="space-y-2">
-        {items.map(t => (
-          <Card key={t.id}
-                task={t}
-                onComplete={()=>onComplete(t.id)}
-                onEdit={()=>onEdit(t)}
-                onDelete={()=>onDelete(t.id)} />
-        ))}
-      </div>
+    <div
+      ref={ref}
+      className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 min-h-[18rem]"
+      style={{ touchAction: "pan-y" }}
+    >
+      <div className="font-semibold mb-2">{title}</div>
+      <div className="space-y-2">{children}</div>
     </div>
   );
 }
 
-function Card({ task, onComplete, onEdit, onDelete }: {
-  task: Task; onComplete: ()=>void; onEdit: ()=>void; onDelete: ()=>void;
+function Card({
+  task,
+  onComplete,
+  onEdit,
+  onDelete,
+  onDragStart,
+  onDropBefore,
+  isLast,
+}: {
+  task: Task;
+  onComplete: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onDragStart: (id: string) => { id: string; beforeId?: string };
+  onDropBefore: (dragId: string) => void;
+  isLast: boolean;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const [overBefore, setOverBefore] = useState(false);
+
+  // HTML5 drag (desktop + iOS)
+  function handleDragStart(e: React.DragEvent) {
+    e.dataTransfer.setData("text/task-id", task.id);
+    e.dataTransfer.effectAllowed = "move";
+  }
+  function handleDragOver(e: React.DragEvent) {
+    // Allow drop and show "insert before" indicator when hovering top half
+    e.preventDefault();
+    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const midpoint = rect.top + rect.height / 2;
+    setOverBefore(e.clientY < midpoint);
+  }
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    const dragId = e.dataTransfer.getData("text/task-id");
+    if (dragId) onDropBefore(dragId);
+    setOverBefore(false);
+  }
+  function handleDragLeave() { setOverBefore(false); }
 
   // swipe: right => complete, left => delete
   useEffect(()=>{
@@ -364,7 +455,7 @@ function Card({ task, onComplete, onEdit, onDelete }: {
       active = false;
     };
 
-    // IMPORTANT: listeners must be non-passive so we can preventDefault()
+    // IMPORTANT: non-passive to allow preventDefault
     el.addEventListener("touchstart", onTouchStart, {passive:false});
     el.addEventListener("touchmove", onTouchMove, {passive:false});
     el.addEventListener("touchend", onTouchEnd, {passive:false});
@@ -379,8 +470,18 @@ function Card({ task, onComplete, onEdit, onDelete }: {
     <div
       ref={cardRef}
       className="group relative p-3 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
-      style={{touchAction:"pan-y"}}
+      style={{ touchAction: "pan-y" }}
+      draggable
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      onDragLeave={handleDragLeave}
     >
+      {/* insert-before indicator */}
+      {overBefore && (
+        <div className="absolute -top-[2px] left-0 right-0 h-[3px] bg-emerald-500 rounded-full" />
+      )}
+
       <div className="flex items-start gap-2">
         {/* Unchecked circular "complete" button (fallback/desktop) */}
         <button

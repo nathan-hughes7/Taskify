@@ -918,16 +918,20 @@ function Card({
           </div>
           {!!task.note && (
   <div
-    className="text-xs text-neutral-400 break-words"
+    className="text-xs text-neutral-400"
     style={{
       display: "-webkit-box",
       WebkitLineClamp: 2,
       WebkitBoxOrient: "vertical",
-      overflow: "hidden"
+      overflow: "hidden",
+      // Make long URLs wrap inside <a>
+      wordBreak: "break-word",      // legacy/fallback
+      overflowWrap: "anywhere"      // modern, works great on iOS Safari
     }}
     title={task.note}
   >
-    <span style={{ display: "inline", whiteSpace: "normal" }}>
+    {/* Keep content inline so the clamp works with anchors */}
+    <span style={{ display: "inline", whiteSpace: "normal" }} className="break-all">
       {autolink(task.note)}
     </span>
   </div>

@@ -28,7 +28,8 @@ const WD_SHORT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"] as const;
 
 const R_NONE: Recurrence = { type: "none" };
 
-function nextOccurrence(currentISO: string, rule: Recurrence): string | null {
+// Removed "nextOccurrence(currentISO: string, rule: Recurrence)" after function
+function : string | null {
   const cur = startOfDay(new Date(currentISO));
   const addDays = (d: number) => startOfDay(new Date(cur.getTime() + d*86400000)).toISOString();
   switch (rule.type) {

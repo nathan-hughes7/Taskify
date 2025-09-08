@@ -152,7 +152,7 @@ export default function App() {
     const t = tasks.find(x => x.id === id); if (!t) return;
     setUndoTask(t);
     setTasks(prev => prev.filter(x => x.id !== id));
-    setTimeout(() => setUndoTask(null), 4000);
+    setTimeout(() => setUndoTask(null), 5000);
   }
   function undoDelete() { if (undoTask) { setTasks(prev => [...prev, undoTask]); setUndoTask(null); } }
 

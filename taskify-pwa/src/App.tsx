@@ -81,7 +81,9 @@ export default function App() {
   // Edit modal
   const [editing, setEditing] = useState<Task|null>(null);
 
-  const byDay = useMemo(() => groupByDay(tasks.filter(t => !t.completed)), [tasks]);
+  // NOTE: Preserve the order tasks appear in the array (no sorting),
+  // so manual reordering is respected.
+  const byDay = useMemo(() => groupByDayPreserveOrder(tasks.filter(t => !t.completed)), [tasks]);
   const completed = useMemo(() => (
     tasks.filter(t => !!t.completed)
          .sort((a,b)=> (b.completedAt||"").localeCompare(a.completedAt||""))
@@ -132,6 +134,61 @@ export default function App() {
   function rescheduleTask(id: string, day: Weekday) {
     const newISO = isoForWeekday(day);
     setTasks(prev => prev.map(t => t.id===id ? { ...t, dueISO: newISO } : t));
+  }
+
+  // Reorder within a day OR move+insert into a day at an index
+  function moveTaskToDayAndIndex(id: string, day: Weekday, targetIndex: number) {
+    setTasks(prev => {
+      const curIdx = prev.findIndex(t => t.id === id);
+      if (curIdx === -1) return prev;
+      const moving = prev[curIdx];
+
+      // Build list of indices for tasks in the destination day (excluding the moving one)
+      const destDayIndices: number[] = [];
+      for (let i = 0; i < prev.length; i++) {
+        if (i === curIdx) continue;
+        const t = prev[i];
+        const wd = new Date(t.dueISO).getDay() as Weekday;
+        if (wd === day && !t.completed) destDayIndices.push(i);
+      }
+
+      // Clamp targetIndex
+      const clamped = Math.max(0, Math.min(destDayIndices.length, targetIndex));
+
+      // Compute global insert position: before the dest task at destDayIndices[clamped]
+      const next = prev.slice();
+      // Remove moving
+      next.splice(curIdx, 1);
+      // Recompute indices after removal
+      const destDayIndicesAfter: number[] = [];
+      for (let i = 0; i < next.length; i++) {
+        const t = next[i];
+        const wd = new Date(t.dueISO).getDay() as Weekday;
+        if (wd === day && !t.completed) destDayIndicesAfter.push(i);
+      }
+      const insertAt = (clamped >= destDayIndicesAfter.length)
+        ? (destDayIndicesAfter.length ? destDayIndicesAfter[destDayIndicesAfter.length - 1] + 1 : findLastIndexBeforeNextDayBlock(next, day) + 1)
+        : destDayIndicesAfter[clamped];
+
+      const updatedMoving: Task = {
+        ...moving,
+        // If moving to a different day, update dueISO. If same day, keep.
+        dueISO: (new Date(moving.dueISO).getDay() === day) ? moving.dueISO : isoForWeekday(day)
+      };
+
+      next.splice(insertAt, 0, updatedMoving);
+      return next;
+    });
+  }
+
+  // Helps find an insertion point at end of existing day block, else at end of array
+  function findLastIndexBeforeNextDayBlock(arr: Task[], day: Weekday): number {
+    let last = -1;
+    for (let i = 0; i < arr.length; i++) {
+      const wd = new Date(arr[i].dueISO).getDay() as Weekday;
+      if (wd === day && !arr[i].completed) last = i;
+    }
+    return last;
   }
 
   // Mark complete → keep original task (completed=true, completedAt=now) + spawn next if recurring
@@ -242,7 +299,7 @@ export default function App() {
                   key={day}
                   day={day}
                   items={byDay.get(day) || []}
-                  onDrop={(id)=>rescheduleTask(id, day)}
+                  onDropToIndex={(id, targetIndex)=> moveTaskToDayAndIndex(id, day, targetIndex)}
                   onComplete={completeTask}
                   onEdit={setEditing}
                   onDelete={deleteTask}
@@ -319,14 +376,15 @@ export default function App() {
 }
 
 /* ===== Subcomponents ===== */
-function groupByDay(tasks: Task[]) {
+
+// PRESERVE original order of tasks array (no sorting)
+function groupByDayPreserveOrder(tasks: Task[]) {
   const m = new Map<Weekday, Task[]>();
   for (const t of tasks) {
     const wd = new Date(t.dueISO).getDay() as Weekday;
     if (!m.has(wd)) m.set(wd, []);
     m.get(wd)!.push(t);
   }
-  for (const [k, arr] of m) m.set(k, arr.sort((a,b)=>a.dueISO.localeCompare(b.dueISO)));
   return m;
 }
 
@@ -341,37 +399,53 @@ function labelOf(r: Recurrence): string {
 }
 
 function Column({
-  day, items, onDrop, onComplete, onEdit, onDelete
+  day, items, onDropToIndex, onComplete, onEdit, onDelete
 }: {
   day: Weekday;
   items: Task[];
-  onDrop: (id: string)=>void;
+  onDropToIndex: (id: string, targetIndex: number) => void; // insert at index within this day
   onComplete: (id: string)=>void;
   onEdit: (t: Task)=>void;
   onDelete: (id: string)=>void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(()=>{
-    const el = ref.current!;
-    const prevent = (e: DragEvent) => e.preventDefault();
-    el.addEventListener("dragover", prevent);
-    el.addEventListener("drop", (e)=>{
-      e.preventDefault();
-      const id = e.dataTransfer?.getData("text/task-id");
-      if (id) onDrop(id);
-    });
-    return ()=> el.removeEventListener("dragover", prevent);
-  }, [onDrop]);
+  const colRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // compute the insertion index based on cursor Y vs card midpoints
+  function computeIndex(clientY: number): number {
+    const list = listRef.current;
+    if (!list) return items.length;
+    const children = Array.from(list.children) as HTMLElement[];
+    for (let i = 0; i < children.length; i++) {
+      const rect = children[i].getBoundingClientRect();
+      const mid = rect.top + rect.height / 2;
+      if (clientY < mid) return i;
+    }
+    return children.length;
+  }
 
   return (
-    <div ref={ref} className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 min-h-[18rem]">
+    <div
+      ref={colRef}
+      className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 min-h-[18rem]"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        const id = e.dataTransfer?.getData("text/task-id");
+        if (!id) return;
+        const idx = computeIndex(e.clientY);
+        onDropToIndex(id, idx);
+      }}
+    >
       <div className="font-semibold text-neutral-200 mb-2">{WD_SHORT[day]}</div>
-      <div className="space-y-2">
-        {items.map(t => (
-          <Card key={t.id} task={t}
-                onComplete={()=>onComplete(t.id)}
-                onEdit={()=>onEdit(t)}
-                onDelete={()=>onDelete(t.id)}
+      <div ref={listRef} className="space-y-2">
+        {items.map((t) => (
+          <Card
+            key={t.id}
+            task={t}
+            onComplete={()=>onComplete(t.id)}
+            onEdit={()=>onEdit(t)}
+            onDelete={()=>onDelete(t.id)}
           />
         ))}
       </div>
@@ -389,21 +463,32 @@ function Card({ task, onComplete, onEdit, onDelete }: {
     e.dataTransfer.effectAllowed = "move";
   }
 
-  // swipe right complete
+  // Swipe: right => complete, left => delete (less sensitive: 180px)
   useEffect(()=>{
+    const THRESH = 180;
     const el = cardRef.current!;
     let startX = 0, dx = 0;
+
     const onTouchStart = (e: TouchEvent) => { startX = e.touches[0].clientX; dx = 0; };
     const onTouchMove = (e: TouchEvent) => {
       dx = e.touches[0].clientX - startX;
-      el.style.transform = `translateX(${Math.max(0, dx)}px)`; el.style.opacity = dx > 0 ? String(Math.max(0.4, 1 - dx/240)) : "1";
+      el.style.transform = `translateX(${dx}px)`;
+      el.style.opacity = String(Math.max(0.4, 1 - Math.abs(dx)/320));
     };
-    const onTouchEnd = () => { if (dx > 120) onComplete(); el.style.transform = ""; el.style.opacity = ""; };
+    const onTouchEnd = () => {
+      if (dx > THRESH) onComplete();
+      else if (dx < -THRESH) onDelete();
+      el.style.transform = ""; el.style.opacity = "";
+    };
     el.addEventListener("touchstart", onTouchStart, {passive:true});
     el.addEventListener("touchmove", onTouchMove, {passive:true});
     el.addEventListener("touchend", onTouchEnd);
-    return ()=>{ el.removeEventListener("touchstart", onTouchStart); el.removeEventListener("touchmove", onTouchMove); el.removeEventListener("touchend", onTouchEnd); };
-  }, [onComplete]);
+    return ()=>{
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [onComplete, onDelete]);
 
   return (
     <div

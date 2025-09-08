@@ -15,8 +15,9 @@ type Task = {
   id: string;
   title: string;
   note?: string;
-  dueISO: string;
+  dueISO: string;              // midnight ISO (which “day column” it’s on)
   completed?: boolean;
+  completedAt?: string;        // ISO timestamp when completed
   recurrence?: Recurrence;
 };
 
@@ -66,18 +67,27 @@ function useLocalTasks() {
 /* ===== App ===== */
 export default function App() {
   const [tasks, setTasks] = useLocalTasks();
+  const [view, setView] = useState<"board"|"completed">("board");
+
+  // Add form
   const [newTitle, setNewTitle] = useState("");
   const [quickRule, setQuickRule] = useState<"none"|"daily"|"weeklyMonFri"|"weeklyWeekends"|"every2d"|"custom">("none");
   const [activeDay, setActiveDay] = useState<Weekday>(new Date().getDay() as Weekday);
 
+  // Advanced recurrence modal (still available via “Custom…” or Edit)
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [advancedRule, setAdvancedRule] = useState<Recurrence>(R_NONE);
 
+  // Edit modal
   const [editing, setEditing] = useState<Task|null>(null);
 
-  const byDay = useMemo(() => groupByDay(tasks), [tasks]);
-  const confettiRef = useRef<HTMLDivElement>(null);
+  const byDay = useMemo(() => groupByDay(tasks.filter(t => !t.completed)), [tasks]);
+  const completed = useMemo(() => (
+    tasks.filter(t => !!t.completed)
+         .sort((a,b)=> (b.completedAt||"").localeCompare(a.completedAt||""))
+  ), [tasks]);
 
+  const confettiRef = useRef<HTMLDivElement>(null);
   function burst() {
     const el = confettiRef.current; if (!el) return;
     for (let i=0;i<18;i++) {
@@ -124,23 +134,36 @@ export default function App() {
     setTasks(prev => prev.map(t => t.id===id ? { ...t, dueISO: newISO } : t));
   }
 
+  // Mark complete → keep original task (completed=true, completedAt=now) + spawn next if recurring
   function completeTask(id: string) {
     setTasks(prev => {
-      const cur = prev.find(t => t.id === id)!;
+      const cur = prev.find(t => t.id === id);
+      if (!cur) return prev;
+
+      const now = new Date().toISOString();
+      const updated = prev.map(t => t.id===id ? { ...t, completed: true, completedAt: now } : t);
+
       const nextISO = cur.recurrence ? nextOccurrence(cur.dueISO, cur.recurrence) : null;
-      const updated = prev.map(t => t.id===id ? { ...t, completed: true } : t);
-      setTimeout(() => setTasks(p => p.filter(x => x.id !== id)), 500);
       if (nextISO) {
-        const clone: Task = { ...cur, id: crypto.randomUUID(), completed: false, dueISO: nextISO };
-        setTimeout(() => setTasks(p => [...p, clone]), 520);
+        const clone: Task = { ...cur, id: crypto.randomUUID(), completed: false, completedAt: undefined, dueISO: nextISO };
+        return [...updated, clone];
       }
       return updated;
     });
     burst();
   }
 
+  function restoreTask(id: string) {
+    setTasks(prev => prev.map(t => t.id===id ? { ...t, completed: false, completedAt: undefined } : t));
+    setView("board");
+  }
+
   function deleteTask(id: string) {
     setTasks(prev => prev.filter(t => t.id !== id));
+  }
+
+  function clearCompleted() {
+    setTasks(prev => prev.filter(t => !t.completed));
   }
 
   function saveEdit(updated: Task) {
@@ -151,75 +174,126 @@ export default function App() {
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
       <div className="max-w-7xl mx-auto">
+        {/* Header */}
         <header className="flex items-center gap-3 mb-6">
-          <h1 className="text-3xl font-semibold tracking-tight">Taskify (PWA)</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">Taskify</h1>
           <div ref={confettiRef} className="relative h-0 w-full" />
-          <div className="ml-auto flex gap-2">
-            <button className="px-3 py-2 rounded-2xl bg-neutral-800 hover:bg-neutral-700"
-              onClick={() => setShowAdvanced(true)}>Recurrence</button>
-            <button className="px-3 py-2 rounded-2xl bg-neutral-800 hover:bg-neutral-700"
-              onClick={() => alert("Install: Safari • Share • Add to Home Screen")}>Install</button>
+          <div className="ml-auto flex items-center gap-2">
+            <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
+              <button
+                className={`px-3 py-2 ${view==="board" ? "bg-neutral-800" : ""}`}
+                onClick={()=>setView("board")}
+              >Board</button>
+              <button
+                className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800" : ""}`}
+                onClick={()=>setView("completed")}
+              >Completed</button>
+            </div>
           </div>
         </header>
 
-        {/* Add bar */}
-        <div className="flex flex-wrap gap-2 items-center mb-5">
-          <input
-            value={newTitle}
-            onChange={e=>setNewTitle(e.target.value)}
-            placeholder="New task…"
-            className="flex-1 min-w-[220px] px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
-          />
-          <select
-            value={activeDay}
-            onChange={e=>setActiveDay(Number(e.target.value) as Weekday)}
-            className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-          >
-            {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
-          </select>
+        {view === "board" ? (
+          <>
+            {/* Add bar */}
+            <div className="flex flex-wrap gap-2 items-center mb-5">
+              <input
+                value={newTitle}
+                onChange={e=>setNewTitle(e.target.value)}
+                placeholder="New task…"
+                className="flex-1 min-w-[220px] px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
+              />
+              <select
+                value={activeDay}
+                onChange={e=>setActiveDay(Number(e.target.value) as Weekday)}
+                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              >
+                {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
+              </select>
 
-          {/* Quick recurrence dropdown */}
-          <select
-            value={quickRule}
-            onChange={(e)=> {
-              const v = e.target.value as typeof quickRule;
-              setQuickRule(v);
-              if (v === "custom") setShowAdvanced(true);
-            }}
-            className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-            title="Recurrence"
-          >
-            <option value="none">No recurrence</option>
-            <option value="daily">Daily</option>
-            <option value="weeklyMonFri">Mon–Fri</option>
-            <option value="weeklyWeekends">Weekends</option>
-            <option value="every2d">Every 2 days</option>
-            <option value="custom">Custom…</option>
-          </select>
+              {/* Quick recurrence */}
+              <select
+                value={quickRule}
+                onChange={(e)=> {
+                  const v = e.target.value as typeof quickRule;
+                  setQuickRule(v);
+                  if (v === "custom") setShowAdvanced(true);
+                }}
+                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                title="Recurrence"
+              >
+                <option value="none">No recurrence</option>
+                <option value="daily">Daily</option>
+                <option value="weeklyMonFri">Mon–Fri</option>
+                <option value="weeklyWeekends">Weekends</option>
+                <option value="every2d">Every 2 days</option>
+                <option value="custom">Custom…</option>
+              </select>
 
-          <button onClick={()=>addTask(activeDay)}
-                  className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium">
-            Add
-          </button>
-        </div>
+              <button onClick={()=>addTask(activeDay)}
+                      className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium">
+                Add
+              </button>
+            </div>
 
-        {/* Board: 1 col on mobile → 7 cols on 2xl */}
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
-          {(Array.from({length:7}, (_,i)=>i as Weekday)).map(day => (
-            <Column
-              key={day}
-              day={day}
-              items={byDay.get(day) || []}
-              onDrop={(id)=>rescheduleTask(id, day)}
-              onComplete={completeTask}
-              onEdit={setEditing}
-              onDelete={deleteTask}
-            />
-          ))}
-        </div>
+            {/* Board */}
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
+              {(Array.from({length:7}, (_,i)=>i as Weekday)).map(day => (
+                <Column
+                  key={day}
+                  day={day}
+                  items={byDay.get(day) || []}
+                  onDrop={(id)=>rescheduleTask(id, day)}
+                  onComplete={completeTask}
+                  onEdit={setEditing}
+                  onDelete={deleteTask}
+                />
+              ))}
+            </div>
+          </>
+        ) : (
+          /* Completed view */
+          <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="text-lg font-semibold">Completed</div>
+              <div className="ml-auto">
+                <button
+                  className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600"
+                  onClick={clearCompleted}
+                >
+                  Clear completed
+                </button>
+              </div>
+            </div>
+            {completed.length === 0 ? (
+              <div className="text-neutral-400 text-sm">No completed tasks yet.</div>
+            ) : (
+              <ul className="space-y-2">
+                {completed.map(t => (
+                  <li key={t.id} className="p-3 rounded-xl bg-neutral-800 border border-neutral-700">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1">
+                        <div className="text-sm font-medium">{t.title}</div>
+                        <div className="text-xs text-neutral-400">
+                          Due {WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}
+                          {t.completedAt ? ` • Completed ${new Date(t.completedAt).toLocaleString()}` : ""}
+                        </div>
+                        {!!t.note && <div className="text-xs text-neutral-400 mt-1">{t.note}</div>}
+                      </div>
+                      <div className="flex gap-1">
+                        <IconButton label="Edit" onClick={()=>setEditing(t)}>✎</IconButton>
+                        <IconButton label="Restore" onClick={()=>restoreTask(t.id)} intent="success">↩︎</IconButton>
+                        <IconButton label="Delete" onClick={()=>deleteTask(t.id)} intent="danger">🗑</IconButton>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Advanced recurrence modal */}
+      {/* Advanced recurrence modal (opened via “Custom…” or inside Edit) */}
       {showAdvanced && (
         <Modal onClose={()=>setShowAdvanced(false)} title="Custom recurrence">
           <RecurrencePicker value={advancedRule} onChange={setAdvancedRule} />
@@ -237,6 +311,7 @@ export default function App() {
           onCancel={()=>setEditing(null)}
           onDelete={()=>{ deleteTask(editing.id); setEditing(null); }}
           onSave={saveEdit}
+          onOpenAdvanced={()=>setShowAdvanced(true)}
         />
       )}
     </div>
@@ -244,7 +319,6 @@ export default function App() {
 }
 
 /* ===== Subcomponents ===== */
-
 function groupByDay(tasks: Task[]) {
   const m = new Map<Weekday, Task[]>();
   for (const t of tasks) {
@@ -332,21 +406,47 @@ function Card({ task, onComplete, onEdit, onDelete }: {
   }, [onComplete]);
 
   return (
-    <div ref={cardRef}
-         className="group relative p-3 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
-         draggable onDragStart={onDragStart}>
+    <div
+      ref={cardRef}
+      className="group relative p-3 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
+      draggable
+      onDragStart={onDragStart}
+    >
       <div className="flex items-start gap-2">
-        <button onClick={onComplete} className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500">✓</button>
-        <div className="flex-1">
+        <button
+          onClick={onComplete}
+          className="px-2 py-1 rounded bg-emerald-600/80 hover:bg-emerald-600 text-sm"
+          title="Complete"
+        >
+          ✓
+        </button>
+        <div className="flex-1 cursor-pointer" onClick={onEdit}>
           <div className="text-sm font-medium leading-5">{task.title}</div>
           {!!task.note && <div className="text-xs text-neutral-400">{task.note}</div>}
         </div>
-        <div className="flex gap-1">
-          <button onClick={onEdit} className="px-2 py-1 rounded bg-neutral-700 hover:bg-neutral-600" title="Edit">✎</button>
-          <button onClick={onDelete} className="px-2 py-1 rounded bg-rose-600 hover:bg-rose-500" title="Delete">🗑</button>
+        {/* Subtle icon actions: hidden until hover/focus */}
+        <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <IconButton label="Edit" onClick={onEdit}>✎</IconButton>
+          <IconButton label="Delete" onClick={onDelete} intent="danger">🗑</IconButton>
         </div>
       </div>
     </div>
+  );
+}
+
+/* Small, low-emphasis icon button */
+function IconButton({
+  children, onClick, label, intent
+}: React.PropsWithChildren<{ onClick: ()=>void; label: string; intent?: "danger"|"success" }>) {
+  const base =
+    "px-2 py-1 rounded text-xs border border-transparent bg-neutral-700/40 hover:bg-neutral-700/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500";
+  const danger = " bg-rose-700/30 hover:bg-rose-700/50";
+  const success = " bg-emerald-700/30 hover:bg-emerald-700/50";
+  const cls = base + (intent==="danger" ? danger : intent==="success" ? success : "");
+  return (
+    <button aria-label={label} title={label} className={cls} onClick={onClick}>
+      {children}
+    </button>
   );
 }
 
@@ -440,8 +540,8 @@ function RecurrencePicker({ value, onChange }: { value: Recurrence; onChange: (r
   );
 }
 
-function EditModal({ task, onCancel, onDelete, onSave }: {
-  task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void;
+function EditModal({ task, onCancel, onDelete, onSave, onOpenAdvanced }: {
+  task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void; onOpenAdvanced: ()=>void;
 }) {
   const [title, setTitle] = useState(task.title);
   const [note, setNote] = useState(task.note || "");
@@ -457,11 +557,14 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                   className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
                   rows={3} placeholder="Notes (optional)"/>
         <div>
-          <div className="text-sm mb-2">Recurrence</div>
+          <div className="text-sm mb-2 flex items-center gap-2">
+            <span>Recurrence</span>
+            <button className="px-2 py-1 text-xs rounded bg-neutral-800" onClick={onOpenAdvanced}>Open advanced…</button>
+          </div>
           <RecurrencePicker value={rule} onChange={setRule}/>
         </div>
         <div className="pt-2 flex justify-between">
-          <button className="px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-500" onClick={onDelete}>Delete</button>
+          <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
           <div className="space-x-2">
             <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
             <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"

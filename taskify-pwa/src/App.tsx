@@ -921,13 +921,15 @@ function Card({
     className="text-xs text-neutral-400 break-words"
     style={{
       display: "-webkit-box",
-      WebkitLineClamp: 2,       // number of lines to show in preview
+      WebkitLineClamp: 2,
       WebkitBoxOrient: "vertical",
       overflow: "hidden"
     }}
-    title={task.note} // optional: hover to see full note as tooltip (desktop)
+    title={task.note}
   >
-    {autolink(task.note)}
+    <span style={{ display: "inline", whiteSpace: "normal" }}>
+      {autolink(task.note)}
+    </span>
   </div>
 )}
         </div>

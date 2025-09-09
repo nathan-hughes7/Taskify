@@ -7,11 +7,11 @@ type DayChoice = Weekday | "bounties" | string; // string = custom list columnId
 const WD_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
 type Recurrence =
-  | { type: "none" }
-  | { type: "daily" }
-  | { type: "weekly"; days: Weekday[] }
-  | { type: "every"; n: number; unit: "day" | "week" }
-  | { type: "monthlyDay"; day: number };
+  | { type: "none"; untilISO?: string }
+  | { type: "daily"; untilISO?: string }
+  | { type: "weekly"; days: Weekday[]; untilISO?: string }
+  | { type: "every"; n: number; unit: "day" | "week"; untilISO?: string }
+  | { type: "monthlyDay"; day: number; untilISO?: string };
 
 type Task = {
   id: string;
@@ -334,28 +334,36 @@ function nextOccurrence(currentISO: string, rule: Recurrence): string | null {
   const cur = startOfDay(new Date(currentISO));
   const addDays = (d: number) =>
     startOfDay(new Date(cur.getTime() + d * 86400000)).toISOString();
+  let next: string | null = null;
   switch (rule.type) {
     case "none":
-      return null;
+      next = null; break;
     case "daily":
-      return addDays(1);
+      next = addDays(1); break;
     case "weekly": {
       if (!rule.days.length) return null;
       for (let i = 1; i <= 28; i++) {
         const cand = addDays(i);
         const wd = new Date(cand).getDay() as Weekday;
-        if (rule.days.includes(wd)) return cand;
+        if (rule.days.includes(wd)) { next = cand; break; }
       }
-      return null;
+      break;
     }
     case "every":
-      return addDays(rule.unit === "day" ? rule.n : rule.n * 7);
+      next = addDays(rule.unit === "day" ? rule.n : rule.n * 7); break;
     case "monthlyDay": {
       const y = cur.getFullYear(), m = cur.getMonth();
-      const next = new Date(y, m + 1, Math.min(rule.day, 28));
-      return startOfDay(next).toISOString();
+      const n = new Date(y, m + 1, Math.min(rule.day, 28));
+      next = startOfDay(n).toISOString();
+      break;
     }
   }
+  if (next && rule.untilISO) {
+    const limit = startOfDay(new Date(rule.untilISO)).getTime();
+    const n = startOfDay(new Date(next)).getTime();
+    if (n > limit) return null;
+  }
+  return next;
 }
 
 /* ============= Visibility helpers (hide until X) ============= */
@@ -382,13 +390,8 @@ function hiddenUntilForNext(
   weekStart: Weekday
 ): string | undefined {
   const nextMidnight = startOfDay(new Date(nextISO));
-  if (rule.type === "daily") return nextMidnight.toISOString(); // midnight on due day
-  if (rule.type === "weekly") {
-    const sow = startOfWeek(nextMidnight, weekStart);
-    return sow.toISOString(); // midnight at start of that week
-  }
-  const dayBefore = new Date(nextMidnight.getTime() - 86400000);
-  return startOfDay(dayBefore).toISOString(); // others: day before
+  const sow = startOfWeek(nextMidnight, weekStart);
+  return sow.toISOString();
 }
 
 /* ================= Storage hooks ================= */
@@ -513,8 +516,15 @@ export default function App() {
     }
   };
 
+  const lastNostrCreated = useRef(0);
   async function nostrPublish(relays: string[], template: EventTemplate) {
-    const ev = finalizeEvent(template, nostrSK);
+    const now = Math.floor(Date.now() / 1000);
+    let createdAt = typeof template.created_at === "number" ? template.created_at : now;
+    if (createdAt <= lastNostrCreated.current) {
+      createdAt = lastNostrCreated.current + 1;
+    }
+    lastNostrCreated.current = createdAt;
+    const ev = finalizeEvent({ ...template, created_at: createdAt }, nostrSK);
     pool.publishEvent(relays, ev as unknown as NostrEvent);
   }
   type NostrIndex = {
@@ -538,6 +548,7 @@ export default function App() {
       ? (boards[0] as Extract<Board, {kind:"lists"}>).columns[0]?.id || "items"
       : (new Date().getDay() as Weekday);
   });
+  const [scheduleDate, setScheduleDate] = useState<string>("");
 
   // recurrence select (with Custom… option)
   const [quickRule, setQuickRule] = useState<
@@ -683,7 +694,8 @@ export default function App() {
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
     const tags: string[][] = [["d", t.id],["b", boardId],["col", String(colTag)],["status", status]];
     const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy };
-    // Include explicit null to signal bounty removal when undefined
+    // Include explicit nulls to signal removals when undefined
+    body.images = (typeof t.images === 'undefined') ? null : t.images;
     body.bounty = (typeof t.bounty === 'undefined') ? null : t.bounty;
     const content = JSON.stringify(body);
     nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
@@ -785,11 +797,16 @@ export default function App() {
         const current = prev[idx];
         // Determine incoming bounty raw (preserve explicit null removal)
         const incomingB: Task["bounty"] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'bounty') ? payload.bounty : undefined;
-        copy[idx] = { ...current, ...base, bounty: mergeBounty(current.bounty, incomingB as any) };
+        // Determine incoming images raw (allow explicit null removal)
+        const incomingImgs: string[] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'images') ? payload.images : undefined;
+        const mergedImages = incomingImgs === undefined ? current.images : incomingImgs === null ? undefined : incomingImgs;
+        copy[idx] = { ...current, ...base, images: mergedImages, bounty: mergeBounty(current.bounty, incomingB as any) };
         return copy;
       } else {
         const incomingB: Task["bounty"] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'bounty') ? payload.bounty : undefined;
-        return [...prev, { ...base, bounty: incomingB === null ? undefined : incomingB }];
+        const incomingImgs: string[] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'images') ? payload.images : undefined;
+        const imgs = incomingImgs === null ? undefined : Array.isArray(incomingImgs) ? incomingImgs : undefined;
+        return [...prev, { ...base, images: imgs, bounty: incomingB === null ? undefined : incomingB }];
       }
     });
   }, [setTasks, tagValue]);
@@ -809,40 +826,46 @@ export default function App() {
     }
   }
 
+  function applyHiddenForFuture(t: Task) {
+    const due = startOfDay(new Date(t.dueISO));
+    const nowSow = startOfWeek(new Date(), settings.weekStart);
+    const dueSow = startOfWeek(due, settings.weekStart);
+    if (dueSow.getTime() > nowSow.getTime()) t.hiddenUntilISO = dueSow.toISOString();
+    else t.hiddenUntilISO = undefined;
+  }
+
   function addTask() {
     const title = newTitle.trim() || (newImages.length ? "Image" : "");
     if ((!title && !newImages.length) || !currentBoard) return;
 
     const candidate = resolveQuickRule();
     const recurrence = candidate.type === "none" ? undefined : candidate;
+    let dueISO = isoForWeekday(0);
+    if (scheduleDate) {
+      dueISO = new Date(scheduleDate + "T00:00").toISOString();
+    } else if (currentBoard.kind === "week" && dayChoice !== "bounties") {
+      dueISO = isoForWeekday(dayChoice as Weekday);
+    }
 
-      const t: Task = {
+    const t: Task = {
       id: crypto.randomUUID(),
       boardId: currentBoard.id,
       createdBy: nostrPK || undefined,
       title,
-      dueISO: isoForWeekday(0),
+      dueISO,
       completed: false,
       recurrence,
     };
     if (newImages.length) t.images = newImages;
-
     if (currentBoard.kind === "week") {
-      if (dayChoice === "bounties") {
-        t.column = "bounties";
-        t.dueISO = isoForWeekday(0);
-      } else {
-        t.column = "day";
-        t.dueISO = isoForWeekday(dayChoice as Weekday);
-      }
+      t.column = dayChoice === "bounties" ? "bounties" : "day";
     } else {
       // lists board
       const firstCol = currentBoard.columns[0];
       const selectedColId = typeof dayChoice === "string" ? dayChoice : firstCol?.id;
       t.columnId = selectedColId || firstCol?.id;
-      t.dueISO = isoForWeekday(0);
     }
-
+    applyHiddenForFuture(t);
     setTasks(prev => [...prev, t]);
     // Publish to Nostr if board is shared
     try { maybePublishTask(t); } catch {}
@@ -850,6 +873,7 @@ export default function App() {
     setNewImages([]);
     setQuickRule("none");
     setAddCustomRule(R_NONE);
+    setScheduleDate("");
   }
 
   function completeTask(id: string) {
@@ -896,12 +920,18 @@ export default function App() {
   }
 
   function restoreTask(id: string) {
-    setTasks(prev => prev.map(t => t.id===id ? ({...t, completed:false, completedAt:undefined}) : t));
+    const t = tasks.find((x) => x.id === id);
+    if (!t) return;
+    const updated: Task = { ...t, completed: false, completedAt: undefined };
+    setTasks((prev) => prev.map((x) => (x.id === id ? updated : x)));
+    try {
+      maybePublishTask(updated);
+    } catch {}
     setView("board");
   }
   function clearCompleted() {
     try {
-      for (const t of tasksForBoard) if (t.completed) maybePublishTask(t);
+      for (const t of tasksForBoard) if (t.completed) publishTaskDeleted(t);
     } catch {}
     setTasks(prev => prev.filter(t => !t.completed));
   }
@@ -927,7 +957,7 @@ export default function App() {
       if (fromIdx < 0) return prev;
       const task = arr[fromIdx];
 
-        const updated: Task = { ...task };
+      const updated: Task = { ...task };
       if (target.type === "day") {
         updated.column = "day";
         updated.columnId = undefined;
@@ -943,6 +973,12 @@ export default function App() {
       }
       // reveal if user manually places it
       updated.hiddenUntilISO = undefined;
+
+      // un-complete if dragging from Completed back onto the board
+      if (updated.completed) {
+        updated.completed = false;
+        updated.completedAt = undefined;
+      }
 
       // remove original
       arr.splice(fromIdx, 1);
@@ -1071,6 +1107,7 @@ export default function App() {
                 onChange={(e) => {
                   const v = e.target.value;
                   setDayChoice(v === "bounties" ? "bounties" : (Number(v) as Weekday));
+                  setScheduleDate("");
                 }}
                 className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               >
@@ -1144,7 +1181,6 @@ export default function App() {
                           task={t}
                           onComplete={() => completeTask(t.id)}
                           onEdit={() => setEditing(t)}
-                          onDelete={() => deleteTask(t.id)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "day", day }, t.id)}
                         />
                       ))}
@@ -1162,7 +1198,6 @@ export default function App() {
                           task={t}
                           onComplete={() => completeTask(t.id)}
                           onEdit={() => setEditing(t)}
-                          onDelete={() => deleteTask(t.id)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
                         />
                     ))}
@@ -1190,7 +1225,6 @@ export default function App() {
                           task={t}
                           onComplete={() => completeTask(t.id)}
                           onEdit={() => setEditing(t)}
-                          onDelete={() => deleteTask(t.id)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
                         />
                     ))}
@@ -1226,7 +1260,7 @@ export default function App() {
                         </div>
                         <div className="text-xs text-neutral-400">
                           {currentBoard?.kind === "week"
-                            ? `Due ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
+                            ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
                             : "Completed item"}
                           {t.completedAt ? ` • Completed ${new Date(t.completedAt).toLocaleString()}` : ""}
                         </div>
@@ -1241,7 +1275,7 @@ export default function App() {
                       </div>
                       <div className="flex gap-1">
                         <IconButton label="Restore" onClick={() => restoreTask(t.id)} intent="success">↩︎</IconButton>
-                        <IconButton label="Delete" onClick={() => deleteTask(t.id)} intent="danger">🗑</IconButton>
+                        <IconButton label="Delete" onClick={() => deleteTask(t.id)} intent="danger">✕</IconButton>
                       </div>
                     </div>
                   </li>
@@ -1275,7 +1309,7 @@ export default function App() {
                       <div className="text-sm font-medium">{renderTitleWithLink(t.title, t.note)}</div>
                       <div className="text-xs text-neutral-400">
                         {currentBoard?.kind === "week"
-                          ? `Due ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
+                          ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
                           : "Hidden item"}
                         {t.hiddenUntilISO ? ` • Reveals ${new Date(t.hiddenUntilISO).toLocaleDateString()}` : ""}
                       </div>
@@ -1330,6 +1364,7 @@ export default function App() {
           onCancel={() => setEditing(null)}
           onDelete={() => { deleteTask(editing.id); setEditing(null); }}
           onSave={saveEdit}
+          weekStart={settings.weekStart}
         />
       )}
 
@@ -1337,8 +1372,16 @@ export default function App() {
       {showAddAdvanced && (
         <RecurrenceModal
           initial={addCustomRule}
+          initialSchedule={scheduleDate}
           onClose={() => setShowAddAdvanced(false)}
-          onApply={(r) => { setAddCustomRule(r); setShowAddAdvanced(false); }}
+          onApply={(r, sched) => {
+            setAddCustomRule(r);
+            setScheduleDate(sched || "");
+            if (sched && currentBoard?.kind === "week" && dayChoice !== "bounties") {
+              setDayChoice(new Date(sched).getDay() as Weekday);
+            }
+            setShowAddAdvanced(false);
+          }}
         />
       )}
 
@@ -1553,15 +1596,13 @@ function Card({
   task,
   onComplete,
   onEdit,
-    onDelete,
-    onDropBefore,
-  }: {
-    task: Task;
-    onComplete: () => void;
-    onEdit: () => void;
-    onDelete: () => void;
-    onDropBefore: (dragId: string) => void;
-  }) {
+  onDropBefore,
+}: {
+  task: Task;
+  onComplete: () => void;
+  onEdit: () => void;
+  onDropBefore: (dragId: string) => void;
+}) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
 
@@ -1619,11 +1660,6 @@ function Card({
           </div>
         </div>
 
-        {/* Circular edit/delete buttons */}
-        <div className="flex gap-1">
-          <IconButton label="Edit" onClick={onEdit}>✎</IconButton>
-          <IconButton label="Delete" onClick={onDelete} intent="danger">🗑</IconButton>
-        </div>
       </div>
 
       <TaskMedia task={task} />
@@ -1662,14 +1698,15 @@ function labelOf(r: Recurrence): string {
 }
 
 /* Edit modal with Advanced recurrence */
-function EditModal({ task, onCancel, onDelete, onSave }: {
-  task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void;
+function EditModal({ task, onCancel, onDelete, onSave, weekStart }: { 
+  task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void; weekStart: Weekday;
 }) {
   const [title, setTitle] = useState(task.title);
   const [note, setNote] = useState(task.note || "");
   const [images, setImages] = useState<string[]>(task.images || []);
   const [rule, setRule] = useState<Recurrence>(task.recurrence ?? R_NONE);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [scheduledDate, setScheduledDate] = useState(task.dueISO.slice(0,10));
   const [bountyToken, setBountyToken] = useState(task.bounty?.token || "");
   const [bountyAmount, setBountyAmount] = useState<number | "">(task.bounty?.amount ?? "");
   const [, setBountyState] = useState<Task["bounty"]["state"]>(task.bounty?.state || "locked");
@@ -1690,8 +1727,38 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
     }
   }
 
+  function save(overrides: Partial<Task> = {}) {
+    const dueISO = new Date(scheduledDate + "T00:00").toISOString();
+    const due = startOfDay(new Date(dueISO));
+    const nowSow = startOfWeek(new Date(), weekStart);
+    const dueSow = startOfWeek(due, weekStart);
+    const hiddenUntilISO = dueSow.getTime() > nowSow.getTime() ? dueSow.toISOString() : undefined;
+    const base: Task = {
+      ...task,
+      title,
+      note: note || undefined,
+      images: images.length ? images : undefined,
+      recurrence: rule.type === "none" ? undefined : rule,
+      dueISO,
+      hiddenUntilISO,
+      ...overrides,
+    };
+    onSave(base);
+  }
+
   return (
-    <Modal onClose={onCancel} title="Edit task">
+    <Modal
+      onClose={onCancel}
+      title="Edit task"
+      actions={
+        <button
+          className="pressable px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500"
+          onClick={() => save()}
+        >
+          Save
+        </button>
+      }
+    >
       <div className="space-y-4">
         <input value={title} onChange={e=>setTitle(e.target.value)}
                className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Title"/>
@@ -1708,6 +1775,18 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
             ))}
           </div>
         )}
+
+        <div>
+          <label htmlFor="edit-schedule" className="block mb-1 text-sm font-medium">Scheduled for</label>
+          <input
+            id="edit-schedule"
+            type="date"
+            value={scheduledDate}
+            onChange={e=>setScheduledDate(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+            title="Scheduled date"
+          />
+        </div>
 
         {/* Recurrence section */}
         <div className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
@@ -1778,7 +1857,7 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                               return;
                             }
                           }
-                            onSave({ ...task, title, note: note || undefined, images: images.length ? images : undefined, recurrence: rule.type==="none"? undefined : rule, bounty: b });
+                          save({ bounty: b });
                         }}
                 >Attach</button>
               </div>
@@ -1810,7 +1889,7 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                           onClick={async () => {
                             try {
                                 const pt = await decryptEcashTokenForFunder(task.bounty!.enc!);
-                                onSave({ ...task, title, note: note || undefined, images: images.length ? images : undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, token: pt, enc: undefined, state: 'unlocked', updatedAt: new Date().toISOString() } });
+                                save({ bounty: { ...task.bounty!, token: pt, enc: undefined, state: 'unlocked', updatedAt: new Date().toISOString() } });
                             } catch (e) { alert("Decrypt failed: " + (e as Error).message); }
                           }}>Reveal (decrypt)</button>
                 )}
@@ -1820,7 +1899,7 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                   onClick={() => {
                     if (!task.bounty.token) return;
                     setBountyState('claimed');
-                      onSave({ ...task, title, note: note || undefined, images: images.length ? images : undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, state: 'claimed', updatedAt: new Date().toISOString() } });
+                    save({ bounty: { ...task.bounty!, state: 'claimed', updatedAt: new Date().toISOString() } });
                   }}
                 >
                   Mark claimed
@@ -1832,14 +1911,14 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                               // Placeholder unlock: trust user has reissued unlocked token externally
                               const newTok = prompt('Paste unlocked token (after you reissued in your wallet):');
                               if (!newTok) return;
-                                onSave({ ...task, title, note: note || undefined, images: images.length ? images : undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, token: newTok, state: 'unlocked', updatedAt: new Date().toISOString() } });
+                              save({ bounty: { ...task.bounty!, token: newTok, state: 'unlocked', updatedAt: new Date().toISOString() } });
                             }}>Unlock…</button>
                     <button
                       className={`px-3 py-2 rounded-xl ${((window as any).nostrPK && (task.bounty!.sender === (window as any).nostrPK || task.createdBy === (window as any).nostrPK)) ? 'bg-rose-600/80 hover:bg-rose-600' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}`}
                       disabled={!((window as any).nostrPK && (task.bounty!.sender === (window as any).nostrPK || task.createdBy === (window as any).nostrPK))}
                       onClick={() => {
                         if (!((window as any).nostrPK && (task.bounty!.sender === (window as any).nostrPK || task.createdBy === (window as any).nostrPK))) return;
-                          onSave({ ...task, title, note: note || undefined, images: images.length ? images : undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, state: 'revoked', updatedAt: new Date().toISOString() } });
+                        save({ bounty: { ...task.bounty!, state: 'revoked', updatedAt: new Date().toISOString() } });
                       }}
                     >
                       Revoke
@@ -1851,7 +1930,7 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                   disabled={task.bounty.state !== 'claimed'}
                   onClick={() => {
                     if (task.bounty.state !== 'claimed') return;
-                      onSave({ ...task, title, note: note || undefined, images: images.length ? images : undefined, recurrence: rule.type==="none"? undefined : rule, bounty: undefined });
+                    save({ bounty: undefined });
                   }}
                 >
                   Remove bounty
@@ -1863,13 +1942,7 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
 
         <div className="pt-2 flex justify-between">
           <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
-          <div className="space-x-2">
-            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
-              <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
-                      onClick={()=>onSave({...task, title, note: note || undefined, images: images.length ? images : undefined, recurrence: rule.type==="none"? undefined : rule})}>
-                Save
-              </button>
-          </div>
+          <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
         </div>
       </div>
 
@@ -1886,17 +1959,60 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
 
 /* Advanced recurrence modal & picker */
 function RecurrenceModal({
-  initial, onClose, onApply,
-}: { initial: Recurrence; onClose: () => void; onApply: (r: Recurrence) => void; }) {
+  initial,
+  onClose,
+  onApply,
+  initialSchedule,
+}: {
+  initial: Recurrence;
+  onClose: () => void;
+  onApply: (r: Recurrence, scheduleISO?: string) => void;
+  initialSchedule?: string;
+}) {
   const [value, setValue] = useState<Recurrence>(initial);
+  const [schedule, setSchedule] = useState(initialSchedule ?? "");
 
   return (
-    <Modal onClose={onClose} title="Advanced recurrence">
+    <Modal
+      onClose={onClose}
+      title="Advanced recurrence"
+      showClose={false}
+      actions={
+        <>
+          <button
+            className="pressable px-3 py-1 rounded bg-neutral-800"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          <button
+            className="pressable px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500"
+            onClick={() =>
+              onApply(
+                value,
+                initialSchedule !== undefined ? schedule : undefined
+              )
+            }
+          >
+            Apply
+          </button>
+        </>
+      }
+    >
+      {initialSchedule !== undefined && (
+        <div className="mb-4">
+          <label htmlFor="advanced-schedule" className="block mb-1 text-sm font-medium">Scheduled for</label>
+          <input
+            id="advanced-schedule"
+            type="date"
+            value={schedule}
+            onChange={(e) => setSchedule(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+            title="Scheduled date"
+          />
+        </div>
+      )}
       <RecurrencePicker value={value} onChange={setValue} />
-      <div className="mt-4 flex justify-end gap-2">
-        <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onClose}>Cancel</button>
-        <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={() => onApply(value)}>Apply</button>
-      </div>
     </Modal>
   );
 }
@@ -1906,6 +2022,7 @@ function RecurrencePicker({ value, onChange }: { value: Recurrence; onChange: (r
   const [everyN, setEveryN] = useState(2);
   const [unit, setUnit] = useState<"day"|"week">("day");
   const [monthDay, setMonthDay] = useState(15);
+  const [end, setEnd] = useState(value.untilISO ? value.untilISO.slice(0,10) : "");
 
   useEffect(()=>{
     switch (value.type) {
@@ -1914,10 +2031,12 @@ function RecurrencePicker({ value, onChange }: { value: Recurrence; onChange: (r
       case "monthlyDay": setMonthDay(value.day); break;
       default: setWeekly(new Set());
     }
+    setEnd(value.untilISO ? value.untilISO.slice(0,10) : "");
   }, [value]);
 
-  function setNone() { onChange({ type: "none" }); }
-  function setDaily() { onChange({ type: "daily" }); }
+  const withEnd = (r: Recurrence): Recurrence => ({ ...r, untilISO: end ? new Date(end).toISOString() : undefined });
+  function setNone() { onChange(withEnd({ type: "none" })); }
+  function setDaily() { onChange(withEnd({ type: "daily" })); }
     function toggleDay(d: Weekday) {
       const next = new Set(weekly);
       if (next.has(d)) {
@@ -1927,10 +2046,10 @@ function RecurrencePicker({ value, onChange }: { value: Recurrence; onChange: (r
       }
       setWeekly(next);
       const sorted = Array.from(next).sort((a,b)=>a-b);
-      onChange(sorted.length ? { type: "weekly", days: sorted } : { type: "none" });
+      onChange(withEnd(sorted.length ? { type: "weekly", days: sorted } : { type: "none" }));
     }
-  function applyEvery() { onChange({ type:"every", n: Math.max(1, everyN || 1), unit }); }
-  function applyMonthly() { onChange({ type:"monthlyDay", day: Math.min(28, Math.max(1, monthDay)) }); }
+  function applyEvery() { onChange(withEnd({ type:"every", n: Math.max(1, everyN || 1), unit })); }
+  function applyMonthly() { onChange(withEnd({ type:"monthlyDay", day: Math.min(28, Math.max(1, monthDay)) })); }
 
   return (
     <div className="space-y-5">
@@ -1984,18 +2103,35 @@ function RecurrencePicker({ value, onChange }: { value: Recurrence; onChange: (r
           <button className="ml-2 px-3 py-2 rounded-xl bg-neutral-800" onClick={applyMonthly}>Apply</button>
         </div>
       </section>
+
+      <section>
+        <div className="text-sm font-medium mb-2">End date</div>
+        <input
+          type="date"
+          value={end}
+          onChange={e=>{ const v = e.target.value; setEnd(v); onChange({ ...value, untilISO: v ? new Date(v).toISOString() : undefined }); }}
+          className="px-2 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+        />
+      </section>
     </div>
   );
 }
 
 /* Generic modal */
-function Modal({ children, onClose, title }: React.PropsWithChildren<{ onClose: ()=>void; title?: string }>) {
+function Modal({ children, onClose, title, actions, showClose = true }: React.PropsWithChildren<{ onClose: ()=>void; title?: React.ReactNode; actions?: React.ReactNode; showClose?: boolean }>) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-[min(720px,92vw)] max-h-[80vh] overflow-auto bg-neutral-900 border border-neutral-700 rounded-2xl p-4">
+      <div className="w-[min(720px,92vw)] max-h-[80vh] overflow-y-auto overflow-x-hidden bg-neutral-900 border border-neutral-700 rounded-2xl p-4">
         <div className="flex items-center gap-2 mb-3">
           <div className="text-lg font-semibold">{title}</div>
-          <button className="pressable ml-auto px-3 py-1 rounded bg-neutral-800" onClick={onClose}>Close</button>
+          <div className="ml-auto flex items-center gap-2">
+            {actions}
+            {showClose && (
+              <button className="pressable px-3 py-1 rounded bg-neutral-800" onClick={onClose}>
+                Close
+              </button>
+            )}
+          </div>
         </div>
         {children}
       </div>

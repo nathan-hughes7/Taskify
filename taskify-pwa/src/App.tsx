@@ -290,11 +290,32 @@ export async function decryptEcashTokenForFunder(enc: {alg:"aes-gcm-256";iv:stri
 }
 
 async function fileToDataURL(file: File): Promise<string> {
-  return await new Promise((resolve, reject) => {
+  const dataUrl: string = await new Promise((resolve, reject) => {
     const fr = new FileReader();
     fr.onerror = () => reject(fr.error);
     fr.onload = () => resolve(fr.result as string);
     fr.readAsDataURL(file);
+  });
+
+  return await new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxDim = 1280;
+      let { width, height } = img;
+      if (width > maxDim || height > maxDim) {
+        const scale = Math.min(maxDim / width, maxDim / height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.8));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
   });
 }
 
@@ -424,7 +445,13 @@ function useTasks() {
   const [tasks, setTasks] = useState<Task[]>(() => {
     try { return JSON.parse(localStorage.getItem(LS_TASKS) || "[]"); } catch { return []; }
   });
-  useEffect(() => { localStorage.setItem(LS_TASKS, JSON.stringify(tasks)); }, [tasks]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_TASKS, JSON.stringify(tasks));
+    } catch (err) {
+      console.error('Failed to save tasks', err);
+    }
+  }, [tasks]);
   return [tasks, setTasks] as const;
 }
 
@@ -1411,7 +1438,16 @@ function UrlPreview({ text }: { text: string }) {
           doc.querySelector('meta[property="og:description"]')?.getAttribute("content") ||
           doc.querySelector('meta[name="description"]')?.getAttribute("content") ||
           undefined;
-        const image = doc.querySelector('meta[property="og:image"]')?.getAttribute("content") || undefined;
+        let image =
+          doc.querySelector('meta[property="og:image"]')?.getAttribute("content") ||
+          doc.querySelector('meta[property="og:image:url"]')?.getAttribute("content") ||
+          undefined;
+        if (image) {
+          try { image = new URL(image, url).href; } catch {}
+        } else {
+          const yt = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+          if (yt) image = `https://img.youtube.com/vi/${yt[1]}/hqdefault.jpg`;
+        }
         const p: PreviewData = { url, title, description, image };
         previewCache[url] = p;
         if (!cancelled) setData(p);
@@ -2014,6 +2050,7 @@ function SettingsModal({
   const [joinRelays, setJoinRelays] = useState("");
   const [joinName, setJoinName] = useState("");
   const [customSk, setCustomSk] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   function addBoard() {
     const name = newBoardName.trim();
@@ -2162,38 +2199,46 @@ function SettingsModal({
           <div className="flex items-center gap-2 mb-3">
             <div className="text-sm font-medium">Nostr (Shared boards)</div>
             <div className="ml-auto" />
+            <button
+              className="px-3 py-1 rounded-lg bg-neutral-800 text-xs"
+              onClick={()=>setShowAdvanced(a=>!a)}
+            >{showAdvanced ? "Hide advanced" : "Advanced"}</button>
           </div>
-          {/* Public key */}
-          <div className="mb-3">
-            <div className="text-xs text-neutral-400 mb-1">Your Nostr public key (hex)</div>
-            <div className="flex gap-2 items-center">
-              <input readOnly value={pubkeyHex || "(generating…)"}
-                     className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-              <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{if(pubkeyHex) navigator.clipboard?.writeText(pubkeyHex);}}>Copy</button>
-            </div>
-          </div>
+          {showAdvanced && (
+            <>
+              {/* Public key */}
+              <div className="mb-3">
+                <div className="text-xs text-neutral-400 mb-1">Your Nostr public key (hex)</div>
+                <div className="flex gap-2 items-center">
+                  <input readOnly value={pubkeyHex || "(generating…)"}
+                         className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{if(pubkeyHex) navigator.clipboard?.writeText(pubkeyHex);}}>Copy</button>
+                </div>
+              </div>
 
-          {/* Private key options */}
-          <div className="mb-3 space-y-2">
-            <div className="text-xs text-neutral-400 mb-1">Custom Nostr private key (hex or nsec)</div>
-            <div className="flex gap-2 items-center">
-              <input value={customSk} onChange={e=>setCustomSk(e.target.value)}
-                     className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="nsec or hex"/>
-              <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{onSetKey(customSk); setCustomSk('');}}>Use</button>
-            </div>
-            <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onGenerateKey}>Generate new key</button>
-          </div>
+              {/* Private key options */}
+              <div className="mb-3 space-y-2">
+                <div className="text-xs text-neutral-400 mb-1">Custom Nostr private key (hex or nsec)</div>
+                <div className="flex gap-2 items-center">
+                  <input value={customSk} onChange={e=>setCustomSk(e.target.value)}
+                         className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="nsec or hex"/>
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{onSetKey(customSk); setCustomSk('');}}>Use</button>
+                </div>
+                <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onGenerateKey}>Generate new key</button>
+              </div>
 
-          {/* Default relays */}
-          <div className="mb-3">
-            <div className="text-xs text-neutral-400 mb-1">Default relays (CSV)</div>
-            <input
-              value={defaultRelays.join(",")}
-              onChange={(e)=>setDefaultRelays(e.target.value.split(",").map(s=>s.trim()).filter(Boolean))}
-              className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              placeholder="wss://relay1, wss://relay2"
-            />
-          </div>
+              {/* Default relays */}
+              <div className="mb-3">
+                <div className="text-xs text-neutral-400 mb-1">Default relays (CSV)</div>
+                <input
+                  value={defaultRelays.join(",")}
+                  onChange={(e)=>setDefaultRelays(e.target.value.split(",").map(s=>s.trim()).filter(Boolean))}
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                  placeholder="wss://relay1, wss://relay2"
+                />
+              </div>
+            </>
+          )}
 
           {/* Share current board */}
           <div className="mb-3">

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19 } from "nostr-tools";
 
 /* ================= Types ================= */
@@ -524,6 +524,7 @@ export default function App() {
   const nostrIdxRef = useRef<NostrIndex>({ boardMeta: new Map(), taskClock: new Map() });
   const boardsRef = useRef<Board[]>(boards);
   useEffect(() => { boardsRef.current = boards; }, [boards]);
+  const [nostrRefresh, setNostrRefresh] = useState(0);
 
   // header view
   const [view, setView] = useState<"board" | "completed">("board");
@@ -594,7 +595,7 @@ export default function App() {
       m.get(wd)!.push(t); // preserve insertion order for manual reordering
     }
     return m;
-  }, [tasksForBoard, currentBoard.kind]);
+  }, [tasksForBoard, currentBoard]);
 
   const bounties = useMemo(
     () => currentBoard?.kind === "week"
@@ -646,14 +647,14 @@ export default function App() {
   }
 
   // --------- Nostr helpers
-  function tagValue(ev: NostrEvent, name: string): string | undefined {
+  const tagValue = useCallback((ev: NostrEvent, name: string): string | undefined => {
     const t = ev.tags.find((x) => x[0] === name);
     return t ? t[1] : undefined;
-  }
-  function isShared(board: Board) { return !!board.nostr?.boardId; }
-  function getBoardRelays(board: Board): string[] {
+  }, []);
+  const isShared = (board: Board) => !!board.nostr?.boardId;
+  const getBoardRelays = useCallback((board: Board): string[] => {
     return (board.nostr?.relays?.length ? board.nostr!.relays : defaultRelays).filter(Boolean);
-  }
+  }, [defaultRelays]);
   function publishBoardMetadata(board: Board) {
     if (!board.nostr?.boardId) return;
     const relays = getBoardRelays(board);
@@ -687,7 +688,7 @@ export default function App() {
     const content = JSON.stringify(body);
     nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
   }
-  function applyBoardEvent(ev: NostrEvent) {
+  const applyBoardEvent = useCallback((ev: NostrEvent) => {
     const d = tagValue(ev, "d");
     if (!d) return;
     const boardId = d;
@@ -708,8 +709,8 @@ export default function App() {
       }
       return b;
     }));
-  }
-  function applyTaskEvent(ev: NostrEvent) {
+  }, [setBoards, tagValue]);
+  const applyTaskEvent = useCallback((ev: NostrEvent) => {
     const boardId = tagValue(ev, "b");
     const taskId = tagValue(ev, "d");
     if (!boardId || !taskId) return;
@@ -791,7 +792,7 @@ export default function App() {
         return [...prev, { ...base, bounty: incomingB === null ? undefined : incomingB }];
       }
     });
-  }
+  }, [setTasks, tagValue]);
 
   async function handleAddPaste(e: React.ClipboardEvent<HTMLInputElement>) {
     const items = e.clipboardData?.items;
@@ -961,7 +962,7 @@ export default function App() {
       .map(b => ({ id: b.nostr!.boardId, relays: getBoardRelays(b).join(",") }))
       .sort((a,b) => (a.id + a.relays).localeCompare(b.id + b.relays));
     return JSON.stringify(items);
-  }, [boards, defaultRelays]);
+  }, [boards, getBoardRelays]);
 
   useEffect(() => {
     let parsed: Array<{id:string; relays:string}> = [];
@@ -982,7 +983,7 @@ export default function App() {
       unsubs.push(unsub);
     }
     return () => { unsubs.forEach(u => u()); };
-  }, [nostrBoardsKey, pool]);
+  }, [nostrBoardsKey, pool, applyBoardEvent, applyTaskEvent, nostrRefresh]);
 
   // reset dayChoice when board changes
   useEffect(() => {
@@ -1014,12 +1015,21 @@ export default function App() {
               className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               title="Boards"
             >
-              {boards.length === 0 ? (
+            {boards.length === 0 ? (
                 <option value="">No boards</option>
               ) : (
                 boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
               )}
             </select>
+            {currentBoard?.nostr?.boardId && (
+              <button
+                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                onClick={() => setNostrRefresh(n => n + 1)}
+                title="Refresh shared board"
+              >
+                🔄
+              </button>
+            )}
 
             {/* Settings + View */}
             <button
@@ -1481,10 +1491,11 @@ function UrlPreview({ text }: { text: string }) {
 }
 
 function TaskMedia({ task }: { task: Task }) {
+  const noteText = task.note?.replace(/https?:\/\/[^\s)]+/gi, "").trim();
   return (
     <>
-      {!!task.note && (
-        <div className="text-xs text-neutral-400 mt-1 break-words">{autolink(task.note)}</div>
+      {noteText && (
+        <div className="text-xs text-neutral-400 mt-1 break-words">{autolink(noteText)}</div>
       )}
       {task.images?.length ? (
         <div className="mt-2 space-y-2">
@@ -1594,9 +1605,9 @@ function Card({
           onClick={onComplete}
           aria-label="Complete task"
           title="Mark complete"
-          className="flex items-center justify-center w-8 h-8 rounded-full border border-neutral-600 text-neutral-300 hover:text-emerald-500 hover:border-emerald-500 transition"
+          className="flex items-center justify-center w-9 h-9 rounded-full border border-neutral-600 text-neutral-300 hover:text-emerald-500 hover:border-emerald-500 transition"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none">
+          <svg width="22" height="22" viewBox="0 0 24 24" className="pointer-events-none">
             <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
           </svg>
         </button>
@@ -1609,7 +1620,7 @@ function Card({
         </div>
 
         {/* Circular edit/delete buttons */}
-        <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+        <div className="flex gap-1">
           <IconButton label="Edit" onClick={onEdit}>✎</IconButton>
           <IconButton label="Delete" onClick={onDelete} intent="danger">🗑</IconButton>
         </div>
@@ -1632,8 +1643,8 @@ function Card({
 function IconButton({
   children, onClick, label, intent
 }: React.PropsWithChildren<{ onClick: ()=>void; label: string; intent?: "danger"|"success" }>) {
-  const base = "w-8 h-8 rounded-full inline-flex items-center justify-center text-xs border border-transparent bg-neutral-700/40 hover:bg-neutral-700/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500";
-  const danger = " bg-rose-700/30 hover:bg-rose-700/50";
+  const base = "w-9 h-9 rounded-full inline-flex items-center justify-center text-sm border border-transparent bg-neutral-700/40 hover:bg-neutral-700/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500";
+  const danger = " border-rose-700";
   const success = " bg-emerald-700/30 hover:bg-emerald-700/50";
   const cls = base + (intent==="danger" ? danger : intent==="success" ? success : "");
   return <button aria-label={label} title={label} className={cls} onClick={onClick}>{children}</button>;

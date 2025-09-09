@@ -16,6 +16,7 @@ type Recurrence =
 type Task = {
   id: string;
   boardId: string;
+  createdBy?: string;             // nostr pubkey of task creator
   title: string;
   note?: string;
   dueISO: string;                 // for week board day grouping
@@ -27,6 +28,17 @@ type Task = {
   // Custom boards (multi-list):
   columnId?: string;
   hiddenUntilISO?: string;        // controls visibility (appear at/after this date)
+  bounty?: {
+    id: string;                   // bounty id (uuid)
+    token: string;                // cashu token string (locked or unlocked)
+    amount?: number;              // optional, sats
+    mint?: string;                // optional hint
+    lock?: "p2pk" | "htlc" | "none" | "unknown";
+    owner?: string;               // hex pubkey of task creator (who can unlock)
+    sender?: string;              // hex pubkey of funder (who can revoke)
+    state: "locked" | "unlocked" | "revoked" | "claimed";
+    updatedAt: string;            // iso
+  };
 };
 
 type ListColumn = { id: string; name: string };
@@ -385,6 +397,7 @@ export default function App() {
   const [nostrPK, setNostrPK] = useState<string>(() => {
     try { return getPublicKey(nostrSK); } catch { return ""; }
   });
+  useEffect(() => { (window as any).nostrPK = nostrPK; }, [nostrPK]);
   // allow manual key rotation later if needed
   const rotateNostrKey = () => {
     const sk = generateSecretKey();
@@ -559,7 +572,7 @@ export default function App() {
     const status = t.completed ? "done" : "open";
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
     const tags: string[][] = [["d", t.id],["b", boardId],["col", String(colTag)],["status", status]];
-    const content = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO });
+    const content = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, bounty: t.bounty });
     nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
   }
   function applyBoardEvent(ev: NostrEvent) {
@@ -603,6 +616,7 @@ export default function App() {
     const base: Task = {
       id: taskId,
       boardId: lb.id,
+      createdBy: payload.createdBy,
       title: payload.title || "Untitled",
       note: payload.note || "",
       dueISO: payload.dueISO || isoForWeekday(0),
@@ -610,6 +624,7 @@ export default function App() {
       completedAt: payload.completedAt,
       recurrence: payload.recurrence,
       hiddenUntilISO: payload.hiddenUntilISO,
+      bounty: payload.bounty,
     };
     if (lb.kind === "week") base.column = col === "bounties" ? "bounties" : "day";
     else if (lb.kind === "lists") base.columnId = col || (lb.columns[0]?.id || "");
@@ -620,7 +635,27 @@ export default function App() {
       }
       if (idx >= 0) {
         const copy = prev.slice();
-        copy[idx] = { ...prev[idx], ...base };
+        const current = prev[idx];
+        // Merge bounty state with authorization checks when present
+        const mergeBounty = (oldB?: Task["bounty"], incoming?: Task["bounty"]) => {
+          if (!incoming) return oldB;
+          if (!oldB) return incoming;
+          const next = { ...oldB };
+          if (incoming.id && incoming.id === oldB.id) {
+            if (incoming.token) next.token = incoming.token;
+            if (typeof incoming.amount === 'number') next.amount = incoming.amount;
+            next.mint = incoming.mint ?? next.mint;
+            next.lock = incoming.lock ?? next.lock;
+            next.updatedAt = incoming.updatedAt || next.updatedAt;
+          }
+          if (incoming.state && incoming.state !== oldB.state) {
+            if (incoming.state === 'unlocked' && oldB.owner && ev.pubkey === oldB.owner) next.state = 'unlocked';
+            if (incoming.state === 'revoked' && oldB.sender && ev.pubkey === oldB.sender) next.state = 'revoked';
+            if (incoming.state === 'claimed') next.state = 'claimed';
+          }
+          return next;
+        };
+        copy[idx] = { ...current, ...base, bounty: mergeBounty(current.bounty, base.bounty) };
         return copy;
       } else return [...prev, base];
     });
@@ -636,6 +671,7 @@ export default function App() {
     let t: Task = {
       id: crypto.randomUUID(),
       boardId: currentBoard.id,
+      createdBy: nostrPK || undefined,
       title,
       dueISO: isoForWeekday(0),
       completed: false,
@@ -1019,6 +1055,13 @@ export default function App() {
                           {t.completedAt ? ` • Completed ${new Date(t.completedAt).toLocaleString()}` : ""}
                         </div>
                         {!!t.note && <div className="text-xs text-neutral-400 mt-1 break-words">{autolink(t.note)}</div>}
+                        {t.bounty && (
+                          <div className="mt-2">
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full border ${t.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : t.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : t.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
+                              Bounty {typeof t.bounty.amount==='number' ? `• ${t.bounty.amount} sats` : ''} • {t.bounty.state}
+                            </span>
+                          </div>
+                        )}
                       </div>
                       <div className="flex gap-1">
                         <IconButton label="Restore" onClick={() => restoreTask(t.id)} intent="success">↩︎</IconButton>
@@ -1329,6 +1372,14 @@ function Card({
     </span>
   </div>
 )}
+          {/* Bounty badge */}
+          {task.bounty && (
+            <div className="mt-2">
+              <span className={`text-[11px] px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
+                Bounty {typeof task.bounty.amount==='number' ? `• ${task.bounty.amount} sats` : ''} • {task.bounty.state}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Circular edit/delete buttons */}
@@ -1371,6 +1422,9 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
   const [note, setNote] = useState(task.note || "");
   const [rule, setRule] = useState<Recurrence>(task.recurrence ?? R_NONE);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [bountyToken, setBountyToken] = useState(task.bounty?.token || "");
+  const [bountyAmount, setBountyAmount] = useState<number | "">(task.bounty?.amount ?? "");
+  const [bountyState, setBountyState] = useState<Task["bounty"]["state"]>(task.bounty?.state || "locked");
 
   return (
     <Modal onClose={onCancel} title="Edit task">
@@ -1394,6 +1448,81 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
             <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "weekly", days: [0,6] })}>Weekends</button>
             <button className="ml-auto px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setShowAdvanced(true)} title="Advanced recurrence…">Advanced…</button>
           </div>
+        </div>
+
+        {/* Bounty (ecash) */}
+        <div className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-medium">Bounty (ecash)</div>
+            {task.bounty && (
+              <div className="ml-auto text-xs text-neutral-400">{task.bounty.state.toUpperCase()}</div>
+            )}
+          </div>
+          {!task.bounty ? (
+            <div className="mt-2 space-y-2">
+              <textarea
+                value={bountyToken}
+                onChange={(e)=>setBountyToken(e.target.value)}
+                placeholder="Paste Cashu token (can be locked to your pubkey)"
+                rows={3}
+                className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              />
+              <div className="flex items-center gap-2">
+                <input type="number" min={1} value={bountyAmount as number || ""}
+                       onChange={(e)=>setBountyAmount(e.target.value ? parseInt(e.target.value,10) : "")}
+                       placeholder="Amount (sats)"
+                       className="w-40 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                <button className="px-3 py-2 rounded-xl bg-neutral-800"
+                        onClick={() => {
+                          const tok = bountyToken.trim();
+                          if (!tok) return;
+                          const b: Task["bounty"] = {
+                            id: crypto.randomUUID(),
+                            token: tok,
+                            amount: typeof bountyAmount === 'number' ? bountyAmount : undefined,
+                            state: "locked",
+                            owner: task.createdBy || (window as any).nostrPK || "",
+                            sender: (window as any).nostrPK || "",
+                            updatedAt: new Date().toISOString(),
+                            lock: tok.includes("pubkey") ? "p2pk" : tok.includes("hash") ? "htlc" : "unknown",
+                          };
+                          onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: b });
+                        }}
+                >Attach</button>
+              </div>
+              <div className="text-xs text-neutral-400">Tip: Ask the funder to lock the token to your Nostr pubkey so only you can unlock it later.</div>
+            </div>
+          ) : (
+            <div className="mt-2 space-y-2">
+              <div className="text-xs text-neutral-400">Amount</div>
+              <input type="number" min={1} value={(bountyAmount as number) || task.bounty?.amount || ""}
+                     onChange={(e)=>setBountyAmount(e.target.value ? parseInt(e.target.value,10) : "")}
+                     className="w-40 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+              <div className="text-xs text-neutral-400">Token</div>
+              <textarea readOnly value={task.bounty.token}
+                        className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" rows={3}/>
+              <div className="flex gap-2 flex-wrap">
+                <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>navigator.clipboard?.writeText(task.bounty!.token)}>Copy token</button>
+                <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{ setBountyState('claimed'); onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, state: 'claimed', updatedAt: new Date().toISOString() } }); }}>Mark claimed</button>
+                {task.bounty.state === 'locked' && (
+                  <>
+                    <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                            onClick={() => {
+                              // Placeholder unlock: trust user has reissued unlocked token externally
+                              const newTok = prompt('Paste unlocked token (after you reissued in your wallet):');
+                              if (!newTok) return;
+                              onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, token: newTok, state: 'unlocked', updatedAt: new Date().toISOString() } });
+                            }}>Unlock…</button>
+                    <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600"
+                            onClick={() => {
+                              onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, state: 'revoked', updatedAt: new Date().toISOString() } });
+                            }}>Revoke</button>
+                  </>
+                )}
+                <button className="ml-auto px-3 py-2 rounded-xl bg-neutral-800" onClick={()=> onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: undefined })}>Remove bounty</button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="pt-2 flex justify-between">

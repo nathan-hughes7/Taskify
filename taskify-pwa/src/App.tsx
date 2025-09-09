@@ -2199,6 +2199,43 @@ function SettingsModal({
   const [customSk, setCustomSk] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  function backupData() {
+    const data = {
+      tasks: JSON.parse(localStorage.getItem(LS_TASKS) || "[]"),
+      boards: JSON.parse(localStorage.getItem(LS_BOARDS) || "[]"),
+      settings: JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}"),
+      defaultRelays: JSON.parse(localStorage.getItem(LS_NOSTR_RELAYS) || "[]"),
+      nostrSk: localStorage.getItem(LS_NOSTR_SK) || "",
+    };
+    const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "taskify-backup.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function restoreFromBackup(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    file.text().then((txt) => {
+      try {
+        const data = JSON.parse(txt);
+        if (data.tasks) localStorage.setItem(LS_TASKS, JSON.stringify(data.tasks));
+        if (data.boards) localStorage.setItem(LS_BOARDS, JSON.stringify(data.boards));
+        if (data.settings) localStorage.setItem(LS_SETTINGS, JSON.stringify(data.settings));
+        if (data.defaultRelays) localStorage.setItem(LS_NOSTR_RELAYS, JSON.stringify(data.defaultRelays));
+        if (data.nostrSk) localStorage.setItem(LS_NOSTR_SK, data.nostrSk);
+        alert("Backup restored. Reloading…");
+        window.location.reload();
+      } catch {
+        alert("Invalid backup file");
+      }
+    });
+    e.target.value = "";
+  }
+
   function addBoard() {
     const name = newBoardName.trim();
     if (!name) return;
@@ -2438,6 +2475,18 @@ function SettingsModal({
               )}
               <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onJoinBoard(joinId, joinName, showAdvanced ? joinRelays : "")}>Join</button>
             </div>
+          </div>
+        </section>
+
+        {/* Backup & Restore */}
+        <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+          <div className="text-sm font-medium mb-3">Backup</div>
+          <div className="space-y-2">
+            <button className="px-3 py-2 rounded-xl bg-neutral-800 w-full" onClick={backupData}>Download backup</button>
+            <label className="px-3 py-2 rounded-xl bg-neutral-800 w-full text-center cursor-pointer">
+              Restore from backup
+              <input type="file" accept="application/json" className="hidden" onChange={restoreFromBackup} />
+            </label>
           </div>
         </section>
 

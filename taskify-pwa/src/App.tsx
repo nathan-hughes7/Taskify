@@ -2191,7 +2191,9 @@ function SettingsModal({
 }) {
   const [newBoardName, setNewBoardName] = useState("");
   const [selectedBoardId, setSelectedBoardId] = useState(currentBoardId);
+  const [manageBoardId, setManageBoardId] = useState<string | null>(null);
   const selectedBoard = boards.find(b => b.id === selectedBoardId);
+  const manageBoard = boards.find(b => b.id === manageBoardId);
   const [relaysCsv, setRelaysCsv] = useState("");
   const [joinId, setJoinId] = useState("");
   const [joinRelays, setJoinRelays] = useState("");
@@ -2273,6 +2275,18 @@ function SettingsModal({
       }
       return next;
     });
+    if (manageBoardId === id) setManageBoardId(null);
+  }
+
+  function moveBoard(index: number, dir: number) {
+    setBoards(prev => {
+      const next = [...prev];
+      const newIndex = index + dir;
+      if (newIndex < 0 || newIndex >= next.length) return prev;
+      const [item] = next.splice(index, 1);
+      next.splice(newIndex, 0, item);
+      return next;
+    });
   }
 
   function addColumn(boardId: string) {
@@ -2307,12 +2321,27 @@ function SettingsModal({
     }));
   }
 
+  function moveColumn(boardId: string, index: number, dir: number) {
+    setBoards(prev => prev.map(b => {
+      if (b.id !== boardId || b.kind !== "lists") return b;
+      const cols = [...b.columns];
+      const newIndex = index + dir;
+      if (newIndex < 0 || newIndex >= cols.length) return b;
+      const [col] = cols.splice(index, 1);
+      cols.splice(newIndex, 0, col);
+      const nb = { ...b, columns: cols } as Board;
+      setTimeout(() => { if (nb.nostr) onBoardChanged(boardId); }, 0);
+      return nb;
+    }));
+  }
+
   const handleClose = () => {
     onClose();
     if (reloadNeeded) window.location.reload();
   };
 
   return (
+    <>
     <Modal onClose={handleClose} title="Settings">
       <div className="space-y-6">
         
@@ -2331,11 +2360,21 @@ function SettingsModal({
         <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
           <div className="flex items-center gap-2 mb-3">
             <div className="text-sm font-medium">Boards & Lists</div>
-            <div className="ml-auto" />
           </div>
-
-          {/* Create board */}
-          <div className="flex gap-2 mb-3">
+          <ul className="space-y-2 mb-3">
+            {boards.map((b, idx) => (
+              <li key={b.id} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
+                <button className="flex-1 text-left" onClick={() => { setManageBoardId(b.id); setSelectedBoardId(b.id); }}>{b.name}</button>
+                <div className="flex gap-1">
+                  <button className="px-2 py-1 rounded bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40" disabled={idx===0} onClick={()=>moveBoard(idx,-1)}>↑</button>
+                  <button className="px-2 py-1 rounded bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40" disabled={idx===boards.length-1} onClick={()=>moveBoard(idx,1)}>↓</button>
+                  <button className="px-2 py-1 rounded bg-neutral-700 hover:bg-neutral-600" onClick={()=>renameBoard(b.id)}>Rename</button>
+                  <button className="pressable px-2 py-1 rounded bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(b.id)}>Delete</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="flex gap-2">
             <input
               value={newBoardName}
               onChange={e=>setNewBoardName(e.target.value)}
@@ -2344,44 +2383,6 @@ function SettingsModal({
             />
             <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={addBoard}>Create</button>
           </div>
-
-          {/* Pick board to manage */}
-          <div className="flex items-center gap-2 mb-2">
-            <div className="text-sm">Manage:</div>
-            <select
-              value={selectedBoardId}
-              onChange={(e)=>setSelectedBoardId(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-            >
-              {boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>renameBoard(selectedBoardId)}>Rename</button>
-            <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>selectedBoardId && deleteBoard(selectedBoardId)}>Delete</button>
-          </div>
-
-          {/* Columns (for lists boards) */}
-          {selectedBoard?.kind === "lists" ? (
-            <div className="mt-3">
-              <div className="text-sm font-medium mb-2">Lists in “{selectedBoard.name}”</div>
-              <ul className="space-y-2">
-                {selectedBoard.columns.map(col => (
-                  <li key={col.id} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
-                    <div className="text-sm">{col.name}</div>
-                    <div className="ml-auto flex gap-2">
-                      <button className="px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600" onClick={()=>renameColumn(selectedBoard.id, col.id)}>Rename</button>
-                      <button className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteColumn(selectedBoard.id, col.id)}>Delete</button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-2">
-                <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>addColumn(selectedBoard.id)}>Add list</button>
-              </div>
-              <div className="text-xs text-neutral-400 mt-2">Tasks can be dragged between lists directly on the board.</div>
-            </div>
-          ) : (
-            <div className="text-xs text-neutral-400 mt-2">The Week board has fixed columns (Sun–Sat, Bounties).</div>
-          )}
         </section>
 
         {/* Nostr shared boards */}
@@ -2501,5 +2502,33 @@ function SettingsModal({
         </div>
       </div>
     </Modal>
+    {manageBoard && (
+      <Modal onClose={() => setManageBoardId(null)} title={`Lists in “${manageBoard.name}”`}>
+        {manageBoard.kind === "lists" ? (
+          <>
+            <ul className="space-y-2">
+              {manageBoard.columns.map((col, idx) => (
+                <li key={col.id} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
+                  <div className="flex-1">{col.name}</div>
+                  <div className="flex gap-1">
+                    <button className="px-2 py-1 rounded bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40" disabled={idx===0} onClick={()=>moveColumn(manageBoard.id, idx, -1)}>↑</button>
+                    <button className="px-2 py-1 rounded bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40" disabled={idx===manageBoard.columns.length-1} onClick={()=>moveColumn(manageBoard.id, idx, 1)}>↓</button>
+                    <button className="px-2 py-1 rounded bg-neutral-700 hover:bg-neutral-600" onClick={()=>renameColumn(manageBoard.id, col.id)}>Rename</button>
+                    <button className="pressable px-2 py-1 rounded bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteColumn(manageBoard.id, col.id)}>Delete</button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-2">
+              <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>addColumn(manageBoard.id)}>Add list</button>
+            </div>
+            <div className="text-xs text-neutral-400 mt-2">Tasks can be dragged between lists directly on the board.</div>
+          </>
+        ) : (
+          <div className="text-xs text-neutral-400">The Week board has fixed columns (Sun–Sat, Bounties).</div>
+        )}
+      </Modal>
+    )}
+    </>
   );
 }

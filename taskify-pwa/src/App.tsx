@@ -2504,9 +2504,22 @@ function SettingsModal({
             </>
           )}
 
-          {/* Share current board */}
+          {/* Share board */}
           <div className="mb-3">
-            <div className="text-sm font-medium">Share current board</div>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="text-sm font-medium">Share board</div>
+              <select
+                value={selectedBoardId}
+                onChange={(e)=>setSelectedBoardId(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 ml-auto"
+              >
+                {boards.length === 0 ? (
+                  <option value="">No boards</option>
+                ) : (
+                  boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
+                )}
+              </select>
+            </div>
             {selectedBoard?.nostr ? (
               <div className="mt-2 space-y-2">
                 <div className="text-xs text-neutral-400">Board ID</div>

@@ -2190,14 +2190,9 @@ function SettingsModal({
   onClose: () => void;
 }) {
   const [newBoardName, setNewBoardName] = useState("");
-  const [selectedBoardId, setSelectedBoardId] = useState(currentBoardId);
   const [manageBoardId, setManageBoardId] = useState<string | null>(null);
-  const selectedBoard = boards.find(b => b.id === selectedBoardId);
   const manageBoard = boards.find(b => b.id === manageBoardId);
   const [relaysCsv, setRelaysCsv] = useState("");
-  const [joinId, setJoinId] = useState("");
-  const [joinRelays, setJoinRelays] = useState("");
-  const [joinName, setJoinName] = useState("");
   const [customSk, setCustomSk] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [reloadNeeded, setReloadNeeded] = useState(false);
@@ -2242,11 +2237,16 @@ function SettingsModal({
   function addBoard() {
     const name = newBoardName.trim();
     if (!name) return;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (uuidRegex.test(name)) {
+      onJoinBoard(name);
+      setNewBoardName("");
+      return;
+    }
     const id = crypto.randomUUID();
     const board: Board = { id, name, kind: "lists", columns: [{ id: crypto.randomUUID(), name: "List 1" }] };
     setBoards(prev => [...prev, board]);
     setNewBoardName("");
-    setSelectedBoardId(id);
     setCurrentBoardId(id);
   }
 
@@ -2265,7 +2265,6 @@ function SettingsModal({
       if (currentBoardId === id) {
         const newId = next[0]?.id || "";
         setCurrentBoardId(newId);
-        setSelectedBoardId(newId);
       }
       return next;
     });
@@ -2442,7 +2441,7 @@ function SettingsModal({
               <BoardListItem
                 key={b.id}
                 board={b}
-                onOpen={() => { setManageBoardId(b.id); setSelectedBoardId(b.id); }}
+                onOpen={() => setManageBoardId(b.id)}
                 onDrop={(dragId, before) => reorderBoards(dragId, b.id, before)}
               />
             ))}
@@ -2451,17 +2450,17 @@ function SettingsModal({
             <input
               value={newBoardName}
               onChange={e=>setNewBoardName(e.target.value)}
-              placeholder="New board (e.g., Groceries)"
+              placeholder="Board name or shared ID"
               className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
             />
-            <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={addBoard}>Create</button>
+            <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={addBoard}>Create/Join</button>
           </div>
         </section>
 
-        {/* Nostr shared boards */}
+        {/* Nostr */}
         <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
           <div className="flex items-center gap-2 mb-3">
-            <div className="text-sm font-medium">Nostr (Shared boards)</div>
+            <div className="text-sm font-medium">Nostr</div>
             <div className="ml-auto" />
             <button
               className="px-3 py-1 rounded-lg bg-neutral-800 text-xs"
@@ -2503,72 +2502,6 @@ function SettingsModal({
               </div>
             </>
           )}
-
-          {/* Share board */}
-          <div className="mb-3">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="text-sm font-medium">Share board</div>
-              <select
-                value={selectedBoardId}
-                onChange={(e)=>setSelectedBoardId(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 ml-auto"
-              >
-                {boards.length === 0 ? (
-                  <option value="">No boards</option>
-                ) : (
-                  boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
-                )}
-              </select>
-            </div>
-            {selectedBoard?.nostr ? (
-              <div className="mt-2 space-y-2">
-                <div className="text-xs text-neutral-400">Board ID</div>
-                <div className="flex gap-2 items-center">
-                  <input readOnly value={selectedBoard.nostr.boardId}
-                         className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{navigator.clipboard?.writeText(selectedBoard.nostr!.boardId);}}>Copy</button>
-                </div>
-                {showAdvanced && (
-                  <>
-                    <div className="text-xs text-neutral-400">Relays (CSV)</div>
-                    <input value={(selectedBoard.nostr.relays || []).join(",")} onChange={(e)=>{
-                      const relays = e.target.value.split(",").map(s=>s.trim()).filter(Boolean);
-                      setBoards(prev => prev.map(b => b.id === selectedBoard.id ? ({...b, nostr: { boardId: selectedBoard.nostr!.boardId, relays } }) : b));
-                    }} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                  </>
-                )}
-                <div className="flex gap-2">
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onBoardChanged(selectedBoard.id)}>Republish metadata</button>
-                  <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>{
-                    setBoards(prev => prev.map(b => b.id === selectedBoard.id ? (b.kind === 'week' ? { id: b.id, name: b.name, kind: 'week' } as Board : { id: b.id, name: b.name, kind: 'lists', columns: b.columns } as Board) : b));
-                  }}>Stop sharing</button>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-2 space-y-2">
-                {showAdvanced && (
-                  <>
-                    <div className="text-xs text-neutral-400">Relays override (optional, CSV)</div>
-                    <input value={relaysCsv} onChange={(e)=>setRelaysCsv(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="wss://relay1, wss://relay2"/>
-                  </>
-                )}
-                <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={()=>onShareBoard(selectedBoard.id, showAdvanced ? relaysCsv : "")}>Share this board</button>
-              </div>
-            )}
-          </div>
-
-          {/* Join a shared board */}
-          <div>
-            <div className="text-sm font-medium">Join a shared board</div>
-            <div className="mt-2 space-y-2">
-              <input value={joinId} onChange={e=>setJoinId(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Board ID (d tag)"/>
-              <input value={joinName} onChange={e=>setJoinName(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Local name (optional)"/>
-              {showAdvanced && (
-                <input value={joinRelays} onChange={e=>setJoinRelays(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Relays (optional CSV)"/>
-              )}
-              <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onJoinBoard(joinId, joinName, showAdvanced ? joinRelays : "")}>Join</button>
-            </div>
-          </div>
         </section>
 
         {/* Backup & Restore */}
@@ -2613,6 +2546,52 @@ function SettingsModal({
         ) : (
           <div className="text-xs text-neutral-400">The Week board has fixed columns (Sun–Sat, Bounties).</div>
         )}
+
+        <div className="mt-6">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="text-sm font-medium">Sharing</div>
+            <div className="ml-auto" />
+            <button
+              className="px-3 py-1 rounded-lg bg-neutral-800 text-xs"
+              onClick={()=>setShowAdvanced(a=>!a)}
+            >{showAdvanced ? "Hide advanced" : "Advanced"}</button>
+          </div>
+          {manageBoard.nostr ? (
+            <div className="space-y-2">
+              <div className="text-xs text-neutral-400">Board ID</div>
+              <div className="flex gap-2 items-center">
+                <input readOnly value={manageBoard.nostr.boardId}
+                       className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{navigator.clipboard?.writeText(manageBoard.nostr!.boardId);}}>Copy</button>
+              </div>
+              {showAdvanced && (
+                <>
+                  <div className="text-xs text-neutral-400">Relays (CSV)</div>
+                  <input value={(manageBoard.nostr.relays || []).join(",")} onChange={(e)=>{
+                    const relays = e.target.value.split(",").map(s=>s.trim()).filter(Boolean);
+                    setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays } }) : b));
+                  }} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                </>
+              )}
+              <div className="flex gap-2">
+                <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onBoardChanged(manageBoard.id)}>Republish metadata</button>
+                <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>{
+                  setBoards(prev => prev.map(b => b.id === manageBoard.id ? (b.kind === 'week' ? { id: b.id, name: b.name, kind: 'week' } as Board : { id: b.id, name: b.name, kind: 'lists', columns: b.columns } as Board) : b));
+                }}>Stop sharing</button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {showAdvanced && (
+                <>
+                  <div className="text-xs text-neutral-400">Relays override (optional, CSV)</div>
+                  <input value={relaysCsv} onChange={(e)=>setRelaysCsv(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="wss://relay1, wss://relay2"/>
+                </>
+              )}
+              <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={()=>{onShareBoard(manageBoard.id, showAdvanced ? relaysCsv : ""); setRelaysCsv('');}}>Share this board</button>
+            </div>
+          )}
+        </div>
       </Modal>
     )}
     </>

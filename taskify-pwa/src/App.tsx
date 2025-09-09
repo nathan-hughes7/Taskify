@@ -664,6 +664,7 @@ export default function App() {
   function publishTaskDeleted(t: Task) {
     const b = boards.find((x) => x.id === t.boardId);
     if (!b || !isShared(b) || !b.nostr) return;
+    publishBoardMetadata(b);
     const relays = getBoardRelays(b);
     const boardId = b.nostr.boardId;
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
@@ -674,6 +675,7 @@ export default function App() {
   function maybePublishTask(t: Task) {
     const b = boards.find((x) => x.id === t.boardId);
     if (!b || !isShared(b) || !b.nostr) return;
+    publishBoardMetadata(b);
     const relays = getBoardRelays(b);
     const boardId = b.nostr.boardId;
     const status = t.completed ? "done" : "open";
@@ -813,7 +815,7 @@ export default function App() {
     const candidate = resolveQuickRule();
     const recurrence = candidate.type === "none" ? undefined : candidate;
 
-    let t: Task = {
+      const t: Task = {
       id: crypto.randomUUID(),
       boardId: currentBoard.id,
       createdBy: nostrPK || undefined,
@@ -924,7 +926,7 @@ export default function App() {
       if (fromIdx < 0) return prev;
       const task = arr[fromIdx];
 
-      let updated: Task = { ...task };
+        const updated: Task = { ...task };
       if (target.type === "day") {
         updated.column = "day";
         updated.columnId = undefined;
@@ -1126,7 +1128,7 @@ export default function App() {
                       title={WD_SHORT[day]}
                       onDropCard={(payload) => moveTask(payload.id, { type: "day", day })}
                     >
-                      {(byDay.get(day) || []).map((t, idx, arr) => (
+                        {(byDay.get(day) || []).map((t) => (
                         <Card
                           key={t.id}
                           task={t}
@@ -1134,7 +1136,6 @@ export default function App() {
                           onEdit={() => setEditing(t)}
                           onDelete={() => deleteTask(t.id)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "day", day }, t.id)}
-                          isLast={idx === arr.length - 1}
                         />
                       ))}
                     </DroppableColumn>
@@ -1145,16 +1146,15 @@ export default function App() {
                     title="Bounties"
                     onDropCard={(payload) => moveTask(payload.id, { type: "bounties" })}
                   >
-                    {bounties.map((t, idx, arr) => (
-                      <Card
-                        key={t.id}
-                        task={t}
-                        onComplete={() => completeTask(t.id)}
-                        onEdit={() => setEditing(t)}
-                        onDelete={() => deleteTask(t.id)}
-                        onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
-                        isLast={idx === arr.length - 1}
-                      />
+                      {bounties.map((t) => (
+                        <Card
+                          key={t.id}
+                          task={t}
+                          onComplete={() => completeTask(t.id)}
+                          onEdit={() => setEditing(t)}
+                          onDelete={() => deleteTask(t.id)}
+                          onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
+                        />
                     ))}
                   </DroppableColumn>
                 </div>
@@ -1174,16 +1174,15 @@ export default function App() {
                     title={col.name}
                     onDropCard={(payload) => moveTask(payload.id, { type: "list", columnId: col.id })}
                   >
-                    {(itemsByColumn.get(col.id) || []).map((t, idx, arr) => (
-                      <Card
-                        key={t.id}
-                        task={t}
-                        onComplete={() => completeTask(t.id)}
-                        onEdit={() => setEditing(t)}
-                        onDelete={() => deleteTask(t.id)}
-                        onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
-                        isLast={idx === arr.length - 1}
-                      />
+                      {(itemsByColumn.get(col.id) || []).map((t) => (
+                        <Card
+                          key={t.id}
+                          task={t}
+                          onComplete={() => completeTask(t.id)}
+                          onEdit={() => setEditing(t)}
+                          onDelete={() => deleteTask(t.id)}
+                          onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
+                        />
                     ))}
                   </DroppableColumn>
                 ))}
@@ -1543,17 +1542,15 @@ function Card({
   task,
   onComplete,
   onEdit,
-  onDelete,
-  onDropBefore,
-  isLast,
-}: {
-  task: Task;
-  onComplete: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  onDropBefore: (dragId: string) => void;
-  isLast: boolean;
-}) {
+    onDelete,
+    onDropBefore,
+  }: {
+    task: Task;
+    onComplete: () => void;
+    onEdit: () => void;
+    onDelete: () => void;
+    onDropBefore: (dragId: string) => void;
+  }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
 
@@ -1591,7 +1588,7 @@ function Card({
         <div className="absolute -top-[2px] left-0 right-0 h-[3px] bg-emerald-500 rounded-full" />
       )}
 
-      <div className="flex items-start gap-2">
+      <div className="flex items-center gap-2">
         {/* Unchecked circular "complete" button (click only) */}
         <button
           onClick={onComplete}
@@ -1609,15 +1606,6 @@ function Card({
           <div className="text-sm font-medium leading-5 break-words">
             {renderTitleWithLink(task.title, task.note)}
           </div>
-          <TaskMedia task={task} />
-          {/* Bounty badge */}
-          {task.bounty && (
-            <div className="mt-2">
-              <span className={`text-[11px] px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
-                Bounty {typeof task.bounty.amount==='number' ? `• ${task.bounty.amount} sats` : ''} • {task.bounty.state}
-              </span>
-            </div>
-          )}
         </div>
 
         {/* Circular edit/delete buttons */}
@@ -1626,6 +1614,16 @@ function Card({
           <IconButton label="Delete" onClick={onDelete} intent="danger">🗑</IconButton>
         </div>
       </div>
+
+      <TaskMedia task={task} />
+      {/* Bounty badge */}
+      {task.bounty && (
+        <div className="mt-2">
+          <span className={`text-[11px] px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
+            Bounty {typeof task.bounty.amount==='number' ? `• ${task.bounty.amount} sats` : ''} • {task.bounty.state}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1663,10 +1661,8 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [bountyToken, setBountyToken] = useState(task.bounty?.token || "");
   const [bountyAmount, setBountyAmount] = useState<number | "">(task.bounty?.amount ?? "");
-  const [bountyState, setBountyState] = useState<Task["bounty"]["state"]>(task.bounty?.state || "locked");
+  const [, setBountyState] = useState<Task["bounty"]["state"]>(task.bounty?.state || "locked");
   const [encryptWhenAttach, setEncryptWhenAttach] = useState(true);
-  const myPubkey = (window as any).nostrPK as string | undefined;
-  const iAmFunder = !!(task.bounty?.sender && myPubkey && task.bounty.sender === myPubkey);
 
   async function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
     const items = e.clipboardData?.items;
@@ -1911,13 +1907,17 @@ function RecurrencePicker({ value, onChange }: { value: Recurrence; onChange: (r
 
   function setNone() { onChange({ type: "none" }); }
   function setDaily() { onChange({ type: "daily" }); }
-  function toggleDay(d: Weekday) {
-    const next = new Set(weekly);
-    next.has(d) ? next.delete(d) : next.add(d);
-    setWeekly(next);
-    const sorted = Array.from(next).sort((a,b)=>a-b);
-    onChange(sorted.length ? { type: "weekly", days: sorted } : { type: "none" });
-  }
+    function toggleDay(d: Weekday) {
+      const next = new Set(weekly);
+      if (next.has(d)) {
+        next.delete(d);
+      } else {
+        next.add(d);
+      }
+      setWeekly(next);
+      const sorted = Array.from(next).sort((a,b)=>a-b);
+      onChange(sorted.length ? { type: "weekly", days: sorted } : { type: "none" });
+    }
   function applyEvery() { onChange({ type:"every", n: Math.max(1, everyN || 1), unit }); }
   function applyMonthly() { onChange({ type:"monthlyDay", day: Math.min(28, Math.max(1, monthDay)) }); }
 

@@ -554,6 +554,7 @@ export default function App() {
     "none" | "daily" | "weeklyMonFri" | "weeklyWeekends" | "every2d" | "custom"
   >("none");
   const [addCustomRule, setAddCustomRule] = useState<Recurrence>(R_NONE);
+  const [addCustomDue, setAddCustomDue] = useState<string | undefined>(undefined);
   const [showAddAdvanced, setShowAddAdvanced] = useState(false);
 
   // edit modal
@@ -839,31 +840,30 @@ export default function App() {
 
     const candidate = resolveQuickRule();
     const recurrence = candidate.type === "none" ? undefined : candidate;
+    let dueISO = isoForWeekday(0);
+    if (quickRule === "custom" && addCustomDue) {
+      dueISO = startOfDay(new Date(addCustomDue)).toISOString();
+    } else if (currentBoard.kind === "week" && dayChoice !== "bounties") {
+      dueISO = isoForWeekday(dayChoice as Weekday);
+    }
 
-      const t: Task = {
+    const t: Task = {
       id: crypto.randomUUID(),
       boardId: currentBoard.id,
       createdBy: nostrPK || undefined,
       title,
-      dueISO: isoForWeekday(0),
+      dueISO,
       completed: false,
       recurrence,
     };
     if (newImages.length) t.images = newImages;
     if (currentBoard.kind === "week") {
-      if (dayChoice === "bounties") {
-        t.column = "bounties";
-        t.dueISO = isoForWeekday(0);
-      } else {
-        t.column = "day";
-        t.dueISO = isoForWeekday(dayChoice as Weekday);
-      }
+      t.column = dayChoice === "bounties" ? "bounties" : "day";
     } else {
       // lists board
       const firstCol = currentBoard.columns[0];
       const selectedColId = typeof dayChoice === "string" ? dayChoice : firstCol?.id;
       t.columnId = selectedColId || firstCol?.id;
-      t.dueISO = isoForWeekday(0);
     }
     applyHiddenForFuture(t);
     setTasks(prev => [...prev, t]);
@@ -873,6 +873,7 @@ export default function App() {
     setNewImages([]);
     setQuickRule("none");
     setAddCustomRule(R_NONE);
+    setAddCustomDue(undefined);
   }
 
   function completeTask(id: string) {
@@ -1370,8 +1371,10 @@ export default function App() {
       {showAddAdvanced && (
         <RecurrenceModal
           initial={addCustomRule}
+          initialDue={addCustomDue}
+          showDueDate
           onClose={() => setShowAddAdvanced(false)}
-          onApply={(r) => { setAddCustomRule(r); setShowAddAdvanced(false); }}
+          onApply={(r, due) => { setAddCustomRule(r); setAddCustomDue(due); setShowAddAdvanced(false); }}
         />
       )}
 
@@ -1939,16 +1942,43 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
 
 /* Advanced recurrence modal & picker */
 function RecurrenceModal({
-  initial, onClose, onApply,
-}: { initial: Recurrence; onClose: () => void; onApply: (r: Recurrence) => void; }) {
+  initial,
+  initialDue,
+  onClose,
+  onApply,
+  showDueDate = false,
+}: {
+  initial: Recurrence;
+  initialDue?: string;
+  onClose: () => void;
+  onApply: (r: Recurrence, dueISO?: string) => void;
+  showDueDate?: boolean;
+}) {
   const [value, setValue] = useState<Recurrence>(initial);
+  const [due, setDue] = useState(initialDue ? initialDue.slice(0, 10) : "");
 
   return (
     <Modal onClose={onClose} title="Advanced recurrence">
       <RecurrencePicker value={value} onChange={setValue} />
+      {showDueDate && (
+        <div className="mt-4">
+          <div className="text-sm font-medium mb-2">Due date</div>
+          <input
+            type="date"
+            value={due}
+            onChange={(e) => setDue(e.target.value)}
+            className="px-2 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+          />
+        </div>
+      )}
       <div className="mt-4 flex justify-end gap-2">
         <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onClose}>Cancel</button>
-        <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={() => onApply(value)}>Apply</button>
+        <button
+          className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+          onClick={() => onApply(value, showDueDate && due ? new Date(due).toISOString() : undefined)}
+        >
+          Apply
+        </button>
       </div>
     </Modal>
   );

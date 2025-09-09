@@ -741,7 +741,6 @@ export default function App() {
       completedAt: payload.completedAt,
       recurrence: payload.recurrence,
       hiddenUntilISO: payload.hiddenUntilISO,
-      images: Array.isArray(payload.images) ? payload.images : undefined,
     };
     if (lb.kind === "week") base.column = col === "bounties" ? "bounties" : "day";
     else if (lb.kind === "lists") base.columnId = col || (lb.columns[0]?.id || "");
@@ -790,12 +789,16 @@ export default function App() {
         const current = prev[idx];
         // Determine incoming bounty raw (preserve explicit null removal)
         const incomingB: Task["bounty"] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'bounty') ? payload.bounty : undefined;
-        const mergedImages = base.images === undefined ? current.images : base.images;
+        // Determine incoming images raw (allow explicit null removal)
+        const incomingImgs: string[] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'images') ? payload.images : undefined;
+        const mergedImages = incomingImgs === undefined ? current.images : incomingImgs === null ? undefined : incomingImgs;
         copy[idx] = { ...current, ...base, images: mergedImages, bounty: mergeBounty(current.bounty, incomingB as any) };
         return copy;
       } else {
         const incomingB: Task["bounty"] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'bounty') ? payload.bounty : undefined;
-        return [...prev, { ...base, bounty: incomingB === null ? undefined : incomingB }];
+        const incomingImgs: string[] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'images') ? payload.images : undefined;
+        const imgs = incomingImgs === null ? undefined : Array.isArray(incomingImgs) ? incomingImgs : undefined;
+        return [...prev, { ...base, images: imgs, bounty: incomingB === null ? undefined : incomingB }];
       }
     });
   }, [setTasks, tagValue]);
@@ -909,7 +912,17 @@ export default function App() {
   }
 
   function restoreTask(id: string) {
-    setTasks(prev => prev.map(t => t.id===id ? ({...t, completed:false, completedAt:undefined}) : t));
+    let updated: Task | null = null;
+    setTasks(prev => prev.map(t => {
+      if (t.id === id) {
+        updated = { ...t, completed: false, completedAt: undefined };
+        return updated;
+      }
+      return t;
+    }));
+    if (updated) {
+      try { maybePublishTask(updated); } catch {}
+    }
     setView("board");
   }
   function clearCompleted() {

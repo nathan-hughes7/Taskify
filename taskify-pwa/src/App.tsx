@@ -421,8 +421,8 @@ function useTasks() {
 /* ================= App ================= */
 export default function App() {
   const [boards, setBoards] = useBoards();
-  const [currentBoardId, setCurrentBoardId] = useState(boards[0].id);
-  const currentBoard = boards.find(b => b.id === currentBoardId)!;
+  const [currentBoardId, setCurrentBoardId] = useState(boards[0]?.id || "");
+  const currentBoard = boards.find(b => b.id === currentBoardId);
 
   const [tasks, setTasks] = useTasks();
   const [settings, setSettings] = useSettings();
@@ -432,12 +432,6 @@ export default function App() {
   // Nostr pool + merge indexes
   const pool = useMemo(() => createNostrPool(), []);
   // In-app Nostr key (secp256k1/Schnorr) for signing
-  function hexToBytes(hex: string): Uint8Array {
-    if (!hex) return new Uint8Array();
-    const arr = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < arr.length; i++) arr[i] = parseInt(hex.substr(i * 2, 2), 16);
-    return arr;
-  }
   function bytesToHex(b: Uint8Array): string {
     return Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
   }
@@ -534,7 +528,7 @@ export default function App() {
 
   // Week board
   const byDay = useMemo(() => {
-    if (currentBoard.kind !== "week") return new Map<Weekday, Task[]>();
+    if (!currentBoard || currentBoard.kind !== "week") return new Map<Weekday, Task[]>();
     const visible = tasksForBoard.filter(t => !t.completed && t.column !== "bounties" && isVisibleNow(t));
     const m = new Map<Weekday, Task[]>();
     for (const t of visible) {
@@ -546,16 +540,16 @@ export default function App() {
   }, [tasksForBoard, currentBoard.kind]);
 
   const bounties = useMemo(
-    () => currentBoard.kind === "week"
+    () => currentBoard?.kind === "week"
       ? tasksForBoard.filter(t => !t.completed && t.column === "bounties" && isVisibleNow(t))
       : [],
     [tasksForBoard, currentBoard.kind]
   );
 
   // Custom list boards
-  const listColumns = (currentBoard.kind === "lists") ? currentBoard.columns : [];
+  const listColumns = (currentBoard?.kind === "lists") ? currentBoard.columns : [];
   const itemsByColumn = useMemo(() => {
-    if (currentBoard.kind !== "lists") return new Map<string, Task[]>();
+    if (!currentBoard || currentBoard.kind !== "lists") return new Map<string, Task[]>();
     const m = new Map<string, Task[]>();
     const visible = tasksForBoard.filter(t => !t.completed && t.columnId && isVisibleNow(t));
     for (const col of currentBoard.columns) m.set(col.id, []);
@@ -628,7 +622,10 @@ export default function App() {
     const status = t.completed ? "done" : "open";
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
     const tags: string[][] = [["d", t.id],["b", boardId],["col", String(colTag)],["status", status]];
-    const content = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, bounty: t.bounty });
+    const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy };
+    // Include explicit null to signal bounty removal when undefined
+    body.bounty = (typeof t.bounty === 'undefined') ? null : t.bounty;
+    const content = JSON.stringify(body);
     nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
   }
   function applyBoardEvent(ev: NostrEvent) {
@@ -680,7 +677,6 @@ export default function App() {
       completedAt: payload.completedAt,
       recurrence: payload.recurrence,
       hiddenUntilISO: payload.hiddenUntilISO,
-      bounty: payload.bounty,
     };
     if (lb.kind === "week") base.column = col === "bounties" ? "bounties" : "day";
     else if (lb.kind === "lists") base.columnId = col || (lb.columns[0]?.id || "");
@@ -689,31 +685,52 @@ export default function App() {
       if (status === "deleted") {
         return idx >= 0 ? prev.filter((_,i)=>i!==idx) : prev;
       }
+      // Improved bounty merge with clocks and auth; incoming may be null (explicit removal)
+      const mergeBounty = (oldB?: Task["bounty"], incoming?: Task["bounty"] | null) => {
+        if (incoming === null) return undefined; // explicit removal
+        if (!incoming) return oldB;
+        if (!oldB) return incoming;
+        // Prefer the bounty with the latest updatedAt; fallback to event created_at
+        const oldT = Date.parse(oldB.updatedAt || '') || 0;
+        const incT = Date.parse(incoming.updatedAt || '') || 0;
+        const incNewer = incT > oldT || (incT === oldT && ev.created_at > (nostrIdxRef.current.taskClock.get(boardId)?.get(taskId) || 0));
+
+        // Different ids: pick the newer one
+        if (oldB.id !== incoming.id) return incNewer ? incoming : oldB;
+
+        const next = { ...oldB };
+        // accept token/content updates if incoming is newer
+        if (incNewer) {
+          if (typeof incoming.amount === 'number') next.amount = incoming.amount;
+          next.mint = incoming.mint ?? next.mint;
+          next.lock = incoming.lock ?? next.lock;
+          // Only overwrite token if sender/owner published or token becomes visible
+          if (incoming.token) next.token = incoming.token;
+          next.enc = incoming.enc !== undefined ? incoming.enc : next.enc;
+          next.updatedAt = incoming.updatedAt || next.updatedAt;
+        }
+        // Auth for state transitions (allow owner or sender to unlock; owner or sender to revoke; anyone to mark claimed)
+        if (incoming.state && incoming.state !== oldB.state) {
+          const isOwner = !!(oldB.owner && ev.pubkey === oldB.owner);
+          const isSender = !!(oldB.sender && ev.pubkey === oldB.sender);
+          if (incoming.state === 'unlocked' && (isOwner || isSender)) next.state = 'unlocked';
+          if (incoming.state === 'revoked' && (isOwner || isSender)) next.state = 'revoked';
+          if (incoming.state === 'claimed') next.state = 'claimed';
+        }
+        return next;
+      };
+
       if (idx >= 0) {
         const copy = prev.slice();
         const current = prev[idx];
-        // Merge bounty state with authorization checks when present
-        const mergeBounty = (oldB?: Task["bounty"], incoming?: Task["bounty"]) => {
-          if (!incoming) return oldB;
-          if (!oldB) return incoming;
-          const next = { ...oldB };
-          if (incoming.id && incoming.id === oldB.id) {
-            if (incoming.token) next.token = incoming.token;
-            if (typeof incoming.amount === 'number') next.amount = incoming.amount;
-            next.mint = incoming.mint ?? next.mint;
-            next.lock = incoming.lock ?? next.lock;
-            next.updatedAt = incoming.updatedAt || next.updatedAt;
-          }
-          if (incoming.state && incoming.state !== oldB.state) {
-            if (incoming.state === 'unlocked' && oldB.owner && ev.pubkey === oldB.owner) next.state = 'unlocked';
-            if (incoming.state === 'revoked' && oldB.sender && ev.pubkey === oldB.sender) next.state = 'revoked';
-            if (incoming.state === 'claimed') next.state = 'claimed';
-          }
-          return next;
-        };
-        copy[idx] = { ...current, ...base, bounty: mergeBounty(current.bounty, base.bounty) };
+        // Determine incoming bounty raw (preserve explicit null removal)
+        const incomingB: Task["bounty"] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'bounty') ? payload.bounty : undefined;
+        copy[idx] = { ...current, ...base, bounty: mergeBounty(current.bounty, incomingB as any) };
         return copy;
-      } else return [...prev, base];
+      } else {
+        const incomingB: Task["bounty"] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'bounty') ? payload.bounty : undefined;
+        return [...prev, { ...base, bounty: incomingB === null ? undefined : incomingB }];
+      }
     });
   }
 
@@ -893,6 +910,7 @@ export default function App() {
 
   // reset dayChoice when board changes
   useEffect(() => {
+    if (!currentBoard) return;
     if (currentBoard.kind === "lists") {
       const firstCol = currentBoard.columns[0];
       setDayChoice(firstCol?.id || crypto.randomUUID());
@@ -920,7 +938,11 @@ export default function App() {
               className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               title="Boards"
             >
-              {boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              {boards.length === 0 ? (
+                <option value="">No boards</option>
+              ) : (
+                boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
+              )}
             </select>
 
             {/* Settings + View */}
@@ -939,7 +961,7 @@ export default function App() {
         </header>
 
         {/* Add bar */}
-        {view === "board" && (
+        {view === "board" && currentBoard && (
           <div className="flex flex-wrap gap-2 items-center mb-4">
             <input
               value={newTitle}
@@ -1005,7 +1027,9 @@ export default function App() {
 
         {/* Board/Completed */}
         {view === "board" ? (
-          currentBoard.kind === "week" ? (
+          !currentBoard ? (
+            <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-6 text-center text-sm text-neutral-400">No boards. Open Settings to create one.</div>
+          ) : currentBoard.kind === "week" ? (
             <>
               {/* HORIZONTAL board: single row, side-scroll */}
               <div
@@ -1110,7 +1134,7 @@ export default function App() {
                           {renderTitleWithLink(t.title, t.note)}
                         </div>
                         <div className="text-xs text-neutral-400">
-                          {currentBoard.kind === "week"
+                          {currentBoard?.kind === "week"
                             ? `Due ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
                             : "Completed item"}
                           {t.completedAt ? ` • Completed ${new Date(t.completedAt).toLocaleString()}` : ""}
@@ -1159,7 +1183,7 @@ export default function App() {
                     <div className="flex-1">
                       <div className="text-sm font-medium">{renderTitleWithLink(t.title, t.note)}</div>
                       <div className="text-xs text-neutral-400">
-                        {currentBoard.kind === "week"
+                        {currentBoard?.kind === "week"
                           ? `Due ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
                           : "Hidden item"}
                         {t.hiddenUntilISO ? ` • Reveals ${new Date(t.hiddenUntilISO).toLocaleDateString()}` : ""}
@@ -1519,7 +1543,11 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
           <div className="flex items-center gap-2">
             <div className="text-sm font-medium">Bounty (ecash)</div>
             {task.bounty && (
-              <div className="ml-auto text-xs text-neutral-400">{task.bounty.state.toUpperCase()}</div>
+              <div className="ml-auto flex items-center gap-2 text-[11px]">
+                <span className={`px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>{task.bounty.state}</span>
+                {task.createdBy && (window as any).nostrPK === task.createdBy && <span className="px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700" title="You created the task">owner: you</span>}
+                {task.bounty.sender && (window as any).nostrPK === task.bounty.sender && <span className="px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700" title="You funded the bounty">funder: you</span>}
+              </div>
             )}
           </div>
           {!task.bounty ? (
@@ -1620,10 +1648,16 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                               if (!newTok) return;
                               onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, token: newTok, state: 'unlocked', updatedAt: new Date().toISOString() } });
                             }}>Unlock…</button>
-                    <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600"
-                            onClick={() => {
-                              onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, state: 'revoked', updatedAt: new Date().toISOString() } });
-                            }}>Revoke</button>
+                    <button
+                      className={`px-3 py-2 rounded-xl ${((window as any).nostrPK && (task.bounty!.sender === (window as any).nostrPK || task.createdBy === (window as any).nostrPK)) ? 'bg-rose-600/80 hover:bg-rose-600' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}`}
+                      disabled={!((window as any).nostrPK && (task.bounty!.sender === (window as any).nostrPK || task.createdBy === (window as any).nostrPK))}
+                      onClick={() => {
+                        if (!((window as any).nostrPK && (task.bounty!.sender === (window as any).nostrPK || task.createdBy === (window as any).nostrPK))) return;
+                        onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, state: 'revoked', updatedAt: new Date().toISOString() } });
+                      }}
+                    >
+                      Revoke
+                    </button>
                   </>
                 )}
                 <button
@@ -1827,7 +1861,7 @@ function SettingsModal({
 }) {
   const [newBoardName, setNewBoardName] = useState("");
   const [selectedBoardId, setSelectedBoardId] = useState(currentBoardId);
-  const selectedBoard = boards.find(b => b.id === selectedBoardId)!;
+  const selectedBoard = boards.find(b => b.id === selectedBoardId);
   const [relaysCsv, setRelaysCsv] = useState("");
   const [joinId, setJoinId] = useState("");
   const [joinRelays, setJoinRelays] = useState("");
@@ -1859,16 +1893,16 @@ function SettingsModal({
   function deleteBoard(id: string) {
     const b = boards.find(x => x.id === id);
     if (!b) return;
-    if (b.kind === "week") return alert("The Week board cannot be deleted.");
     if (!confirm(`Delete board “${b.name}”? This will also remove its tasks.`)) return;
-    setBoards(prev => prev.filter(x => x.id !== id));
-    // Caller (App) removes tasks for deleted board on commit; we keep simple here.
-    // Switch away if deleting current
-    if (currentBoardId === id) {
-      const fallback = boards.find(x => x.id !== id) || { id: "week-default" };
-      setCurrentBoardId(fallback.id);
-      setSelectedBoardId(fallback.id);
-    }
+    setBoards(prev => {
+      const next = prev.filter(x => x.id !== id);
+      if (currentBoardId === id) {
+        const newId = next[0]?.id || "";
+        setCurrentBoardId(newId);
+        setSelectedBoardId(newId);
+      }
+      return next;
+    });
   }
 
   function addColumn(boardId: string) {
@@ -1897,7 +1931,6 @@ function SettingsModal({
   function deleteColumn(boardId: string, colId: string) {
     setBoards(prev => prev.map(b => {
       if (b.id !== boardId || b.kind !== "lists") return b;
-      if (b.columns.length <= 1) return b; // keep at least one
       const nb = { ...b, columns: b.columns.filter(c => c.id !== colId) } as Board;
       setTimeout(() => { if (nb.nostr) onBoardChanged(boardId); }, 0);
       return nb;
@@ -1948,13 +1981,7 @@ function SettingsModal({
               {boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
             <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>renameBoard(selectedBoardId)}>Rename</button>
-            <button
-              className={`px-3 py-2 rounded-xl ${boards.find(b=>b.id===selectedBoardId)?.kind==="week" ? "bg-neutral-800 text-neutral-500 cursor-not-allowed":"bg-rose-600/80 hover:bg-rose-600"}`}
-              disabled={boards.find(b=>b.id===selectedBoardId)?.kind==="week"}
-              onClick={()=>deleteBoard(selectedBoardId)}
-            >
-              Delete
-            </button>
+            <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>selectedBoardId && deleteBoard(selectedBoardId)}>Delete</button>
           </div>
 
           {/* Columns (for lists boards) */}
@@ -1967,13 +1994,7 @@ function SettingsModal({
                     <div className="text-sm">{col.name}</div>
                     <div className="ml-auto flex gap-2">
                       <button className="px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600" onClick={()=>renameColumn(selectedBoard.id, col.id)}>Rename</button>
-                      <button
-                        className={`px-3 py-1 rounded-full ${selectedBoard.columns.length<=1 ? "bg-neutral-700 text-neutral-500 cursor-not-allowed":"bg-rose-600/80 hover:bg-rose-600"}`}
-                        disabled={selectedBoard.columns.length<=1}
-                        onClick={()=>deleteColumn(selectedBoard.id, col.id)}
-                      >
-                        Delete
-                      </button>
+                      <button className="px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteColumn(selectedBoard.id, col.id)}>Delete</button>
                     </div>
                   </li>
                 ))}

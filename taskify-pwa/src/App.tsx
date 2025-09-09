@@ -919,22 +919,18 @@ export default function App() {
   }
 
   function restoreTask(id: string) {
-    let updated: Task | null = null;
-    setTasks(prev => prev.map(t => {
-      if (t.id === id) {
-        updated = { ...t, completed: false, completedAt: undefined };
-        return updated;
-      }
-      return t;
-    }));
-    if (updated) {
-      try { maybePublishTask(updated); } catch {}
-    }
+    const t = tasks.find((x) => x.id === id);
+    if (!t) return;
+    const updated: Task = { ...t, completed: false, completedAt: undefined };
+    setTasks((prev) => prev.map((x) => (x.id === id ? updated : x)));
+    try {
+      maybePublishTask(updated);
+    } catch {}
     setView("board");
   }
   function clearCompleted() {
     try {
-      for (const t of tasksForBoard) if (t.completed) maybePublishTask(t);
+      for (const t of tasksForBoard) if (t.completed) publishTaskDeleted(t);
     } catch {}
     setTasks(prev => prev.filter(t => !t.completed));
   }

@@ -2191,7 +2191,9 @@ function SettingsModal({
 }) {
   const [newBoardName, setNewBoardName] = useState("");
   const [selectedBoardId, setSelectedBoardId] = useState(currentBoardId);
+  const [manageBoardId, setManageBoardId] = useState<string | null>(null);
   const selectedBoard = boards.find(b => b.id === selectedBoardId);
+  const manageBoard = boards.find(b => b.id === manageBoardId);
   const [relaysCsv, setRelaysCsv] = useState("");
   const [joinId, setJoinId] = useState("");
   const [joinRelays, setJoinRelays] = useState("");
@@ -2248,16 +2250,10 @@ function SettingsModal({
     setCurrentBoardId(id);
   }
 
-  function renameBoard(id: string) {
-    const b = boards.find(x => x.id === id);
-    if (!b) return;
-    const name = prompt("Rename board", b.name);
-    if (name == null) return;
-    const nn = name.trim();
-    if (!nn) return;
-    setBoards(prev => prev.map(x => x.id === id ? { ...x, name: nn } : x));
+  function renameBoard(id: string, name: string) {
+    setBoards(prev => prev.map(x => x.id === id ? { ...x, name } : x));
     const sb = boards.find(x => x.id === id);
-    if (sb?.nostr) onBoardChanged(id);
+    if (sb?.nostr) setTimeout(() => onBoardChanged(id), 0);
   }
 
   function deleteBoard(id: string) {
@@ -2272,6 +2268,21 @@ function SettingsModal({
         setSelectedBoardId(newId);
       }
       return next;
+    });
+    if (manageBoardId === id) setManageBoardId(null);
+  }
+
+  function reorderBoards(dragId: string, targetId: string, before: boolean) {
+    setBoards(prev => {
+      const list = [...prev];
+      const fromIndex = list.findIndex(b => b.id === dragId);
+      if (fromIndex === -1) return prev;
+      const [item] = list.splice(fromIndex, 1);
+      let targetIndex = list.findIndex(b => b.id === targetId);
+      if (targetIndex === -1) return prev;
+      if (!before) targetIndex++;
+      list.splice(targetIndex, 0, item);
+      return list;
     });
   }
 
@@ -2307,12 +2318,106 @@ function SettingsModal({
     }));
   }
 
+  function reorderColumn(boardId: string, dragId: string, targetId: string, before: boolean) {
+    setBoards(prev => prev.map(b => {
+      if (b.id !== boardId || b.kind !== "lists") return b;
+      const cols = [...b.columns];
+      const fromIndex = cols.findIndex(c => c.id === dragId);
+      if (fromIndex === -1) return b;
+      const [col] = cols.splice(fromIndex, 1);
+      let targetIndex = cols.findIndex(c => c.id === targetId);
+      if (targetIndex === -1) return b;
+      if (!before) targetIndex++;
+      cols.splice(targetIndex, 0, col);
+      const nb = { ...b, columns: cols } as Board;
+      setTimeout(() => { if (nb.nostr) onBoardChanged(boardId); }, 0);
+      return nb;
+    }));
+  }
+
+  function BoardListItem({ board, onOpen, onDrop }: { board: Board; onOpen: ()=>void; onDrop: (dragId: string, before: boolean)=>void }) {
+    const [overBefore, setOverBefore] = useState(false);
+    function handleDragStart(e: React.DragEvent) {
+      e.dataTransfer.setData("text/board-id", board.id);
+      e.dataTransfer.effectAllowed = "move";
+    }
+    function handleDragOver(e: React.DragEvent) {
+      e.preventDefault();
+      const rect = (e.currentTarget as HTMLLIElement).getBoundingClientRect();
+      const midpoint = rect.top + rect.height / 2;
+      setOverBefore(e.clientY < midpoint);
+    }
+    function handleDrop(e: React.DragEvent) {
+      e.preventDefault();
+      const dragId = e.dataTransfer.getData("text/board-id");
+      if (dragId) onDrop(dragId, overBefore);
+      setOverBefore(false);
+    }
+    function handleDragLeave() { setOverBefore(false); }
+    return (
+      <li
+        className="relative p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center"
+        draggable
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        onDragLeave={handleDragLeave}
+      >
+        {overBefore && (
+          <div className="absolute -top-[2px] left-0 right-0 h-[3px] bg-emerald-500 rounded-full" />
+        )}
+        <button className="flex-1 text-left" onClick={onOpen}>{board.name}</button>
+      </li>
+    );
+  }
+
+  function ColumnItem({ boardId, column }: { boardId: string; column: ListColumn }) {
+    const [overBefore, setOverBefore] = useState(false);
+    function handleDragStart(e: React.DragEvent) {
+      e.dataTransfer.setData("text/column-id", column.id);
+      e.dataTransfer.effectAllowed = "move";
+    }
+    function handleDragOver(e: React.DragEvent) {
+      e.preventDefault();
+      const rect = (e.currentTarget as HTMLLIElement).getBoundingClientRect();
+      const midpoint = rect.top + rect.height / 2;
+      setOverBefore(e.clientY < midpoint);
+    }
+    function handleDrop(e: React.DragEvent) {
+      e.preventDefault();
+      const dragId = e.dataTransfer.getData("text/column-id");
+      if (dragId) reorderColumn(boardId, dragId, column.id, overBefore);
+      setOverBefore(false);
+    }
+    function handleDragLeave() { setOverBefore(false); }
+    return (
+      <li
+        className="relative p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2"
+        draggable
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        onDragLeave={handleDragLeave}
+      >
+        {overBefore && (
+          <div className="absolute -top-[2px] left-0 right-0 h-[3px] bg-emerald-500 rounded-full" />
+        )}
+        <div className="flex-1">{column.name}</div>
+        <div className="flex gap-1">
+          <button className="px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600" onClick={()=>renameColumn(boardId, column.id)}>Rename</button>
+          <button className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteColumn(boardId, column.id)}>Delete</button>
+        </div>
+      </li>
+    );
+  }
+
   const handleClose = () => {
     onClose();
     if (reloadNeeded) window.location.reload();
   };
 
   return (
+    <>
     <Modal onClose={handleClose} title="Settings">
       <div className="space-y-6">
         
@@ -2331,11 +2436,18 @@ function SettingsModal({
         <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
           <div className="flex items-center gap-2 mb-3">
             <div className="text-sm font-medium">Boards & Lists</div>
-            <div className="ml-auto" />
           </div>
-
-          {/* Create board */}
-          <div className="flex gap-2 mb-3">
+          <ul className="space-y-2 mb-3">
+            {boards.map((b) => (
+              <BoardListItem
+                key={b.id}
+                board={b}
+                onOpen={() => { setManageBoardId(b.id); setSelectedBoardId(b.id); }}
+                onDrop={(dragId, before) => reorderBoards(dragId, b.id, before)}
+              />
+            ))}
+          </ul>
+          <div className="flex gap-2">
             <input
               value={newBoardName}
               onChange={e=>setNewBoardName(e.target.value)}
@@ -2344,44 +2456,6 @@ function SettingsModal({
             />
             <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={addBoard}>Create</button>
           </div>
-
-          {/* Pick board to manage */}
-          <div className="flex items-center gap-2 mb-2">
-            <div className="text-sm">Manage:</div>
-            <select
-              value={selectedBoardId}
-              onChange={(e)=>setSelectedBoardId(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-            >
-              {boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>renameBoard(selectedBoardId)}>Rename</button>
-            <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>selectedBoardId && deleteBoard(selectedBoardId)}>Delete</button>
-          </div>
-
-          {/* Columns (for lists boards) */}
-          {selectedBoard?.kind === "lists" ? (
-            <div className="mt-3">
-              <div className="text-sm font-medium mb-2">Lists in “{selectedBoard.name}”</div>
-              <ul className="space-y-2">
-                {selectedBoard.columns.map(col => (
-                  <li key={col.id} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
-                    <div className="text-sm">{col.name}</div>
-                    <div className="ml-auto flex gap-2">
-                      <button className="px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600" onClick={()=>renameColumn(selectedBoard.id, col.id)}>Rename</button>
-                      <button className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteColumn(selectedBoard.id, col.id)}>Delete</button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-2">
-                <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>addColumn(selectedBoard.id)}>Add list</button>
-              </div>
-              <div className="text-xs text-neutral-400 mt-2">Tasks can be dragged between lists directly on the board.</div>
-            </div>
-          ) : (
-            <div className="text-xs text-neutral-400 mt-2">The Week board has fixed columns (Sun–Sat, Bounties).</div>
-          )}
         </section>
 
         {/* Nostr shared boards */}
@@ -2501,5 +2575,33 @@ function SettingsModal({
         </div>
       </div>
     </Modal>
+    {manageBoard && (
+      <Modal onClose={() => setManageBoardId(null)} title="Manage board">
+        {manageBoard.kind === "lists" ? (
+          <>
+            <input
+              value={manageBoard.name}
+              onChange={e => renameBoard(manageBoard.id, e.target.value)}
+              className="w-full mb-4 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+            />
+            <ul className="space-y-2">
+              {manageBoard.columns.map(col => (
+                <ColumnItem key={col.id} boardId={manageBoard.id} column={col} />
+              ))}
+            </ul>
+            <div className="mt-2">
+              <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>addColumn(manageBoard.id)}>Add list</button>
+            </div>
+            <div className="text-xs text-neutral-400 mt-2">Tasks can be dragged between lists directly on the board.</div>
+            <div className="mt-4 flex justify-end">
+              <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
+            </div>
+          </>
+        ) : (
+          <div className="text-xs text-neutral-400">The Week board has fixed columns (Sun–Sat, Bounties).</div>
+        )}
+      </Modal>
+    )}
+    </>
   );
 }

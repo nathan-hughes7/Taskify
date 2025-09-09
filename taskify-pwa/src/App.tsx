@@ -38,6 +38,11 @@ type Task = {
     sender?: string;              // hex pubkey of funder (who can revoke)
     state: "locked" | "unlocked" | "revoked" | "claimed";
     updatedAt: string;            // iso
+    enc?: {                       // optional encrypted form (hidden until funder reveals)
+      alg: "aes-gcm-256";
+      iv: string;                // base64
+      ct: string;                // base64
+    };
   };
 };
 
@@ -230,6 +235,57 @@ function createNostrPool(): NostrPool {
     }
   };
   return api;
+}
+
+/* ================== Crypto helpers (AES-GCM via local Nostr key) ================== */
+async function sha256(data: Uint8Array): Promise<Uint8Array> {
+  const h = await crypto.subtle.digest("SHA-256", data);
+  return new Uint8Array(h);
+}
+function hexToBytes(hex: string): Uint8Array {
+  const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.substr(i * 2, 2), 16);
+  return out;
+}
+function concatBytes(a: Uint8Array, b: Uint8Array) {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a); out.set(b, a.length);
+  return out;
+}
+function b64encode(buf: ArrayBuffer | Uint8Array): string {
+  const b = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  let s = ""; for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+  return btoa(s);
+}
+function b64decode(s: string): Uint8Array {
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function deriveAesKeyFromLocalSk(): Promise<CryptoKey> {
+  // Derive a stable AES key from local Nostr SK: AES-GCM 256 with SHA-256(sk || label)
+  const skHex = localStorage.getItem(LS_NOSTR_SK) || "";
+  if (!skHex || !/^[0-9a-fA-F]{64}$/.test(skHex)) throw new Error("No local Nostr secret key");
+  const label = new TextEncoder().encode("taskify-ecash-v1");
+  const raw = concatBytes(hexToBytes(skHex), label);
+  const digest = await sha256(raw);
+  return await crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt","decrypt"]);
+}
+export async function encryptEcashTokenForFunder(plain: string): Promise<{alg:"aes-gcm-256";iv:string;ct:string}> {
+  const key = await deriveAesKeyFromLocalSk();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ctBuf = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(plain));
+  return { alg: "aes-gcm-256", iv: b64encode(iv), ct: b64encode(ctBuf) };
+}
+export async function decryptEcashTokenForFunder(enc: {alg:"aes-gcm-256";iv:string;ct:string}): Promise<string> {
+  if (enc.alg !== "aes-gcm-256") throw new Error("Unsupported cipher");
+  const key = await deriveAesKeyFromLocalSk();
+  const iv = b64decode(enc.iv);
+  const ct = b64decode(enc.ct);
+  const ptBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
+  return new TextDecoder().decode(new Uint8Array(ptBuf));
 }
 
 /* ================= Date helpers ================= */
@@ -1425,6 +1481,9 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
   const [bountyToken, setBountyToken] = useState(task.bounty?.token || "");
   const [bountyAmount, setBountyAmount] = useState<number | "">(task.bounty?.amount ?? "");
   const [bountyState, setBountyState] = useState<Task["bounty"]["state"]>(task.bounty?.state || "locked");
+  const [encryptWhenAttach, setEncryptWhenAttach] = useState(true);
+  const myPubkey = (window as any).nostrPK as string | undefined;
+  const iAmFunder = !!(task.bounty?.sender && myPubkey && task.bounty.sender === myPubkey);
 
   return (
     <Modal onClose={onCancel} title="Edit task">
@@ -1467,13 +1526,17 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                 rows={3}
                 className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               />
+              <label className="flex items-center gap-2 text-xs text-neutral-300">
+                <input type="checkbox" checked={encryptWhenAttach} onChange={(e)=>setEncryptWhenAttach(e.target.checked)} />
+                Hide/encrypt token until I reveal (uses your local key)
+              </label>
               <div className="flex items-center gap-2">
                 <input type="number" min={1} value={bountyAmount as number || ""}
                        onChange={(e)=>setBountyAmount(e.target.value ? parseInt(e.target.value,10) : "")}
                        placeholder="Amount (sats)"
                        className="w-40 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
                 <button className="px-3 py-2 rounded-xl bg-neutral-800"
-                        onClick={() => {
+                        onClick={async () => {
                           const tok = bountyToken.trim();
                           if (!tok) return;
                           const b: Task["bounty"] = {
@@ -1486,6 +1549,16 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                             updatedAt: new Date().toISOString(),
                             lock: tok.includes("pubkey") ? "p2pk" : tok.includes("hash") ? "htlc" : "unknown",
                           };
+                          if (encryptWhenAttach) {
+                            try {
+                              const enc = await encryptEcashTokenForFunder(tok);
+                              b.enc = enc;
+                              b.token = "";
+                            } catch (e) {
+                              alert("Encryption failed: "+ (e as Error).message);
+                              return;
+                            }
+                          }
                           onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: b });
                         }}
                 >Attach</button>
@@ -1499,10 +1572,29 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                      onChange={(e)=>setBountyAmount(e.target.value ? parseInt(e.target.value,10) : "")}
                      className="w-40 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
               <div className="text-xs text-neutral-400">Token</div>
-              <textarea readOnly value={task.bounty.token}
-                        className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" rows={3}/>
+              {task.bounty.enc && !task.bounty.token ? (
+                <div className="rounded-lg border border-neutral-800 p-2 text-xs text-neutral-300 bg-neutral-900/60">
+                  Hidden (encrypted by funder). Only the funder can reveal.
+                </div>
+              ) : (
+                <textarea readOnly value={task.bounty.token || ""}
+                          className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" rows={3}/>
+              )}
               <div className="flex gap-2 flex-wrap">
-                <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>navigator.clipboard?.writeText(task.bounty!.token)}>Copy token</button>
+                {task.bounty.token && (
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=> navigator.clipboard?.writeText(task.bounty!.token!)}>
+                    Copy token
+                  </button>
+                )}
+                {task.bounty.enc && !task.bounty.token && (window as any).nostrPK && task.bounty.sender === (window as any).nostrPK && (
+                  <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                          onClick={async () => {
+                            try {
+                              const pt = await decryptEcashTokenForFunder(task.bounty!.enc!);
+                              onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, token: pt, enc: undefined, state: 'unlocked', updatedAt: new Date().toISOString() } });
+                            } catch (e) { alert("Decrypt failed: " + (e as Error).message); }
+                          }}>Reveal (decrypt)</button>
+                )}
                 <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{ setBountyState('claimed'); onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, state: 'claimed', updatedAt: new Date().toISOString() } }); }}>Mark claimed</button>
                 {task.bounty.state === 'locked' && (
                   <>

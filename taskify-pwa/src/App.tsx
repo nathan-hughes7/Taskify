@@ -2198,6 +2198,7 @@ function SettingsModal({
   const [joinName, setJoinName] = useState("");
   const [customSk, setCustomSk] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [reloadNeeded, setReloadNeeded] = useState(false);
 
   function backupData() {
     const data = {
@@ -2227,8 +2228,8 @@ function SettingsModal({
         if (data.settings) localStorage.setItem(LS_SETTINGS, JSON.stringify(data.settings));
         if (data.defaultRelays) localStorage.setItem(LS_NOSTR_RELAYS, JSON.stringify(data.defaultRelays));
         if (data.nostrSk) localStorage.setItem(LS_NOSTR_SK, data.nostrSk);
-        alert("Backup restored. Reloading…");
-        window.location.reload();
+        alert("Backup restored. Press close to reload.");
+        setReloadNeeded(true);
       } catch {
         alert("Invalid backup file");
       }
@@ -2306,8 +2307,13 @@ function SettingsModal({
     }));
   }
 
+  const handleClose = () => {
+    onClose();
+    if (reloadNeeded) window.location.reload();
+  };
+
   return (
-    <Modal onClose={onClose} title="Settings">
+    <Modal onClose={handleClose} title="Settings">
       <div className="space-y-6">
         
         {/* Week start */}
@@ -2481,9 +2487,9 @@ function SettingsModal({
         {/* Backup & Restore */}
         <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
           <div className="text-sm font-medium mb-3">Backup</div>
-          <div className="space-y-2">
-            <button className="px-3 py-2 rounded-xl bg-neutral-800 w-full" onClick={backupData}>Download backup</button>
-            <label className="px-3 py-2 rounded-xl bg-neutral-800 w-full text-center cursor-pointer">
+          <div className="flex gap-2">
+            <button className="flex-1 px-3 py-2 rounded-xl bg-neutral-800" onClick={backupData}>Download backup</button>
+            <label className="flex-1 px-3 py-2 rounded-xl bg-neutral-800 text-center cursor-pointer">
               Restore from backup
               <input type="file" accept="application/json" className="hidden" onChange={restoreFromBackup} />
             </label>
@@ -2491,7 +2497,7 @@ function SettingsModal({
         </section>
 
         <div className="flex justify-end">
-          <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onClose}>Close</button>
+          <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={handleClose}>Close</button>
         </div>
       </div>
     </Modal>

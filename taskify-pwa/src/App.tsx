@@ -516,8 +516,15 @@ export default function App() {
     }
   };
 
+  const lastNostrCreated = useRef(0);
   async function nostrPublish(relays: string[], template: EventTemplate) {
-    const ev = finalizeEvent(template, nostrSK);
+    const now = Math.floor(Date.now() / 1000);
+    let createdAt = typeof template.created_at === "number" ? template.created_at : now;
+    if (createdAt <= lastNostrCreated.current) {
+      createdAt = lastNostrCreated.current + 1;
+    }
+    lastNostrCreated.current = createdAt;
+    const ev = finalizeEvent({ ...template, created_at: createdAt }, nostrSK);
     pool.publishEvent(relays, ev as unknown as NostrEvent);
   }
   type NostrIndex = {

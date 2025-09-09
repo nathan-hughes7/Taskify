@@ -1228,7 +1228,7 @@ export default function App() {
       {undoTask && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-neutral-800 border border-neutral-700 text-sm px-4 py-2 rounded-xl shadow-lg flex items-center gap-3">
           Task deleted
-          <button onClick={undoDelete} className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500">Undo</button>
+          <button onClick={undoDelete} className="pressable px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500">Undo</button>
         </div>
       )}
 
@@ -1530,11 +1530,11 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
             <div className="ml-auto text-xs text-neutral-400">{labelOf(rule)}</div>
           </div>
           <div className="mt-2 flex gap-2 flex-wrap">
-            <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule(R_NONE)}>None</button>
-            <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "daily" })}>Daily</button>
-            <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "weekly", days: [1,2,3,4,5] })}>Mon–Fri</button>
-            <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "weekly", days: [0,6] })}>Weekends</button>
-            <button className="ml-auto px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setShowAdvanced(true)} title="Advanced recurrence…">Advanced…</button>
+            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule(R_NONE)}>None</button>
+            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "daily" })}>Daily</button>
+            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "weekly", days: [1,2,3,4,5] })}>Mon–Fri</button>
+            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "weekly", days: [0,6] })}>Weekends</button>
+            <button className="pressable ml-auto px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setShowAdvanced(true)} title="Advanced recurrence…">Advanced…</button>
           </div>
         </div>
 
@@ -1568,7 +1568,7 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                        onChange={(e)=>setBountyAmount(e.target.value ? parseInt(e.target.value,10) : "")}
                        placeholder="Amount (sats)"
                        className="w-40 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                <button className="px-3 py-2 rounded-xl bg-neutral-800"
+                <button className="pressable px-3 py-2 rounded-xl bg-neutral-800"
                         onClick={async () => {
                           const tok = bountyToken.trim();
                           if (!tok) return;
@@ -1615,12 +1615,12 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
               )}
               <div className="flex gap-2 flex-wrap">
                 {task.bounty.token && (
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=> navigator.clipboard?.writeText(task.bounty!.token!)}>
+                  <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=> navigator.clipboard?.writeText(task.bounty!.token!)}>
                     Copy token
                   </button>
                 )}
                 {task.bounty.enc && !task.bounty.token && (window as any).nostrPK && task.bounty.sender === (window as any).nostrPK && (
-                  <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                  <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
                           onClick={async () => {
                             try {
                               const pt = await decryptEcashTokenForFunder(task.bounty!.enc!);
@@ -1641,7 +1641,7 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                 </button>
                 {task.bounty.state === 'locked' && (
                   <>
-                    <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                    <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
                             onClick={() => {
                               // Placeholder unlock: trust user has reissued unlocked token externally
                               const newTok = prompt('Paste unlocked token (after you reissued in your wallet):');
@@ -1676,10 +1676,10 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
         </div>
 
         <div className="pt-2 flex justify-between">
-          <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
+          <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
           <div className="space-x-2">
-            <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
-            <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
+            <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
                     onClick={()=>onSave({...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule})}>
               Save
             </button>
@@ -1708,8 +1708,8 @@ function RecurrenceModal({
     <Modal onClose={onClose} title="Advanced recurrence">
       <RecurrencePicker value={value} onChange={setValue} />
       <div className="mt-4 flex justify-end gap-2">
-        <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onClose}>Cancel</button>
-        <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={() => onApply(value)}>Apply</button>
+        <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onClose}>Cancel</button>
+        <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={() => onApply(value)}>Apply</button>
       </div>
     </Modal>
   );
@@ -1805,7 +1805,7 @@ function Modal({ children, onClose, title }: React.PropsWithChildren<{ onClose: 
       <div className="w-[min(720px,92vw)] max-h-[80vh] overflow-auto bg-neutral-900 border border-neutral-700 rounded-2xl p-4">
         <div className="flex items-center gap-2 mb-3">
           <div className="text-lg font-semibold">{title}</div>
-          <button className="ml-auto px-3 py-1 rounded bg-neutral-800" onClick={onClose}>Close</button>
+          <button className="pressable ml-auto px-3 py-1 rounded bg-neutral-800" onClick={onClose}>Close</button>
         </div>
         {children}
       </div>
@@ -1821,7 +1821,7 @@ function SideDrawer({ title, onClose, children }: React.PropsWithChildren<{ titl
       <div className="absolute right-0 top-0 bottom-0 w-[min(380px,92vw)] bg-neutral-900 border-l border-neutral-800 p-4 shadow-2xl">
         <div className="flex items-center gap-2 mb-3">
           <div className="text-lg font-semibold">{title}</div>
-          <button className="ml-auto px-3 py-1 rounded bg-neutral-800" onClick={onClose}>Close</button>
+          <button className="pressable ml-auto px-3 py-1 rounded bg-neutral-800" onClick={onClose}>Close</button>
         </div>
         <div className="overflow-y-auto max-h-[calc(100vh-80px)]">{children}</div>
       </div>
@@ -1967,7 +1967,7 @@ function SettingsModal({
               placeholder="New board (e.g., Groceries)"
               className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
             />
-            <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={addBoard}>Create</button>
+            <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={addBoard}>Create</button>
           </div>
 
           {/* Pick board to manage */}
@@ -1980,8 +1980,8 @@ function SettingsModal({
             >
               {boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
-            <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>renameBoard(selectedBoardId)}>Rename</button>
-            <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>selectedBoardId && deleteBoard(selectedBoardId)}>Delete</button>
+            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>renameBoard(selectedBoardId)}>Rename</button>
+            <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>selectedBoardId && deleteBoard(selectedBoardId)}>Delete</button>
           </div>
 
           {/* Columns (for lists boards) */}
@@ -1994,13 +1994,13 @@ function SettingsModal({
                     <div className="text-sm">{col.name}</div>
                     <div className="ml-auto flex gap-2">
                       <button className="px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600" onClick={()=>renameColumn(selectedBoard.id, col.id)}>Rename</button>
-                      <button className="px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteColumn(selectedBoard.id, col.id)}>Delete</button>
+                      <button className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteColumn(selectedBoard.id, col.id)}>Delete</button>
                     </div>
                   </li>
                 ))}
               </ul>
               <div className="mt-2">
-                <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>addColumn(selectedBoard.id)}>Add list</button>
+                <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>addColumn(selectedBoard.id)}>Add list</button>
               </div>
               <div className="text-xs text-neutral-400 mt-2">Tasks can be dragged between lists directly on the board.</div>
             </div>

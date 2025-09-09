@@ -787,6 +787,11 @@ export default function App() {
   function deleteTask(id: string) {
     const t = tasks.find(x => x.id === id);
     if (!t) return;
+    // Require confirmation if the task has a bounty that is not claimed yet
+    if (t.bounty && t.bounty.state !== 'claimed') {
+      const ok = confirm('This task has an ecash bounty that is not marked as claimed. Delete anyway?');
+      if (!ok) return;
+    }
     setUndoTask(t);
     setTasks(prev => prev.filter(x => x.id !== id));
     try { publishTaskDeleted(t); } catch {}
@@ -1595,7 +1600,17 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                             } catch (e) { alert("Decrypt failed: " + (e as Error).message); }
                           }}>Reveal (decrypt)</button>
                 )}
-                <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{ setBountyState('claimed'); onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, state: 'claimed', updatedAt: new Date().toISOString() } }); }}>Mark claimed</button>
+                <button
+                  className={`px-3 py-2 rounded-xl ${task.bounty.token ? 'bg-neutral-800' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}`}
+                  disabled={!task.bounty.token}
+                  onClick={() => {
+                    if (!task.bounty.token) return;
+                    setBountyState('claimed');
+                    onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, state: 'claimed', updatedAt: new Date().toISOString() } });
+                  }}
+                >
+                  Mark claimed
+                </button>
                 {task.bounty.state === 'locked' && (
                   <>
                     <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
@@ -1611,7 +1626,16 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                             }}>Revoke</button>
                   </>
                 )}
-                <button className="ml-auto px-3 py-2 rounded-xl bg-neutral-800" onClick={()=> onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: undefined })}>Remove bounty</button>
+                <button
+                  className={`ml-auto px-3 py-2 rounded-xl ${task.bounty.state==='claimed' ? 'bg-neutral-800' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}`}
+                  disabled={task.bounty.state !== 'claimed'}
+                  onClick={() => {
+                    if (task.bounty.state !== 'claimed') return;
+                    onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: undefined });
+                  }}
+                >
+                  Remove bounty
+                </button>
               </div>
             </div>
           )}

@@ -953,7 +953,7 @@ export default function App() {
       if (fromIdx < 0) return prev;
       const task = arr[fromIdx];
 
-        const updated: Task = { ...task };
+      const updated: Task = { ...task };
       if (target.type === "day") {
         updated.column = "day";
         updated.columnId = undefined;
@@ -969,6 +969,12 @@ export default function App() {
       }
       // reveal if user manually places it
       updated.hiddenUntilISO = undefined;
+
+      // un-complete if dragging from Completed back onto the board
+      if (updated.completed) {
+        updated.completed = false;
+        updated.completedAt = undefined;
+      }
 
       // remove original
       arr.splice(fromIdx, 1);

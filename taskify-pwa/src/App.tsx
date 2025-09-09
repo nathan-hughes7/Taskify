@@ -548,13 +548,13 @@ export default function App() {
       ? (boards[0] as Extract<Board, {kind:"lists"}>).columns[0]?.id || "items"
       : (new Date().getDay() as Weekday);
   });
+  const [scheduleDate, setScheduleDate] = useState<string>("");
 
   // recurrence select (with Custom… option)
   const [quickRule, setQuickRule] = useState<
     "none" | "daily" | "weeklyMonFri" | "weeklyWeekends" | "every2d" | "custom"
   >("none");
   const [addCustomRule, setAddCustomRule] = useState<Recurrence>(R_NONE);
-  const [addCustomDue, setAddCustomDue] = useState<string | undefined>(undefined);
   const [showAddAdvanced, setShowAddAdvanced] = useState(false);
 
   // edit modal
@@ -841,8 +841,8 @@ export default function App() {
     const candidate = resolveQuickRule();
     const recurrence = candidate.type === "none" ? undefined : candidate;
     let dueISO = isoForWeekday(0);
-    if (quickRule === "custom" && addCustomDue) {
-      dueISO = startOfDay(new Date(addCustomDue)).toISOString();
+    if (scheduleDate) {
+      dueISO = new Date(scheduleDate + "T00:00").toISOString();
     } else if (currentBoard.kind === "week" && dayChoice !== "bounties") {
       dueISO = isoForWeekday(dayChoice as Weekday);
     }
@@ -873,7 +873,7 @@ export default function App() {
     setNewImages([]);
     setQuickRule("none");
     setAddCustomRule(R_NONE);
-    setAddCustomDue(undefined);
+    setScheduleDate("");
   }
 
   function completeTask(id: string) {
@@ -1107,6 +1107,7 @@ export default function App() {
                 onChange={(e) => {
                   const v = e.target.value;
                   setDayChoice(v === "bounties" ? "bounties" : (Number(v) as Weekday));
+                  setScheduleDate("");
                 }}
                 className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               >
@@ -1259,7 +1260,7 @@ export default function App() {
                         </div>
                         <div className="text-xs text-neutral-400">
                           {currentBoard?.kind === "week"
-                            ? `Due ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
+                            ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
                             : "Completed item"}
                           {t.completedAt ? ` • Completed ${new Date(t.completedAt).toLocaleString()}` : ""}
                         </div>
@@ -1308,7 +1309,7 @@ export default function App() {
                       <div className="text-sm font-medium">{renderTitleWithLink(t.title, t.note)}</div>
                       <div className="text-xs text-neutral-400">
                         {currentBoard?.kind === "week"
-                          ? `Due ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
+                          ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
                           : "Hidden item"}
                         {t.hiddenUntilISO ? ` • Reveals ${new Date(t.hiddenUntilISO).toLocaleDateString()}` : ""}
                       </div>
@@ -1371,10 +1372,16 @@ export default function App() {
       {showAddAdvanced && (
         <RecurrenceModal
           initial={addCustomRule}
-          initialDue={addCustomDue}
-          showDueDate
+          initialSchedule={scheduleDate}
           onClose={() => setShowAddAdvanced(false)}
-          onApply={(r, due) => { setAddCustomRule(r); setAddCustomDue(due); setShowAddAdvanced(false); }}
+          onApply={(r, sched) => {
+            setAddCustomRule(r);
+            setScheduleDate(sched || "");
+            if (sched && currentBoard?.kind === "week" && dayChoice !== "bounties") {
+              setDayChoice(new Date(sched).getDay() as Weekday);
+            }
+            setShowAddAdvanced(false);
+          }}
         />
       )}
 
@@ -1691,7 +1698,7 @@ function labelOf(r: Recurrence): string {
 }
 
 /* Edit modal with Advanced recurrence */
-function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
+function EditModal({ task, onCancel, onDelete, onSave, weekStart }: { 
   task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void; weekStart: Weekday;
 }) {
   const [title, setTitle] = useState(task.title);
@@ -1699,7 +1706,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
   const [images, setImages] = useState<string[]>(task.images || []);
   const [rule, setRule] = useState<Recurrence>(task.recurrence ?? R_NONE);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [dueDate, setDueDate] = useState(task.dueISO.slice(0,10));
+  const [scheduledDate, setScheduledDate] = useState(task.dueISO.slice(0,10));
   const [bountyToken, setBountyToken] = useState(task.bounty?.token || "");
   const [bountyAmount, setBountyAmount] = useState<number | "">(task.bounty?.amount ?? "");
   const [, setBountyState] = useState<Task["bounty"]["state"]>(task.bounty?.state || "locked");
@@ -1721,7 +1728,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
   }
 
   function save(overrides: Partial<Task> = {}) {
-    const dueISO = startOfDay(new Date(dueDate)).toISOString();
+    const dueISO = new Date(scheduledDate + "T00:00").toISOString();
     const due = startOfDay(new Date(dueISO));
     const nowSow = startOfWeek(new Date(), weekStart);
     const dueSow = startOfWeek(due, weekStart);
@@ -1740,7 +1747,18 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
   }
 
   return (
-    <Modal onClose={onCancel} title="Edit task">
+    <Modal
+      onClose={onCancel}
+      title="Edit task"
+      actions={
+        <button
+          className="pressable px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500"
+          onClick={() => save()}
+        >
+          Save
+        </button>
+      }
+    >
       <div className="space-y-4">
         <input value={title} onChange={e=>setTitle(e.target.value)}
                className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Title"/>
@@ -1758,12 +1776,17 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
           </div>
         )}
 
-        <input
-          type="date"
-          value={dueDate}
-          onChange={e=>setDueDate(e.target.value)}
-          className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-        />
+        <div>
+          <label htmlFor="edit-schedule" className="block mb-1 text-sm font-medium">Scheduled for</label>
+          <input
+            id="edit-schedule"
+            type="date"
+            value={scheduledDate}
+            onChange={e=>setScheduledDate(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+            title="Scheduled date"
+          />
+        </div>
 
         {/* Recurrence section */}
         <div className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
@@ -1919,13 +1942,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
 
         <div className="pt-2 flex justify-between">
           <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
-          <div className="space-x-2">
-            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
-              <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
-                      onClick={()=>save()}>
-                Save
-              </button>
-          </div>
+          <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
         </div>
       </div>
 
@@ -1943,39 +1960,39 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
 /* Advanced recurrence modal & picker */
 function RecurrenceModal({
   initial,
-  initialDue,
   onClose,
   onApply,
-  showDueDate = false,
+  initialSchedule,
 }: {
   initial: Recurrence;
-  initialDue?: string;
   onClose: () => void;
-  onApply: (r: Recurrence, dueISO?: string) => void;
-  showDueDate?: boolean;
+  onApply: (r: Recurrence, scheduleISO?: string) => void;
+  initialSchedule?: string;
 }) {
   const [value, setValue] = useState<Recurrence>(initial);
-  const [due, setDue] = useState(initialDue ? initialDue.slice(0, 10) : "");
+  const [schedule, setSchedule] = useState(initialSchedule ?? "");
 
   return (
     <Modal onClose={onClose} title="Advanced recurrence">
-      <RecurrencePicker value={value} onChange={setValue} />
-      {showDueDate && (
-        <div className="mt-4">
-          <div className="text-sm font-medium mb-2">Due date</div>
+      {initialSchedule !== undefined && (
+        <div className="mb-4">
+          <label htmlFor="advanced-schedule" className="block mb-1 text-sm font-medium">Scheduled for</label>
           <input
+            id="advanced-schedule"
             type="date"
-            value={due}
-            onChange={(e) => setDue(e.target.value)}
-            className="px-2 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+            value={schedule}
+            onChange={(e) => setSchedule(e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+            title="Scheduled date"
           />
         </div>
       )}
+      <RecurrencePicker value={value} onChange={setValue} />
       <div className="mt-4 flex justify-end gap-2">
         <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onClose}>Cancel</button>
         <button
           className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
-          onClick={() => onApply(value, showDueDate && due ? new Date(due).toISOString() : undefined)}
+          onClick={() => onApply(value, initialSchedule !== undefined ? schedule : undefined)}
         >
           Apply
         </button>
@@ -2085,13 +2102,16 @@ function RecurrencePicker({ value, onChange }: { value: Recurrence; onChange: (r
 }
 
 /* Generic modal */
-function Modal({ children, onClose, title }: React.PropsWithChildren<{ onClose: ()=>void; title?: string }>) {
+function Modal({ children, onClose, title, actions }: React.PropsWithChildren<{ onClose: ()=>void; title?: React.ReactNode; actions?: React.ReactNode }>) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="w-[min(720px,92vw)] max-h-[80vh] overflow-auto bg-neutral-900 border border-neutral-700 rounded-2xl p-4">
         <div className="flex items-center gap-2 mb-3">
           <div className="text-lg font-semibold">{title}</div>
-          <button className="pressable ml-auto px-3 py-1 rounded bg-neutral-800" onClick={onClose}>Close</button>
+          <div className="ml-auto flex items-center gap-2">
+            {actions}
+            <button className="pressable px-3 py-1 rounded bg-neutral-800" onClick={onClose}>Close</button>
+          </div>
         </div>
         {children}
       </div>

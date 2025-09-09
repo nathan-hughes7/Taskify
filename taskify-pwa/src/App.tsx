@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate } from "nostr-tools";
+import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19 } from "nostr-tools";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sun
@@ -19,6 +19,7 @@ type Task = {
   createdBy?: string;             // nostr pubkey of task creator
   title: string;
   note?: string;
+  images?: string[];              // base64 data URLs for pasted images
   dueISO: string;                 // for week board day grouping
   completed?: boolean;
   completedAt?: string;
@@ -288,6 +289,44 @@ export async function decryptEcashTokenForFunder(enc: {alg:"aes-gcm-256";iv:stri
   return new TextDecoder().decode(new Uint8Array(ptBuf));
 }
 
+async function fileToDataURL(file: File): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(fr.error);
+    fr.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 1024;
+        let { width, height } = img;
+        if (width > height) {
+          if (width > max) {
+            height = Math.round((height * max) / width);
+            width = max;
+          }
+        } else {
+          if (height > max) {
+            width = Math.round((width * max) / height);
+            height = max;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(fr.result as string);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.8));
+      };
+      img.onerror = () => reject(new Error("Image load error"));
+      img.src = fr.result as string;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
 /* ================= Date helpers ================= */
 function startOfDay(d: Date) {
   const nd = new Date(d);
@@ -414,7 +453,13 @@ function useTasks() {
   const [tasks, setTasks] = useState<Task[]>(() => {
     try { return JSON.parse(localStorage.getItem(LS_TASKS) || "[]"); } catch { return []; }
   });
-  useEffect(() => { localStorage.setItem(LS_TASKS, JSON.stringify(tasks)); }, [tasks]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_TASKS, JSON.stringify(tasks));
+    } catch (e) {
+      console.error("Failed to save tasks", e);
+    }
+  }, [tasks]);
   return [tasks, setTasks] as const;
 }
 
@@ -457,6 +502,25 @@ export default function App() {
     try { localStorage.setItem(LS_NOSTR_SK, bytesToHex(sk)); } catch {}
   };
 
+  const setCustomNostrKey = (key: string) => {
+    try {
+      let hex = key.trim();
+      if (hex.startsWith("nsec")) {
+        const dec = nip19.decode(hex);
+        if (typeof dec.data !== "string") throw new Error();
+        hex = dec.data;
+      }
+      if (!/^[0-9a-fA-F]{64}$/.test(hex)) throw new Error();
+      const sk = hexToBytes(hex);
+      setNostrSK(sk);
+      const pk = getPublicKey(sk);
+      setNostrPK(pk);
+      try { localStorage.setItem(LS_NOSTR_SK, hex); } catch {}
+    } catch {
+      alert("Invalid private key");
+    }
+  };
+
   async function nostrPublish(relays: string[], template: EventTemplate) {
     const ev = finalizeEvent(template, nostrSK);
     pool.publishEvent(relays, ev as unknown as NostrEvent);
@@ -475,6 +539,7 @@ export default function App() {
 
   // add bar
   const [newTitle, setNewTitle] = useState("");
+  const [newImages, setNewImages] = useState<string[]>([]);
   const [dayChoice, setDayChoice] = useState<DayChoice>(() => {
     return (boards[0].kind === "lists")
       ? (boards[0] as Extract<Board, {kind:"lists"}>).columns[0]?.id || "items"
@@ -734,9 +799,24 @@ export default function App() {
     });
   }
 
+  async function handleAddPaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imgs = Array.from(items).filter(it => it.type.startsWith("image/"));
+    if (imgs.length) {
+      e.preventDefault();
+      const datas: string[] = [];
+      for (const it of imgs) {
+        const file = it.getAsFile();
+        if (file) datas.push(await fileToDataURL(file));
+      }
+      setNewImages(prev => [...prev, ...datas]);
+    }
+  }
+
   function addTask() {
-    const title = newTitle.trim();
-    if (!title || !currentBoard) return;
+    const title = newTitle.trim() || (newImages.length ? "Image" : "");
+    if ((!title && !newImages.length) || !currentBoard) return;
 
     const candidate = resolveQuickRule();
     const recurrence = candidate.type === "none" ? undefined : candidate;
@@ -750,6 +830,7 @@ export default function App() {
       completed: false,
       recurrence,
     };
+    if (newImages.length) t.images = newImages;
 
     if (currentBoard.kind === "week") {
       if (dayChoice === "bounties") {
@@ -771,6 +852,7 @@ export default function App() {
     // Publish to Nostr if board is shared
     try { maybePublishTask(t); } catch {}
     setNewTitle("");
+    setNewImages([]);
     setQuickRule("none");
     setAddCustomRule(R_NONE);
   }
@@ -966,9 +1048,17 @@ export default function App() {
             <input
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
+              onPaste={handleAddPaste}
               placeholder="New task…"
               className="flex-1 min-w-[220px] px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
             />
+            {newImages.length > 0 && (
+              <div className="w-full flex gap-2 mt-2">
+                {newImages.map((img, i) => (
+                  <img key={i} src={img} className="h-16 rounded-lg" />
+                ))}
+              </div>
+            )}
 
             {/* Column picker (adapts to board) */}
             {currentBoard.kind === "week" ? (
@@ -1130,7 +1220,7 @@ export default function App() {
                   <li key={t.id} className="p-3 rounded-xl bg-neutral-800 border border-neutral-700">
                     <div className="flex items-start gap-2">
                       <div className="flex-1">
-                        <div className="text-sm font-medium">
+                      <div className="text-sm font-medium">
                           {renderTitleWithLink(t.title, t.note)}
                         </div>
                         <div className="text-xs text-neutral-400">
@@ -1139,7 +1229,7 @@ export default function App() {
                             : "Completed item"}
                           {t.completedAt ? ` • Completed ${new Date(t.completedAt).toLocaleString()}` : ""}
                         </div>
-                        {!!t.note && <div className="text-xs text-neutral-400 mt-1 break-words">{autolink(t.note)}</div>}
+                        <TaskMedia task={t} />
                         {t.bounty && (
                           <div className="mt-2">
                             <span className={`text-[11px] px-2 py-0.5 rounded-full border ${t.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : t.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : t.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
@@ -1188,7 +1278,7 @@ export default function App() {
                           : "Hidden item"}
                         {t.hiddenUntilISO ? ` • Reveals ${new Date(t.hiddenUntilISO).toLocaleDateString()}` : ""}
                       </div>
-                      {!!t.note && <div className="text-xs text-neutral-400 mt-1 break-words">{autolink(t.note)}</div>}
+                      <TaskMedia task={t} />
                     </div>
                   </div>
                   <div className="mt-2 flex gap-2">
@@ -1263,6 +1353,8 @@ export default function App() {
           defaultRelays={defaultRelays}
           setDefaultRelays={setDefaultRelays}
           pubkeyHex={nostrPK}
+          onGenerateKey={rotateNostrKey}
+          onSetKey={setCustomNostrKey}
           onShareBoard={(boardId, relayCsv) => {
             const r = (relayCsv || "").split(",").map(s=>s.trim()).filter(Boolean);
             const relays = r.length ? r : defaultRelays;
@@ -1321,8 +1413,97 @@ function autolink(text: string) {
           </a>
         ) : (
           <span key={i}>{p}</span>
-        )
+      )
+    )}
+  </>
+  );
+}
+
+type PreviewData = { url: string; title: string; description?: string; image?: string };
+const previewCache: Record<string, PreviewData | null> = {};
+
+function UrlPreview({ text }: { text: string }) {
+  const [data, setData] = useState<PreviewData | null>(null);
+  useEffect(() => {
+    const m = text.match(/https?:\/\/[^\s)]+/i);
+    if (!m) return;
+    const url = m[0];
+    if (previewCache[url] !== undefined) {
+      setData(previewCache[url]);
+      return;
+    }
+    previewCache[url] = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("https://r.jina.ai/" + url);
+        const html = await res.text();
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        const title =
+          doc.querySelector('meta[property="og:title"]')?.getAttribute("content") ||
+          doc.title || url;
+        const description =
+          doc.querySelector('meta[property="og:description"]')?.getAttribute("content") ||
+          doc.querySelector('meta[name="description"]')?.getAttribute("content") ||
+          undefined;
+        const rawImg = doc
+          .querySelector('meta[property="og:image"]')
+          ?.getAttribute("content") || undefined;
+        let image: string | undefined;
+        if (rawImg) {
+          try {
+            image = new URL(rawImg, url).href;
+          } catch {
+            image = rawImg;
+          }
+        }
+        const p: PreviewData = { url, title, description, image };
+        previewCache[url] = p;
+        if (!cancelled) setData(p);
+      } catch {
+        previewCache[url] = null;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [text]);
+
+  if (!data) return null;
+  return (
+    <a
+      href={data.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="block border border-neutral-700 rounded-lg overflow-hidden mt-2"
+    >
+      {data.image && <img src={data.image} className="w-full h-40 object-cover" />}
+      <div className="p-2 text-xs">
+        <div className="font-medium truncate">{data.title}</div>
+        {data.description && (
+          <div className="text-neutral-400 overflow-hidden text-ellipsis" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+            {data.description}
+          </div>
+        )}
+      </div>
+    </a>
+  );
+}
+
+function TaskMedia({ task }: { task: Task }) {
+  return (
+    <>
+      {!!task.note && (
+        <div className="text-xs text-neutral-400 mt-1 break-words">{autolink(task.note)}</div>
       )}
+      {task.images?.length ? (
+        <div className="mt-2 space-y-2">
+          {task.images.map((img, i) => (
+            <img key={i} src={img} className="max-h-40 rounded-lg" />
+          ))}
+        </div>
+      ) : null}
+      <UrlPreview text={`${task.title} ${task.note || ""}`} />
     </>
   );
 }
@@ -1437,26 +1618,7 @@ function Card({
           <div className="text-sm font-medium leading-5 break-words">
             {renderTitleWithLink(task.title, task.note)}
           </div>
-          {!!task.note && (
-  <div
-    className="text-xs text-neutral-400"
-    style={{
-      display: "-webkit-box",
-      WebkitLineClamp: 2,
-      WebkitBoxOrient: "vertical",
-      overflow: "hidden",
-      // Make long URLs wrap inside <a>
-      wordBreak: "break-word",      // legacy/fallback
-      overflowWrap: "anywhere"      // modern, works great on iOS Safari
-    }}
-    title={task.note}
-  >
-    {/* Keep content inline so the clamp works with anchors */}
-    <span style={{ display: "inline", whiteSpace: "normal" }} className="break-all">
-      {autolink(task.note)}
-    </span>
-  </div>
-)}
+          <TaskMedia task={task} />
           {/* Bounty badge */}
           {task.bounty && (
             <div className="mt-2">
@@ -1505,6 +1667,7 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
 }) {
   const [title, setTitle] = useState(task.title);
   const [note, setNote] = useState(task.note || "");
+  const [images, setImages] = useState<string[]>(task.images || []);
   const [rule, setRule] = useState<Recurrence>(task.recurrence ?? R_NONE);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [bountyToken, setBountyToken] = useState(task.bounty?.token || "");
@@ -1514,14 +1677,39 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
   const myPubkey = (window as any).nostrPK as string | undefined;
   const iAmFunder = !!(task.bounty?.sender && myPubkey && task.bounty.sender === myPubkey);
 
+  async function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imgs = Array.from(items).filter(it => it.type.startsWith("image/"));
+    if (imgs.length) {
+      e.preventDefault();
+      const datas: string[] = [];
+      for (const it of imgs) {
+        const file = it.getAsFile();
+        if (file) datas.push(await fileToDataURL(file));
+      }
+      setImages(prev => [...prev, ...datas]);
+    }
+  }
+
   return (
     <Modal onClose={onCancel} title="Edit task">
       <div className="space-y-4">
         <input value={title} onChange={e=>setTitle(e.target.value)}
                className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Title"/>
-        <textarea value={note} onChange={e=>setNote(e.target.value)}
+        <textarea value={note} onChange={e=>setNote(e.target.value)} onPaste={handlePaste}
                   className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" rows={3}
                   placeholder="Notes (optional)"/>
+        {images.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {images.map((img, i) => (
+              <div key={i} className="relative">
+                <img src={img} className="max-h-40 rounded-lg" />
+                <button type="button" className="absolute top-1 right-1 bg-black/70 rounded-full px-1 text-xs" onClick={() => setImages(images.filter((_, j) => j !== i))}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Recurrence section */}
         <div className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
@@ -1592,7 +1780,7 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                               return;
                             }
                           }
-                          onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: b });
+                            onSave({ ...task, title, note: note || undefined, images: images.length ? images : undefined, recurrence: rule.type==="none"? undefined : rule, bounty: b });
                         }}
                 >Attach</button>
               </div>
@@ -1623,8 +1811,8 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                   <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
                           onClick={async () => {
                             try {
-                              const pt = await decryptEcashTokenForFunder(task.bounty!.enc!);
-                              onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, token: pt, enc: undefined, state: 'unlocked', updatedAt: new Date().toISOString() } });
+                                const pt = await decryptEcashTokenForFunder(task.bounty!.enc!);
+                                onSave({ ...task, title, note: note || undefined, images: images.length ? images : undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, token: pt, enc: undefined, state: 'unlocked', updatedAt: new Date().toISOString() } });
                             } catch (e) { alert("Decrypt failed: " + (e as Error).message); }
                           }}>Reveal (decrypt)</button>
                 )}
@@ -1634,7 +1822,7 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                   onClick={() => {
                     if (!task.bounty.token) return;
                     setBountyState('claimed');
-                    onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, state: 'claimed', updatedAt: new Date().toISOString() } });
+                      onSave({ ...task, title, note: note || undefined, images: images.length ? images : undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, state: 'claimed', updatedAt: new Date().toISOString() } });
                   }}
                 >
                   Mark claimed
@@ -1646,14 +1834,14 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                               // Placeholder unlock: trust user has reissued unlocked token externally
                               const newTok = prompt('Paste unlocked token (after you reissued in your wallet):');
                               if (!newTok) return;
-                              onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, token: newTok, state: 'unlocked', updatedAt: new Date().toISOString() } });
+                                onSave({ ...task, title, note: note || undefined, images: images.length ? images : undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, token: newTok, state: 'unlocked', updatedAt: new Date().toISOString() } });
                             }}>Unlock…</button>
                     <button
                       className={`px-3 py-2 rounded-xl ${((window as any).nostrPK && (task.bounty!.sender === (window as any).nostrPK || task.createdBy === (window as any).nostrPK)) ? 'bg-rose-600/80 hover:bg-rose-600' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}`}
                       disabled={!((window as any).nostrPK && (task.bounty!.sender === (window as any).nostrPK || task.createdBy === (window as any).nostrPK))}
                       onClick={() => {
                         if (!((window as any).nostrPK && (task.bounty!.sender === (window as any).nostrPK || task.createdBy === (window as any).nostrPK))) return;
-                        onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, state: 'revoked', updatedAt: new Date().toISOString() } });
+                          onSave({ ...task, title, note: note || undefined, images: images.length ? images : undefined, recurrence: rule.type==="none"? undefined : rule, bounty: { ...task.bounty!, state: 'revoked', updatedAt: new Date().toISOString() } });
                       }}
                     >
                       Revoke
@@ -1665,7 +1853,7 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
                   disabled={task.bounty.state !== 'claimed'}
                   onClick={() => {
                     if (task.bounty.state !== 'claimed') return;
-                    onSave({ ...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule, bounty: undefined });
+                      onSave({ ...task, title, note: note || undefined, images: images.length ? images : undefined, recurrence: rule.type==="none"? undefined : rule, bounty: undefined });
                   }}
                 >
                   Remove bounty
@@ -1679,10 +1867,10 @@ function EditModal({ task, onCancel, onDelete, onSave }: {
           <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
           <div className="space-x-2">
             <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
-            <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
-                    onClick={()=>onSave({...task, title, note: note || undefined, recurrence: rule.type==="none"? undefined : rule})}>
-              Save
-            </button>
+              <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                      onClick={()=>onSave({...task, title, note: note || undefined, images: images.length ? images : undefined, recurrence: rule.type==="none"? undefined : rule})}>
+                Save
+              </button>
           </div>
         </div>
       </div>
@@ -1840,6 +2028,8 @@ function SettingsModal({
   defaultRelays,
   setDefaultRelays,
   pubkeyHex,
+  onGenerateKey,
+  onSetKey,
   onShareBoard,
   onJoinBoard,
   onBoardChanged,
@@ -1854,6 +2044,8 @@ function SettingsModal({
   defaultRelays: string[];
   setDefaultRelays: (rls: string[]) => void;
   pubkeyHex: string;
+  onGenerateKey: () => void;
+  onSetKey: (hex: string) => void;
   onShareBoard: (boardId: string, relaysCsv?: string) => void;
   onJoinBoard: (nostrId: string, name?: string, relaysCsv?: string) => void;
   onBoardChanged: (boardId: string) => void;
@@ -1866,6 +2058,8 @@ function SettingsModal({
   const [joinId, setJoinId] = useState("");
   const [joinRelays, setJoinRelays] = useState("");
   const [joinName, setJoinName] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [customSk, setCustomSk] = useState("");
 
   function addBoard() {
     const name = newBoardName.trim();
@@ -2009,7 +2203,7 @@ function SettingsModal({
           )}
         </section>
 
-        {/* Nostr shared boards */}
+        {showAdvanced ? (
         <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
           <div className="flex items-center gap-2 mb-3">
             <div className="text-sm font-medium">Nostr (Shared boards)</div>
@@ -2023,6 +2217,17 @@ function SettingsModal({
                      className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
               <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{if(pubkeyHex) navigator.clipboard?.writeText(pubkeyHex);}}>Copy</button>
             </div>
+          </div>
+
+          {/* Private key options */}
+          <div className="mb-3 space-y-2">
+            <div className="text-xs text-neutral-400 mb-1">Custom Nostr private key (hex or nsec)</div>
+            <div className="flex gap-2 items-center">
+              <input value={customSk} onChange={e=>setCustomSk(e.target.value)}
+                     className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="nsec or hex"/>
+              <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{onSetKey(customSk); setCustomSk('');}}>Use</button>
+            </div>
+            <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onGenerateKey}>Generate new key</button>
           </div>
 
           {/* Default relays */}
@@ -2078,7 +2283,15 @@ function SettingsModal({
               <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onJoinBoard(joinId, joinName, joinRelays)}>Join</button>
             </div>
           </div>
+          <div className="mt-3">
+            <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>setShowAdvanced(false)}>Hide advanced</button>
+          </div>
         </section>
+        ) : (
+          <div>
+            <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>setShowAdvanced(true)}>Show advanced settings</button>
+          </div>
+        )}
 
         <div className="flex justify-end">
           <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onClose}>Close</button>

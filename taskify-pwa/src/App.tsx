@@ -842,7 +842,7 @@ export default function App() {
     const recurrence = candidate.type === "none" ? undefined : candidate;
     let dueISO = isoForWeekday(0);
     if (quickRule === "custom" && addCustomDue) {
-      dueISO = startOfDay(new Date(addCustomDue)).toISOString();
+      dueISO = new Date(addCustomDue + "T00:00").toISOString();
     } else if (currentBoard.kind === "week" && dayChoice !== "bounties") {
       dueISO = isoForWeekday(dayChoice as Weekday);
     }
@@ -1691,7 +1691,7 @@ function labelOf(r: Recurrence): string {
 }
 
 /* Edit modal with Advanced recurrence */
-function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
+function EditModal({ task, onCancel, onDelete, onSave, weekStart }: { 
   task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void; weekStart: Weekday;
 }) {
   const [title, setTitle] = useState(task.title);
@@ -1721,7 +1721,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
   }
 
   function save(overrides: Partial<Task> = {}) {
-    const dueISO = startOfDay(new Date(dueDate)).toISOString();
+    const dueISO = new Date(dueDate + "T00:00").toISOString();
     const due = startOfDay(new Date(dueISO));
     const nowSow = startOfWeek(new Date(), weekStart);
     const dueSow = startOfWeek(due, weekStart);
@@ -1740,7 +1740,18 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
   }
 
   return (
-    <Modal onClose={onCancel} title="Edit task">
+    <Modal
+      onClose={onCancel}
+      title="Edit task"
+      actions={
+        <button
+          className="pressable px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500"
+          onClick={() => save()}
+        >
+          Save
+        </button>
+      }
+    >
       <div className="space-y-4">
         <input value={title} onChange={e=>setTitle(e.target.value)}
                className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Title"/>
@@ -1919,13 +1930,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
 
         <div className="pt-2 flex justify-between">
           <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
-          <div className="space-x-2">
-            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
-              <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
-                      onClick={()=>save()}>
-                Save
-              </button>
-          </div>
+          <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
         </div>
       </div>
 
@@ -2085,13 +2090,16 @@ function RecurrencePicker({ value, onChange }: { value: Recurrence; onChange: (r
 }
 
 /* Generic modal */
-function Modal({ children, onClose, title }: React.PropsWithChildren<{ onClose: ()=>void; title?: string }>) {
+function Modal({ children, onClose, title, actions }: React.PropsWithChildren<{ onClose: ()=>void; title?: React.ReactNode; actions?: React.ReactNode }>) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="w-[min(720px,92vw)] max-h-[80vh] overflow-auto bg-neutral-900 border border-neutral-700 rounded-2xl p-4">
         <div className="flex items-center gap-2 mb-3">
           <div className="text-lg font-semibold">{title}</div>
-          <button className="pressable ml-auto px-3 py-1 rounded bg-neutral-800" onClick={onClose}>Close</button>
+          <div className="ml-auto flex items-center gap-2">
+            {actions}
+            <button className="pressable px-3 py-1 rounded bg-neutral-800" onClick={onClose}>Close</button>
+          </div>
         </div>
         {children}
       </div>

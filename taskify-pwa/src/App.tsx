@@ -1144,7 +1144,6 @@ export default function App() {
                           task={t}
                           onComplete={() => completeTask(t.id)}
                           onEdit={() => setEditing(t)}
-                          onDelete={() => deleteTask(t.id)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "day", day }, t.id)}
                         />
                       ))}
@@ -1162,7 +1161,6 @@ export default function App() {
                           task={t}
                           onComplete={() => completeTask(t.id)}
                           onEdit={() => setEditing(t)}
-                          onDelete={() => deleteTask(t.id)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
                         />
                     ))}
@@ -1190,7 +1188,6 @@ export default function App() {
                           task={t}
                           onComplete={() => completeTask(t.id)}
                           onEdit={() => setEditing(t)}
-                          onDelete={() => deleteTask(t.id)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
                         />
                     ))}
@@ -1241,7 +1238,6 @@ export default function App() {
                       </div>
                       <div className="flex gap-1">
                         <IconButton label="Restore" onClick={() => restoreTask(t.id)} intent="success">↩︎</IconButton>
-                        <IconButton label="Delete" onClick={() => deleteTask(t.id)} intent="danger">🗑</IconButton>
                       </div>
                     </div>
                   </li>
@@ -1553,15 +1549,13 @@ function Card({
   task,
   onComplete,
   onEdit,
-    onDelete,
-    onDropBefore,
-  }: {
-    task: Task;
-    onComplete: () => void;
-    onEdit: () => void;
-    onDelete: () => void;
-    onDropBefore: (dragId: string) => void;
-  }) {
+  onDropBefore,
+}: {
+  task: Task;
+  onComplete: () => void;
+  onEdit: () => void;
+  onDropBefore: (dragId: string) => void;
+}) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
 
@@ -1619,11 +1613,6 @@ function Card({
           </div>
         </div>
 
-        {/* Circular edit/delete buttons */}
-        <div className="flex gap-1">
-          <IconButton label="Edit" onClick={onEdit}>✎</IconButton>
-          <IconButton label="Delete" onClick={onDelete} intent="danger">🗑</IconButton>
-        </div>
       </div>
 
       <TaskMedia task={task} />

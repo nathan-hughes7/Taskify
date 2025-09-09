@@ -1466,7 +1466,7 @@ function UrlPreview({ text }: { text: string }) {
       href={data.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="block border border-neutral-700 rounded-lg overflow-hidden mt-2"
+      className="block w-full border border-neutral-700 rounded-lg overflow-hidden mt-2"
     >
       {data.image && <img src={data.image} className="w-full h-40 object-cover" />}
       <div className="p-2 text-xs">
@@ -1490,7 +1490,7 @@ function TaskMedia({ task }: { task: Task }) {
       {task.images?.length ? (
         <div className="mt-2 space-y-2">
           {task.images.map((img, i) => (
-            <img key={i} src={img} className="max-h-40 rounded-lg" />
+            <img key={i} src={img} className="max-h-40 w-full object-contain rounded-lg" />
           ))}
         </div>
       ) : null}
@@ -1605,7 +1605,7 @@ function Card({
         </button>
 
         {/* Title (hyperlinked if note contains a URL) */}
-        <div className="flex-1 cursor-pointer" onClick={onEdit}>
+        <div className="flex-1 min-w-0 cursor-pointer" onClick={onEdit}>
           <div className="text-sm font-medium leading-5 break-words">
             {renderTitleWithLink(task.title, task.note)}
           </div>
@@ -2251,11 +2251,15 @@ function SettingsModal({
                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
                   <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{navigator.clipboard?.writeText(selectedBoard.nostr!.boardId);}}>Copy</button>
                 </div>
-                <div className="text-xs text-neutral-400">Relays (CSV)</div>
-                <input value={(selectedBoard.nostr.relays || []).join(",")} onChange={(e)=>{
-                  const relays = e.target.value.split(",").map(s=>s.trim()).filter(Boolean);
-                  setBoards(prev => prev.map(b => b.id === selectedBoard.id ? ({...b, nostr: { boardId: selectedBoard.nostr!.boardId, relays } }) : b));
-                }} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                {showAdvanced && (
+                  <>
+                    <div className="text-xs text-neutral-400">Relays (CSV)</div>
+                    <input value={(selectedBoard.nostr.relays || []).join(",")} onChange={(e)=>{
+                      const relays = e.target.value.split(",").map(s=>s.trim()).filter(Boolean);
+                      setBoards(prev => prev.map(b => b.id === selectedBoard.id ? ({...b, nostr: { boardId: selectedBoard.nostr!.boardId, relays } }) : b));
+                    }} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                  </>
+                )}
                 <div className="flex gap-2">
                   <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onBoardChanged(selectedBoard.id)}>Republish metadata</button>
                   <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>{
@@ -2265,9 +2269,13 @@ function SettingsModal({
               </div>
             ) : (
               <div className="mt-2 space-y-2">
-                <div className="text-xs text-neutral-400">Relays override (optional, CSV)</div>
-                <input value={relaysCsv} onChange={(e)=>setRelaysCsv(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="wss://relay1, wss://relay2"/>
-                <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={()=>onShareBoard(selectedBoard.id, relaysCsv)}>Share this board</button>
+                {showAdvanced && (
+                  <>
+                    <div className="text-xs text-neutral-400">Relays override (optional, CSV)</div>
+                    <input value={relaysCsv} onChange={(e)=>setRelaysCsv(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="wss://relay1, wss://relay2"/>
+                  </>
+                )}
+                <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={()=>onShareBoard(selectedBoard.id, showAdvanced ? relaysCsv : "")}>Share this board</button>
               </div>
             )}
           </div>
@@ -2278,8 +2286,10 @@ function SettingsModal({
             <div className="mt-2 space-y-2">
               <input value={joinId} onChange={e=>setJoinId(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Board ID (d tag)"/>
               <input value={joinName} onChange={e=>setJoinName(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Local name (optional)"/>
-              <input value={joinRelays} onChange={e=>setJoinRelays(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Relays (optional CSV)"/>
-              <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onJoinBoard(joinId, joinName, joinRelays)}>Join</button>
+              {showAdvanced && (
+                <input value={joinRelays} onChange={e=>setJoinRelays(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Relays (optional CSV)"/>
+              )}
+              <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onJoinBoard(joinId, joinName, showAdvanced ? joinRelays : "")}>Join</button>
             </div>
           </div>
         </section>

@@ -2,12 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useCashu } from "../context/CashuContext";
 
 export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { ready, mintUrl, setMintUrl, balance, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice } = useCashu();
+  const { mintUrl, balance, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice } = useCashu();
 
-  const [urlInput, setUrlInput] = useState(mintUrl || "");
   const [mintAmt, setMintAmt] = useState<string>("");
   const [mintQuote, setMintQuote] = useState<{ request: string; quote: string; expiry: number } | null>(null);
-  const [mintStatus, setMintStatus] = useState<"idle" | "waiting" | "paid" | "minted" | "error">("idle");
+  const [mintStatus, setMintStatus] = useState<"idle" | "waiting" | "minted" | "error">("idle");
   const [mintError, setMintError] = useState<string>("");
 
   const [sendAmt, setSendAmt] = useState<string>("");
@@ -20,12 +19,10 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
   const [lnState, setLnState] = useState<"idle" | "sending" | "done" | "error">("idle");
   const [lnError, setLnError] = useState<string>("");
 
-  useEffect(() => { if (open) setUrlInput(mintUrl || ""); }, [open, mintUrl]);
-
-  useEffect(() => {
-    if (!open) {
-      setMintQuote(null);
-      setMintStatus("idle");
+    useEffect(() => {
+      if (!open) {
+        setMintQuote(null);
+        setMintStatus("idle");
       setMintError("");
       setSendTokenStr("");
       setRecvMsg("");
@@ -40,54 +37,40 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     return `${parts.join(" ")} • ${mintUrl}`;
   }, [info, mintUrl]);
 
-  async function handleConnectMint() {
-    try {
-      await setMintUrl(urlInput.trim());
-    } catch (e: any) {
-      alert(e?.message || String(e));
+    async function handleCreateInvoice() {
+      setMintError("");
+      try {
+        const amt = Math.max(0, Math.floor(Number(mintAmt) || 0));
+        if (!amt) throw new Error("Enter amount in sats");
+        const q = await createMintInvoice(amt);
+        setMintQuote(q);
+        setMintStatus("waiting");
+      } catch (e: any) {
+        setMintError(e?.message || String(e));
+      }
     }
-  }
 
-  async function handleCreateInvoice() {
-    setMintError("");
-    try {
-      const amt = Math.max(0, Math.floor(Number(mintAmt) || 0));
-      if (!amt) throw new Error("Enter amount in sats");
-      const q = await createMintInvoice(amt);
-      setMintQuote(q);
-      setMintStatus("waiting");
-    } catch (e: any) {
-      setMintError(e?.message || String(e));
-    }
-  }
-
-  async function handleCheckInvoice() {
-    if (!mintQuote) return;
-    try {
-      const st = await checkMintQuote(mintQuote.quote);
-      if (st === "PAID") setMintStatus("paid");
-      else if (st === "ISSUED") setMintStatus("minted");
-      else setMintStatus("waiting");
-    } catch (e: any) {
-      setMintError(e?.message || String(e));
-      setMintStatus("error");
-    }
-  }
-
-  async function handleClaimMint() {
-    if (!mintQuote) return;
-    try {
-      const amt = Math.max(0, Math.floor(Number(mintAmt) || 0));
-      if (!amt) throw new Error("Missing amount");
-      await claimMint(mintQuote.quote, amt);
-      setMintStatus("minted");
-      setMintQuote(null);
-      setMintAmt("");
-    } catch (e: any) {
-      setMintError(e?.message || String(e));
-      setMintStatus("error");
-    }
-  }
+    useEffect(() => {
+      if (!mintQuote) return;
+      const timer = setInterval(async () => {
+        try {
+          const st = await checkMintQuote(mintQuote.quote);
+          if (st === "PAID") {
+            const amt = Math.max(0, Math.floor(Number(mintAmt) || 0));
+            await claimMint(mintQuote.quote, amt);
+            setMintStatus("minted");
+            setMintQuote(null);
+            setMintAmt("");
+            clearInterval(timer);
+          }
+        } catch (e: any) {
+          setMintError(e?.message || String(e));
+          setMintStatus("error");
+          clearInterval(timer);
+        }
+      }, 3000);
+      return () => clearInterval(timer);
+    }, [mintQuote, mintAmt, checkMintQuote, claimMint]);
 
   async function handleCreateSendToken() {
     try {
@@ -140,22 +123,9 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         </div>
 
         <div className="text-xs text-neutral-400 mb-3">{headerInfo}</div>
+        <div className="mb-4 text-sm">Balance: <span className="font-mono">{balance}</span> sats</div>
 
         <div className="grid gap-4">
-          <section className="rounded-xl border border-neutral-800 p-3">
-            <div className="text-sm font-medium mb-2">Mint</div>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800"
-                placeholder="https://your-mint.example"
-                value={urlInput}
-                onChange={(e)=>setUrlInput(e.target.value)}
-              />
-              <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={handleConnectMint} disabled={!ready}>Connect</button>
-            </div>
-            <div className="mt-2 text-sm">Balance: <span className="font-mono">{balance}</span> sats</div>
-          </section>
-
           <section className="rounded-xl border border-neutral-800 p-3">
             <div className="text-sm font-medium mb-2">Top up (Mint eCash)</div>
             <div className="flex gap-2 mb-2">
@@ -169,8 +139,6 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
                 <div className="flex gap-2 mt-2">
                   <a className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" href={`lightning:${mintQuote.request}`}>Open Wallet</a>
                   <button className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" onClick={()=>navigator.clipboard.writeText(mintQuote.request)}>Copy</button>
-                  <button className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" onClick={handleCheckInvoice}>Check status</button>
-                  <button className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60" disabled={mintStatus!=="paid"} onClick={handleClaimMint}>Claim</button>
                 </div>
                 <div className="mt-2 text-xs">Status: {mintStatus}</div>
                 {mintError && <div className="mt-1 text-xs text-rose-400">{mintError}</div>}

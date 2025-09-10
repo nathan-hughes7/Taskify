@@ -57,11 +57,11 @@ export function clearProofs(mintUrl: string) {
   saveStore(s);
 }
 
-export function getActiveMint(): string | null {
+export function getActiveMint(): string {
   try {
-    return localStorage.getItem(LS_ACTIVE_MINT);
+    return localStorage.getItem(LS_ACTIVE_MINT) || "https://mint.solife.me";
   } catch {
-    return null;
+    return "https://mint.solife.me";
   }
 }
 

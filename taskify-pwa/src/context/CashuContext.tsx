@@ -11,7 +11,7 @@ type MintInfo = {
 
 type CashuContextType = {
   ready: boolean;
-  mintUrl: string | null;
+  mintUrl: string;
   setMintUrl: (url: string) => Promise<void>;
   balance: number;
   proofs: Proof[];
@@ -27,7 +27,7 @@ type CashuContextType = {
 const CashuContext = createContext<CashuContextType | null>(null);
 
 export function CashuProvider({ children }: { children: React.ReactNode }) {
-  const [mintUrl, setMintUrlState] = useState<string | null>(() => getActiveMint());
+  const [mintUrl, setMintUrlState] = useState<string>(() => getActiveMint());
   const [manager, setManager] = useState<CashuManager | null>(null);
   const [ready, setReady] = useState(false);
   const [balance, setBalance] = useState(0);

@@ -924,11 +924,16 @@ export default function App() {
       const cur = prev.find(t => t.id === id);
       if (!cur) return prev;
       const now = new Date().toISOString();
-      let newStreak = cur.streak ?? 0;
-      if (settings.streaksEnabled && cur.recurrence && (cur.recurrence.type === "daily" || cur.recurrence.type === "weekly")) {
-        const due = startOfDay(new Date(cur.dueISO));
-        const today = startOfDay(new Date());
-        newStreak = today.getTime() === due.getTime() ? newStreak + 1 : 1;
+      let newStreak = typeof cur.streak === "number" ? cur.streak : 0;
+      if (
+        settings.streaksEnabled &&
+        cur.recurrence &&
+        (cur.recurrence.type === "daily" || cur.recurrence.type === "weekly")
+      ) {
+        const due = startOfDay(new Date(cur.dueISO)).getTime();
+        const today = startOfDay(new Date()).getTime();
+        const sameDay = Math.abs(today - due) < 86400000; // tolerate TZ offsets
+        newStreak = sameDay ? newStreak + 1 : 1;
       }
       const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now, streak:newStreak}) : t);
       const doneOne = updated.find(x => x.id === id);

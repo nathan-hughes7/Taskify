@@ -930,10 +930,12 @@ export default function App() {
         cur.recurrence &&
         (cur.recurrence.type === "daily" || cur.recurrence.type === "weekly")
       ) {
-        const due = startOfDay(new Date(cur.dueISO)).getTime();
-        const today = startOfDay(new Date()).getTime();
-        const sameDay = Math.abs(today - due) < 86400000; // tolerate TZ offsets
-        newStreak = sameDay ? newStreak + 1 : 1;
+        // Previously the streak only incremented when completing a task on the
+        // same day it was due. This prevented users from keeping their streak
+        // if they forgot to check the app and completed the task a day later.
+        // Now the streak simply increments whenever the task is completed,
+        // regardless of the current timestamp.
+        newStreak = newStreak + 1;
       }
       const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now, streak:newStreak}) : t);
       const doneOne = updated.find(x => x.id === id);

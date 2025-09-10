@@ -1,5 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19 } from "nostr-tools";
+import { CashuWalletModal } from "./components/CashuWalletModal";
+import { useCashu } from "./context/CashuContext";
+import { loadStore as loadProofStore, saveStore as saveProofStore, getActiveMint, setActiveMint } from "./wallet/storage";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sun
@@ -559,6 +562,8 @@ export default function App() {
   // header view
   const [view, setView] = useState<"board" | "completed">("board");
   const [showSettings, setShowSettings] = useState(false);
+  const [showWallet, setShowWallet] = useState(false);
+  const { receiveToken } = useCashu();
 
   // add bar
   const newTitleRef = useRef<HTMLInputElement>(null);
@@ -570,6 +575,15 @@ export default function App() {
       : (new Date().getDay() as Weekday);
   });
   const [scheduleDate, setScheduleDate] = useState<string>("");
+
+  function handleBoardSelect(e: React.ChangeEvent<HTMLSelectElement>) {
+    const val = e.target.value;
+    if (val === "__wallet") {
+      setShowWallet(true);
+      return;
+    }
+    setCurrentBoardId(val);
+  }
 
   // recurrence select (with Custom… option)
   const [quickRule, setQuickRule] = useState<
@@ -620,7 +634,10 @@ export default function App() {
   // Week board
   const byDay = useMemo(() => {
     if (!currentBoard || currentBoard.kind !== "week") return new Map<Weekday, Task[]>();
-    const visible = tasksForBoard.filter(t => !t.completed && t.column !== "bounties" && isVisibleNow(t));
+    const visible = tasksForBoard.filter(t => {
+      const pendingBounty = t.completed && t.bounty && t.bounty.state !== "claimed";
+      return (!t.completed || pendingBounty) && t.column !== "bounties" && isVisibleNow(t);
+    });
     const m = new Map<Weekday, Task[]>();
     for (const t of visible) {
       const wd = new Date(t.dueISO).getDay() as Weekday;
@@ -632,7 +649,10 @@ export default function App() {
 
   const bounties = useMemo(
     () => currentBoard?.kind === "week"
-      ? tasksForBoard.filter(t => !t.completed && t.column === "bounties" && isVisibleNow(t))
+      ? tasksForBoard.filter(t => {
+          const pendingBounty = t.completed && t.bounty && t.bounty.state !== "claimed";
+          return (!t.completed || pendingBounty) && t.column === "bounties" && isVisibleNow(t);
+        })
       : [],
     [tasksForBoard, currentBoard.kind]
   );
@@ -642,7 +662,10 @@ export default function App() {
   const itemsByColumn = useMemo(() => {
     if (!currentBoard || currentBoard.kind !== "lists") return new Map<string, Task[]>();
     const m = new Map<string, Task[]>();
-    const visible = tasksForBoard.filter(t => !t.completed && t.columnId && isVisibleNow(t));
+    const visible = tasksForBoard.filter(t => {
+      const pendingBounty = t.completed && t.bounty && t.bounty.state !== "claimed";
+      return (!t.completed || pendingBounty) && t.columnId && isVisibleNow(t);
+    });
     for (const col of currentBoard.columns) m.set(col.id, []);
     for (const t of visible) {
       const arr = m.get(t.columnId!);
@@ -654,7 +677,7 @@ export default function App() {
   const completed = useMemo(
     () =>
       tasksForBoard
-        .filter((t) => !!t.completed)
+        .filter((t) => t.completed && (!t.bounty || t.bounty.state === "claimed"))
         .sort((a, b) => (b.completedAt || "").localeCompare(a.completedAt || "")),
     [tasksForBoard]
   );
@@ -990,9 +1013,25 @@ export default function App() {
   }
   function clearCompleted() {
     try {
-      for (const t of tasksForBoard) if (t.completed) publishTaskDeleted(t);
+      for (const t of tasksForBoard)
+        if (t.completed && (!t.bounty || t.bounty.state === 'claimed'))
+          publishTaskDeleted(t);
     } catch {}
-    setTasks(prev => prev.filter(t => !t.completed));
+    setTasks(prev => prev.filter(t => !(t.completed && (!t.bounty || t.bounty.state === 'claimed'))));
+  }
+
+  async function claimBounty(id: string) {
+    const t = tasks.find(x => x.id === id);
+    if (!t || !t.bounty || t.bounty.state !== 'unlocked' || !t.bounty.token) return;
+    try {
+      await receiveToken(t.bounty.token);
+    } catch {}
+    const updated: Task = {
+      ...t,
+      bounty: { ...t.bounty, token: '', state: 'claimed', updatedAt: new Date().toISOString() },
+    };
+    setTasks(prev => prev.map(x => x.id === id ? updated : x));
+    try { maybePublishTask(updated); } catch {}
   }
 
   function saveEdit(updated: Task) {
@@ -1061,8 +1100,8 @@ export default function App() {
       // reveal if user manually places it
       updated.hiddenUntilISO = undefined;
 
-      // un-complete if dragging from Completed back onto the board
-      if (updated.completed) {
+      // un-complete only if it doesn't have a pending bounty
+      if (updated.completed && (!updated.bounty || updated.bounty.state === "claimed")) {
         updated.completed = false;
         updated.completedAt = undefined;
       }
@@ -1156,11 +1195,12 @@ export default function App() {
             {/* Board switcher */}
             <select
               value={currentBoardId}
-              onChange={(e)=>setCurrentBoardId(e.target.value)}
+              onChange={handleBoardSelect}
               className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               title="Boards"
             >
-            {boards.length === 0 ? (
+              <option value="__wallet">💰 Wallet</option>
+              {boards.length === 0 ? (
                 <option value="">No boards</option>
               ) : (
                 boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
@@ -1295,7 +1335,11 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
-                          onComplete={() => completeTask(t.id)}
+                          onComplete={() => {
+                            if (!t.completed) completeTask(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else restoreTask(t.id);
+                          }}
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "day", day }, t.id)}
                           showStreaks={settings.streaksEnabled}
@@ -1313,7 +1357,11 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
-                          onComplete={() => completeTask(t.id)}
+                          onComplete={() => {
+                            if (!t.completed) completeTask(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else restoreTask(t.id);
+                          }}
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
                           showStreaks={settings.streaksEnabled}
@@ -1341,7 +1389,11 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
-                          onComplete={() => completeTask(t.id)}
+                          onComplete={() => {
+                            if (!t.completed) completeTask(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else restoreTask(t.id);
+                          }}
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
                           showStreaks={settings.streaksEnabled}
@@ -1555,6 +1607,11 @@ export default function App() {
           }}
           onClose={() => setShowSettings(false)}
         />
+      )}
+
+      {/* Cashu Wallet */}
+      {showWallet && (
+        <CashuWalletModal open={showWallet} onClose={() => setShowWallet(false)} />
       )}
     </div>
   );
@@ -1773,21 +1830,34 @@ function Card({
       )}
 
       <div className="flex items-center gap-2">
-        {/* Unchecked circular "complete" button (click only) */}
-        <button
-          onClick={onComplete}
-          aria-label="Complete task"
-          title="Mark complete"
-          className="flex items-center justify-center w-9 h-9 rounded-full border border-neutral-600 text-neutral-300 hover:text-emerald-500 hover:border-emerald-500 transition"
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" className="pointer-events-none">
-            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
-          </svg>
-        </button>
+        {task.completed ? (
+          <button
+            onClick={onComplete}
+            aria-label="Mark incomplete"
+            title="Mark incomplete"
+            className="flex items-center justify-center w-9 h-9 rounded-full border border-emerald-500 text-emerald-500"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" className="pointer-events-none">
+              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
+              <path d="M8 12l2.5 2.5L16 9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        ) : (
+          <button
+            onClick={onComplete}
+            aria-label="Complete task"
+            title="Mark complete"
+            className="flex items-center justify-center w-9 h-9 rounded-full border border-neutral-600 text-neutral-300 hover:text-emerald-500 hover:border-emerald-500 transition"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" className="pointer-events-none">
+              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
+            </svg>
+          </button>
+        )}
 
         {/* Title (hyperlinked if note contains a URL) */}
         <div className="flex-1 min-w-0 cursor-pointer" onClick={onEdit}>
-          <div className="text-sm font-medium leading-5 break-words">
+          <div className={`text-sm font-medium leading-5 break-words ${task.completed ? 'line-through text-neutral-400' : ''}`}>
             {renderTitleWithLink(task.title, task.note)}
           </div>
           {showStreaks &&
@@ -1804,6 +1874,11 @@ function Card({
       </div>
 
       <TaskMedia task={task} />
+      {task.completed && task.bounty && task.bounty.state !== 'claimed' && (
+        <div className="mt-2 text-xs text-emerald-400">
+          {task.bounty.state === 'unlocked' ? 'Bounty unlocked!' : 'Complete! - Unlock bounty'}
+        </div>
+      )}
       {/* Bounty badge */}
       {task.bounty && (
         <div className="mt-2">
@@ -1848,10 +1923,10 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
   const [rule, setRule] = useState<Recurrence>(task.recurrence ?? R_NONE);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [scheduledDate, setScheduledDate] = useState(task.dueISO.slice(0,10));
-  const [bountyToken, setBountyToken] = useState(task.bounty?.token || "");
   const [bountyAmount, setBountyAmount] = useState<number | "">(task.bounty?.amount ?? "");
   const [, setBountyState] = useState<Task["bounty"]["state"]>(task.bounty?.state || "locked");
   const [encryptWhenAttach, setEncryptWhenAttach] = useState(true);
+  const { createSendToken, receiveToken, mintUrl } = useCashu();
 
   async function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
     const items = e.clipboardData?.items;
@@ -1958,17 +2033,6 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
           </div>
           {!task.bounty ? (
             <div className="mt-2 space-y-2">
-              <textarea
-                value={bountyToken}
-                onChange={(e)=>setBountyToken(e.target.value)}
-                placeholder="Paste Cashu token (can be locked to your pubkey)"
-                rows={3}
-                className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              />
-              <label className="flex items-center gap-2 text-xs text-neutral-300">
-                <input type="checkbox" checked={encryptWhenAttach} onChange={(e)=>setEncryptWhenAttach(e.target.checked)} />
-                Hide/encrypt token until I reveal (uses your local key)
-              </label>
               <div className="flex items-center gap-2">
                 <input type="number" min={1} value={bountyAmount as number || ""}
                        onChange={(e)=>setBountyAmount(e.target.value ? parseInt(e.target.value,10) : "")}
@@ -1976,33 +2040,41 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                        className="w-40 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
                 <button className="pressable px-3 py-2 rounded-xl bg-neutral-800"
                         onClick={async () => {
-                          const tok = bountyToken.trim();
-                          if (!tok) return;
-                          const b: Task["bounty"] = {
-                            id: crypto.randomUUID(),
-                            token: tok,
-                            amount: typeof bountyAmount === 'number' ? bountyAmount : undefined,
-                            state: "locked",
-                            owner: task.createdBy || (window as any).nostrPK || "",
-                            sender: (window as any).nostrPK || "",
-                            updatedAt: new Date().toISOString(),
-                            lock: tok.includes("pubkey") ? "p2pk" : tok.includes("hash") ? "htlc" : "unknown",
-                          };
-                          if (encryptWhenAttach) {
-                            try {
-                              const enc = await encryptEcashTokenForFunder(tok);
-                              b.enc = enc;
-                              b.token = "";
-                            } catch (e) {
-                              alert("Encryption failed: "+ (e as Error).message);
-                              return;
+                          if (typeof bountyAmount !== 'number' || bountyAmount <= 0) return;
+                          try {
+                            const { token: tok } = await createSendToken(bountyAmount);
+                            const b: Task["bounty"] = {
+                              id: crypto.randomUUID(),
+                              token: tok,
+                              amount: bountyAmount,
+                              mint: mintUrl,
+                              state: "locked",
+                              owner: task.createdBy || (window as any).nostrPK || "",
+                              sender: (window as any).nostrPK || "",
+                              updatedAt: new Date().toISOString(),
+                              lock: tok.includes("pubkey") ? "p2pk" : tok.includes("hash") ? "htlc" : "unknown",
+                            };
+                            if (encryptWhenAttach) {
+                              try {
+                                const enc = await encryptEcashTokenForFunder(tok);
+                                b.enc = enc;
+                                b.token = "";
+                              } catch (e) {
+                                alert("Encryption failed: "+ (e as Error).message);
+                                return;
+                              }
                             }
+                            save({ bounty: b });
+                          } catch (e) {
+                            alert("Failed to create token: "+ (e as Error).message);
                           }
-                          save({ bounty: b });
                         }}
                 >Attach</button>
               </div>
-              <div className="text-xs text-neutral-400">Tip: Ask the funder to lock the token to your Nostr pubkey so only you can unlock it later.</div>
+              <label className="flex items-center gap-2 text-xs text-neutral-300">
+                <input type="checkbox" checked={encryptWhenAttach} onChange={(e)=>setEncryptWhenAttach(e.target.checked)} />
+                Hide/encrypt token until I reveal (uses your local key)
+              </label>
             </div>
           ) : (
             <div className="mt-2 space-y-2">
@@ -2021,9 +2093,29 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
               )}
               <div className="flex gap-2 flex-wrap">
                 {task.bounty.token && (
-                  <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=> navigator.clipboard?.writeText(task.bounty!.token!)}>
-                    Copy token
-                  </button>
+                  task.bounty.state === 'unlocked' ? (
+                    <button
+                      className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                      onClick={async () => {
+                        try {
+                          await receiveToken(task.bounty!.token!);
+                          setBountyState('claimed');
+                          save({ bounty: { ...task.bounty!, token: '', state: 'claimed', updatedAt: new Date().toISOString() } });
+                        } catch (e) {
+                          alert('Redeem failed: ' + (e as Error).message);
+                        }
+                      }}
+                    >
+                      Redeem
+                    </button>
+                  ) : (
+                    <button
+                      className="pressable px-3 py-2 rounded-xl bg-neutral-800"
+                      onClick={() => navigator.clipboard?.writeText(task.bounty!.token!)}
+                    >
+                      Copy token
+                    </button>
+                  )
                 )}
                 {task.bounty.enc && !task.bounty.token && (window as any).nostrPK && task.bounty.sender === (window as any).nostrPK && (
                   <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
@@ -2337,6 +2429,16 @@ function SettingsModal({
   const [customSk, setCustomSk] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [reloadNeeded, setReloadNeeded] = useState(false);
+  const { mintUrl, setMintUrl } = useCashu();
+  const [mintInput, setMintInput] = useState(mintUrl);
+
+  async function handleMintSave() {
+    try {
+      await setMintUrl(mintInput.trim());
+    } catch (e: any) {
+      alert(e?.message || String(e));
+    }
+  }
 
   function backupData() {
     const data = {
@@ -2345,6 +2447,10 @@ function SettingsModal({
       settings: JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}"),
       defaultRelays: JSON.parse(localStorage.getItem(LS_NOSTR_RELAYS) || "[]"),
       nostrSk: localStorage.getItem(LS_NOSTR_SK) || "",
+      cashu: {
+        proofs: loadProofStore(),
+        activeMint: getActiveMint(),
+      },
     };
     const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -2366,6 +2472,8 @@ function SettingsModal({
         if (data.settings) localStorage.setItem(LS_SETTINGS, JSON.stringify(data.settings));
         if (data.defaultRelays) localStorage.setItem(LS_NOSTR_RELAYS, JSON.stringify(data.defaultRelays));
         if (data.nostrSk) localStorage.setItem(LS_NOSTR_SK, data.nostrSk);
+        if (data.cashu?.proofs) saveProofStore(data.cashu.proofs);
+        if (data.cashu) setActiveMint(data.cashu.activeMint || null);
         alert("Backup restored. Press close to reload.");
         setReloadNeeded(true);
       } catch {
@@ -2560,7 +2668,7 @@ function SettingsModal({
     <>
     <Modal onClose={handleClose} title="Settings">
       <div className="space-y-6">
-        
+
         {/* Week start */}
         <section>
           <div className="text-sm font-medium mb-2">Week starts on</div>
@@ -2671,6 +2779,21 @@ function SettingsModal({
               </div>
             </>
           )}
+        </section>
+
+        {/* Cashu mint */}
+        <section>
+          <div className="text-sm font-medium mb-2">Cashu mint</div>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              value={mintInput}
+              onChange={(e)=>setMintInput(e.target.value)}
+              placeholder="https://mint.solife.me"
+            />
+            <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={handleMintSave}>Save</button>
+          </div>
+          <div className="text-xs text-neutral-400 mt-2">Current: {mintUrl}</div>
         </section>
 
         {/* Backup & Restore */}

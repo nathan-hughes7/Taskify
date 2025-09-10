@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19 } from "nostr-tools";
 import { CashuWalletModal } from "./components/CashuWalletModal";
 import { useCashu } from "./context/CashuContext";
+import { loadStore as loadProofStore, saveStore as saveProofStore, getActiveMint, setActiveMint } from "./wallet/storage";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sun
@@ -1925,7 +1926,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
   const [bountyAmount, setBountyAmount] = useState<number | "">(task.bounty?.amount ?? "");
   const [, setBountyState] = useState<Task["bounty"]["state"]>(task.bounty?.state || "locked");
   const [encryptWhenAttach, setEncryptWhenAttach] = useState(true);
-  const { createSendToken, receiveToken } = useCashu();
+  const { createSendToken, receiveToken, mintUrl } = useCashu();
 
   async function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
     const items = e.clipboardData?.items;
@@ -2046,6 +2047,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                               id: crypto.randomUUID(),
                               token: tok,
                               amount: bountyAmount,
+                              mint: mintUrl,
                               state: "locked",
                               owner: task.createdBy || (window as any).nostrPK || "",
                               sender: (window as any).nostrPK || "",
@@ -2445,6 +2447,10 @@ function SettingsModal({
       settings: JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}"),
       defaultRelays: JSON.parse(localStorage.getItem(LS_NOSTR_RELAYS) || "[]"),
       nostrSk: localStorage.getItem(LS_NOSTR_SK) || "",
+      cashu: {
+        proofs: loadProofStore(),
+        activeMint: getActiveMint(),
+      },
     };
     const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -2466,6 +2472,8 @@ function SettingsModal({
         if (data.settings) localStorage.setItem(LS_SETTINGS, JSON.stringify(data.settings));
         if (data.defaultRelays) localStorage.setItem(LS_NOSTR_RELAYS, JSON.stringify(data.defaultRelays));
         if (data.nostrSk) localStorage.setItem(LS_NOSTR_SK, data.nostrSk);
+        if (data.cashu?.proofs) saveProofStore(data.cashu.proofs);
+        if (data.cashu) setActiveMint(data.cashu.activeMint || null);
         alert("Backup restored. Press close to reload.");
         setReloadNeeded(true);
       } catch {
@@ -2661,21 +2669,6 @@ function SettingsModal({
     <Modal onClose={handleClose} title="Settings">
       <div className="space-y-6">
 
-        {/* Cashu mint */}
-        <section>
-          <div className="text-sm font-medium mb-2">Cashu mint</div>
-          <div className="flex gap-2">
-            <input
-              className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              value={mintInput}
-              onChange={(e)=>setMintInput(e.target.value)}
-              placeholder="https://mint.solife.me"
-            />
-            <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={handleMintSave}>Save</button>
-          </div>
-          <div className="text-xs text-neutral-400 mt-2">Current: {mintUrl}</div>
-        </section>
-
         {/* Week start */}
         <section>
           <div className="text-sm font-medium mb-2">Week starts on</div>
@@ -2786,6 +2779,21 @@ function SettingsModal({
               </div>
             </>
           )}
+        </section>
+
+        {/* Cashu mint */}
+        <section>
+          <div className="text-sm font-medium mb-2">Cashu mint</div>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              value={mintInput}
+              onChange={(e)=>setMintInput(e.target.value)}
+              placeholder="https://mint.solife.me"
+            />
+            <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={handleMintSave}>Save</button>
+          </div>
+          <div className="text-xs text-neutral-400 mt-2">Current: {mintUrl}</div>
         </section>
 
         {/* Backup & Restore */}

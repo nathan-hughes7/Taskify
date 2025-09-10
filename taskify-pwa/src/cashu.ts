@@ -3,6 +3,12 @@
  * Stores tokens in browser localStorage and supports basic send/receive.
  */
 
+import {
+  createInvoice as lnCreateInvoice,
+  decodeInvoice,
+  payInvoice as lnPayInvoice,
+} from "./lightning";
+
 export type Token = {
   amount: number;
   secret: string;
@@ -66,6 +72,19 @@ export class CashuWallet {
     if (left > 0) return null; // insufficient balance
     saveTokens(remaining);
     return JSON.stringify(toSend[0]); // simplified single-token return
+  }
+
+  /** Create a Lightning invoice for the given amount. */
+  async createLightningInvoice(amount: number): Promise<string> {
+    return lnCreateInvoice(amount);
+  }
+
+  /** Pay a Lightning invoice using wallet balance. */
+  async payLightningInvoice(invoice: string) {
+    const amount = decodeInvoice(invoice);
+    const token = this.send(amount);
+    if (!token) throw new Error("Insufficient balance");
+    await lnPayInvoice(invoice);
   }
 }
 

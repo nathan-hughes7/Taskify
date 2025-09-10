@@ -67,6 +67,10 @@ export default function Wallet() {
   const [sendAmount, setSendAmount] = useState("");
   const [sendToken, setSendToken] = useState("");
   const [receiveToken, setReceiveToken] = useState("");
+  const [lnAmount, setLnAmount] = useState("");
+  const [lnInvoice, setLnInvoice] = useState("");
+  const [payInvoice, setPayInvoice] = useState("");
+  const [payStatus, setPayStatus] = useState("");
 
   // Ensure seed exists
   useEffect(() => {
@@ -90,6 +94,24 @@ export default function Wallet() {
       setReceiveToken("");
       setBalance(wallet.balance);
     } catch {}
+  };
+
+  const handleCreateInvoice = async () => {
+    const amt = parseInt(lnAmount, 10);
+    if (!amt) return;
+    const invoice = await wallet.createLightningInvoice(amt);
+    setLnInvoice(invoice);
+  };
+
+  const handlePayInvoice = async () => {
+    try {
+      await wallet.payLightningInvoice(payInvoice);
+      setBalance(wallet.balance);
+      setPayInvoice("");
+      setPayStatus("Paid");
+    } catch {
+      setPayStatus("Failed");
+    }
   };
 
   return (
@@ -137,6 +159,44 @@ export default function Wallet() {
           >
             Add token
           </button>
+        </div>
+
+        <div>
+          <div className="mb-2 font-medium">Lightning</div>
+          <div className="flex gap-2 mb-2">
+            <input
+              className="px-3 py-2 rounded-xl bg-neutral-900 w-24"
+              value={lnAmount}
+              onChange={(e) => setLnAmount(e.target.value)}
+              placeholder="sats"
+            />
+            <button
+              className="px-3 py-2 rounded-xl bg-neutral-800"
+              onClick={handleCreateInvoice}
+            >
+              Create invoice
+            </button>
+          </div>
+          {lnInvoice && (
+            <textarea
+              className="w-full h-24 p-2 rounded-xl bg-neutral-900 mb-4"
+              readOnly
+              value={lnInvoice}
+            />
+          )}
+          <textarea
+            className="w-full h-24 p-2 rounded-xl bg-neutral-900 mb-2"
+            value={payInvoice}
+            onChange={(e) => setPayInvoice(e.target.value)}
+            placeholder="paste invoice"
+          />
+          <button
+            className="px-3 py-2 rounded-xl bg-neutral-800"
+            onClick={handlePayInvoice}
+          >
+            Pay invoice
+          </button>
+          {payStatus && <div className="mt-2">{payStatus}</div>}
         </div>
       </div>
     </div>

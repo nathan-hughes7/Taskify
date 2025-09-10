@@ -562,6 +562,7 @@ export default function App() {
   const [view, setView] = useState<"board" | "completed">("board");
   const [showSettings, setShowSettings] = useState(false);
   const [showWallet, setShowWallet] = useState(false);
+  const { receiveToken } = useCashu();
 
   // add bar
   const newTitleRef = useRef<HTMLInputElement>(null);
@@ -632,7 +633,10 @@ export default function App() {
   // Week board
   const byDay = useMemo(() => {
     if (!currentBoard || currentBoard.kind !== "week") return new Map<Weekday, Task[]>();
-    const visible = tasksForBoard.filter(t => !t.completed && t.column !== "bounties" && isVisibleNow(t));
+    const visible = tasksForBoard.filter(t => {
+      const pendingBounty = t.completed && t.bounty && t.bounty.state !== "claimed";
+      return (!t.completed || pendingBounty) && t.column !== "bounties" && isVisibleNow(t);
+    });
     const m = new Map<Weekday, Task[]>();
     for (const t of visible) {
       const wd = new Date(t.dueISO).getDay() as Weekday;
@@ -644,7 +648,10 @@ export default function App() {
 
   const bounties = useMemo(
     () => currentBoard?.kind === "week"
-      ? tasksForBoard.filter(t => !t.completed && t.column === "bounties" && isVisibleNow(t))
+      ? tasksForBoard.filter(t => {
+          const pendingBounty = t.completed && t.bounty && t.bounty.state !== "claimed";
+          return (!t.completed || pendingBounty) && t.column === "bounties" && isVisibleNow(t);
+        })
       : [],
     [tasksForBoard, currentBoard.kind]
   );
@@ -654,7 +661,10 @@ export default function App() {
   const itemsByColumn = useMemo(() => {
     if (!currentBoard || currentBoard.kind !== "lists") return new Map<string, Task[]>();
     const m = new Map<string, Task[]>();
-    const visible = tasksForBoard.filter(t => !t.completed && t.columnId && isVisibleNow(t));
+    const visible = tasksForBoard.filter(t => {
+      const pendingBounty = t.completed && t.bounty && t.bounty.state !== "claimed";
+      return (!t.completed || pendingBounty) && t.columnId && isVisibleNow(t);
+    });
     for (const col of currentBoard.columns) m.set(col.id, []);
     for (const t of visible) {
       const arr = m.get(t.columnId!);
@@ -666,7 +676,7 @@ export default function App() {
   const completed = useMemo(
     () =>
       tasksForBoard
-        .filter((t) => !!t.completed)
+        .filter((t) => t.completed && (!t.bounty || t.bounty.state === "claimed"))
         .sort((a, b) => (b.completedAt || "").localeCompare(a.completedAt || "")),
     [tasksForBoard]
   );
@@ -1002,9 +1012,25 @@ export default function App() {
   }
   function clearCompleted() {
     try {
-      for (const t of tasksForBoard) if (t.completed) publishTaskDeleted(t);
+      for (const t of tasksForBoard)
+        if (t.completed && (!t.bounty || t.bounty.state === 'claimed'))
+          publishTaskDeleted(t);
     } catch {}
-    setTasks(prev => prev.filter(t => !t.completed));
+    setTasks(prev => prev.filter(t => !(t.completed && (!t.bounty || t.bounty.state === 'claimed'))));
+  }
+
+  async function claimBounty(id: string) {
+    const t = tasks.find(x => x.id === id);
+    if (!t || !t.bounty || t.bounty.state !== 'unlocked' || !t.bounty.token) return;
+    try {
+      await receiveToken(t.bounty.token);
+    } catch {}
+    const updated: Task = {
+      ...t,
+      bounty: { ...t.bounty, token: '', state: 'claimed', updatedAt: new Date().toISOString() },
+    };
+    setTasks(prev => prev.map(x => x.id === id ? updated : x));
+    try { maybePublishTask(updated); } catch {}
   }
 
   function saveEdit(updated: Task) {
@@ -1073,8 +1099,8 @@ export default function App() {
       // reveal if user manually places it
       updated.hiddenUntilISO = undefined;
 
-      // un-complete if dragging from Completed back onto the board
-      if (updated.completed) {
+      // un-complete only if it doesn't have a pending bounty
+      if (updated.completed && (!updated.bounty || updated.bounty.state === "claimed")) {
         updated.completed = false;
         updated.completedAt = undefined;
       }
@@ -1308,7 +1334,11 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
-                          onComplete={() => completeTask(t.id)}
+                          onComplete={() => {
+                            if (!t.completed) completeTask(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else restoreTask(t.id);
+                          }}
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "day", day }, t.id)}
                           showStreaks={settings.streaksEnabled}
@@ -1326,7 +1356,11 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
-                          onComplete={() => completeTask(t.id)}
+                          onComplete={() => {
+                            if (!t.completed) completeTask(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else restoreTask(t.id);
+                          }}
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
                           showStreaks={settings.streaksEnabled}
@@ -1354,7 +1388,11 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
-                          onComplete={() => completeTask(t.id)}
+                          onComplete={() => {
+                            if (!t.completed) completeTask(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else restoreTask(t.id);
+                          }}
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
                           showStreaks={settings.streaksEnabled}
@@ -1791,21 +1829,34 @@ function Card({
       )}
 
       <div className="flex items-center gap-2">
-        {/* Unchecked circular "complete" button (click only) */}
-        <button
-          onClick={onComplete}
-          aria-label="Complete task"
-          title="Mark complete"
-          className="flex items-center justify-center w-9 h-9 rounded-full border border-neutral-600 text-neutral-300 hover:text-emerald-500 hover:border-emerald-500 transition"
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" className="pointer-events-none">
-            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
-          </svg>
-        </button>
+        {task.completed ? (
+          <button
+            onClick={onComplete}
+            aria-label="Mark incomplete"
+            title="Mark incomplete"
+            className="flex items-center justify-center w-9 h-9 rounded-full border border-emerald-500 text-emerald-500"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" className="pointer-events-none">
+              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
+              <path d="M8 12l2.5 2.5L16 9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        ) : (
+          <button
+            onClick={onComplete}
+            aria-label="Complete task"
+            title="Mark complete"
+            className="flex items-center justify-center w-9 h-9 rounded-full border border-neutral-600 text-neutral-300 hover:text-emerald-500 hover:border-emerald-500 transition"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" className="pointer-events-none">
+              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
+            </svg>
+          </button>
+        )}
 
         {/* Title (hyperlinked if note contains a URL) */}
         <div className="flex-1 min-w-0 cursor-pointer" onClick={onEdit}>
-          <div className="text-sm font-medium leading-5 break-words">
+          <div className={`text-sm font-medium leading-5 break-words ${task.completed ? 'line-through text-neutral-400' : ''}`}>
             {renderTitleWithLink(task.title, task.note)}
           </div>
           {showStreaks &&
@@ -1822,6 +1873,11 @@ function Card({
       </div>
 
       <TaskMedia task={task} />
+      {task.completed && task.bounty && task.bounty.state !== 'claimed' && (
+        <div className="mt-2 text-xs text-emerald-400">
+          {task.bounty.state === 'unlocked' ? 'Bounty unlocked!' : 'Complete! - Unlock bounty'}
+        </div>
+      )}
       {/* Bounty badge */}
       {task.bounty && (
         <div className="mt-2">

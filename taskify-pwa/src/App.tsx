@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19 } from "nostr-tools";
-import Wallet from "./wallet";
+import Wallet, { getWalletMnemonic } from "./wallet";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sun
@@ -2382,6 +2382,13 @@ function SettingsModal({
   const [customSk, setCustomSk] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [reloadNeeded, setReloadNeeded] = useState(false);
+  const [seed] = useState(() => getWalletMnemonic());
+  const [seedRevealed, setSeedRevealed] = useState(false);
+
+  function backupSeed() {
+    navigator.clipboard?.writeText(seed);
+    alert("Seed phrase copied to clipboard");
+  }
 
   function backupData() {
     const data = {
@@ -2715,6 +2722,23 @@ function SettingsModal({
                 />
               </div>
             </>
+          )}
+        </section>
+
+        {/* Wallet seed */}
+        <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+          <div className="text-sm font-medium mb-2">Wallet seed</div>
+          <div>
+            <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={backupSeed}>Backup seed phrase</button>
+            <button
+              className="ml-2 px-3 py-2 rounded-xl bg-neutral-800"
+              onClick={() => setSeedRevealed(r => !r)}
+            >
+              {seedRevealed ? "Hide" : "Show"}
+            </button>
+          </div>
+          {seedRevealed && (
+            <div className="mt-2 text-xs break-all">{seed}</div>
           )}
         </section>
 

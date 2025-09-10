@@ -684,8 +684,8 @@ export default function App() {
     const content = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO });
     nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
   }
-  function maybePublishTask(t: Task) {
-    const b = boards.find((x) => x.id === t.boardId);
+  function maybePublishTask(t: Task, boardOverride?: Board) {
+    const b = boardOverride || boards.find((x) => x.id === t.boardId);
     if (!b || !isShared(b) || !b.nostr) return;
     publishBoardMetadata(b);
     const relays = getBoardRelays(b);
@@ -1021,17 +1021,20 @@ export default function App() {
     return () => { unsubs.forEach(u => u()); };
   }, [nostrBoardsKey, pool, applyBoardEvent, applyTaskEvent, nostrRefresh]);
 
-  // reset dayChoice when board changes
+  // reset dayChoice when board changes or columns update
   useEffect(() => {
     if (!currentBoard) return;
     if (currentBoard.kind === "lists") {
       const firstCol = currentBoard.columns[0];
-      setDayChoice(firstCol?.id || crypto.randomUUID());
+      const valid = currentBoard.columns.some(c => c.id === dayChoice);
+      if (!valid) setDayChoice(firstCol?.id || crypto.randomUUID());
     } else {
-      setDayChoice(new Date().getDay() as Weekday);
+      if (typeof dayChoice !== "number") {
+        setDayChoice(new Date().getDay() as Weekday);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentBoardId]);
+  }, [currentBoardId, currentBoard?.columns, currentBoard?.kind]);
 
   // horizontal scroller ref to enable iOS momentum scrolling
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -1404,9 +1407,14 @@ export default function App() {
             const relays = r.length ? r : defaultRelays;
             setBoards(prev => prev.map(b => {
               if (b.id !== boardId) return b;
-              const nostrId = b.nostr?.boardId || (/^[0-9a-f-]{8}-[0-9a-f-]{4}-[1-5][0-9a-f-]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(b.id) ? b.id : crypto.randomUUID());
+              const nostrId = b.nostr?.boardId || (/^[0-9a-f-]{8}-[0-9a-f-]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(b.id) ? b.id : crypto.randomUUID());
               const nb: Board = b.kind === "week" ? { ...b, nostr: { boardId: nostrId, relays } } : { ...b, nostr: { boardId: nostrId, relays } };
-              setTimeout(() => publishBoardMetadata(nb), 0);
+              setTimeout(() => {
+                publishBoardMetadata(nb);
+                tasks.filter(t => t.boardId === nb.id).forEach(t => {
+                  try { maybePublishTask(t, nb); } catch {}
+                });
+              }, 0);
               return nb;
             }));
           }}

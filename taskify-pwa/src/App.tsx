@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19 } from "nostr-tools";
 import { CashuWalletModal } from "./components/CashuWalletModal";
+import { useCashu } from "./context/CashuContext";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sun
@@ -2351,6 +2352,16 @@ function SettingsModal({
   const [customSk, setCustomSk] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [reloadNeeded, setReloadNeeded] = useState(false);
+  const { mintUrl, setMintUrl } = useCashu();
+  const [mintInput, setMintInput] = useState(mintUrl);
+
+  async function handleMintSave() {
+    try {
+      await setMintUrl(mintInput.trim());
+    } catch (e: any) {
+      alert(e?.message || String(e));
+    }
+  }
 
   function backupData() {
     const data = {
@@ -2574,7 +2585,22 @@ function SettingsModal({
     <>
     <Modal onClose={handleClose} title="Settings">
       <div className="space-y-6">
-        
+
+        {/* Cashu mint */}
+        <section>
+          <div className="text-sm font-medium mb-2">Cashu mint</div>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              value={mintInput}
+              onChange={(e)=>setMintInput(e.target.value)}
+              placeholder="https://mint.solife.me"
+            />
+            <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={handleMintSave}>Save</button>
+          </div>
+          <div className="text-xs text-neutral-400 mt-2">Current: {mintUrl}</div>
+        </section>
+
         {/* Week start */}
         <section>
           <div className="text-sm font-medium mb-2">Week starts on</div>

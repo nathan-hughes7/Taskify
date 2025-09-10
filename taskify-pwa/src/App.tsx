@@ -30,6 +30,7 @@ type Task = {
   columnId?: string;
   hiddenUntilISO?: string;        // controls visibility (appear at/after this date)
   order?: number;                 // order within the board for manual reordering
+  streak?: number;                // consecutive completion count
   bounty?: {
     id: string;                   // bounty id (uuid)
     token: string;                // cashu token string (locked or unlocked)
@@ -64,6 +65,7 @@ type Board =
 type Settings = {
   weekStart: Weekday; // 0=Sun, 1=Mon, 6=Sat
   newTaskPosition: "top" | "bottom";
+  streaksEnabled: boolean;
 };
 
 const R_NONE: Recurrence = { type: "none" };
@@ -401,9 +403,9 @@ function useSettings() {
   const [settings, setSettingsRaw] = useState<Settings>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}");
-      return { weekStart: 0, newTaskPosition: "bottom", ...parsed };
+      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, ...parsed };
     } catch {
-      return { weekStart: 0, newTaskPosition: "bottom" };
+      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true };
     }
   });
   const setSettings = (s: Partial<Settings>) => {
@@ -701,7 +703,7 @@ export default function App() {
     const boardId = b.nostr.boardId;
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
     const tags: string[][] = [["d", t.id],["b", boardId],["col", String(colTag)],["status","deleted"]];
-    const content = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO });
+    const content = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, streak: t.streak });
     nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
   }
   function maybePublishTask(t: Task, boardOverride?: Board) {
@@ -713,7 +715,7 @@ export default function App() {
     const status = t.completed ? "done" : "open";
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
     const tags: string[][] = [["d", t.id],["b", boardId],["col", String(colTag)],["status", status]];
-    const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, order: t.order };
+    const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, order: t.order, streak: t.streak };
     // Include explicit nulls to signal removals when undefined
     body.images = (typeof t.images === 'undefined') ? null : t.images;
     body.bounty = (typeof t.bounty === 'undefined') ? null : t.bounty;
@@ -770,6 +772,7 @@ export default function App() {
       recurrence: payload.recurrence,
       hiddenUntilISO: payload.hiddenUntilISO,
       order: typeof payload.order === 'number' ? payload.order : undefined,
+      streak: typeof payload.streak === 'number' ? payload.streak : undefined,
     };
     if (lb.kind === "week") base.column = col === "bounties" ? "bounties" : "day";
     else if (lb.kind === "lists") base.columnId = col || (lb.columns[0]?.id || "");
@@ -822,14 +825,18 @@ export default function App() {
         const incomingImgs: string[] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'images') ? payload.images : undefined;
         const mergedImages = incomingImgs === undefined ? current.images : incomingImgs === null ? undefined : incomingImgs;
         const newOrder = typeof base.order === 'number' ? base.order : current.order;
-        copy[idx] = { ...current, ...base, order: newOrder, images: mergedImages, bounty: mergeBounty(current.bounty, incomingB as any) };
+        const incomingStreak: number | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'streak') ? payload.streak : undefined;
+        const newStreak = incomingStreak === undefined ? current.streak : incomingStreak === null ? undefined : incomingStreak;
+        copy[idx] = { ...current, ...base, order: newOrder, images: mergedImages, bounty: mergeBounty(current.bounty, incomingB as any), streak: newStreak };
         return copy;
       } else {
         const incomingB: Task["bounty"] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'bounty') ? payload.bounty : undefined;
         const incomingImgs: string[] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'images') ? payload.images : undefined;
         const imgs = incomingImgs === null ? undefined : Array.isArray(incomingImgs) ? incomingImgs : undefined;
+        const incomingStreak: number | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'streak') ? payload.streak : undefined;
+        const st = incomingStreak === null ? undefined : typeof incomingStreak === 'number' ? incomingStreak : undefined;
         const newOrder = typeof base.order === 'number' ? base.order : 0;
-        return [...prev, { ...base, order: newOrder, images: imgs, bounty: incomingB === null ? undefined : incomingB }];
+        return [...prev, { ...base, order: newOrder, images: imgs, bounty: incomingB === null ? undefined : incomingB, streak: st }];
       }
     });
   }, [setTasks, tagValue]);
@@ -889,6 +896,7 @@ export default function App() {
       completed: false,
       recurrence,
       order: nextOrder,
+      streak: recurrence && (recurrence.type === "daily" || recurrence.type === "weekly") ? 0 : undefined,
     };
     if (newImages.length) t.images = newImages;
     if (currentBoard.kind === "week") {
@@ -916,7 +924,20 @@ export default function App() {
       const cur = prev.find(t => t.id === id);
       if (!cur) return prev;
       const now = new Date().toISOString();
-      const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now}) : t);
+      let newStreak = typeof cur.streak === "number" ? cur.streak : 0;
+      if (
+        settings.streaksEnabled &&
+        cur.recurrence &&
+        (cur.recurrence.type === "daily" || cur.recurrence.type === "weekly")
+      ) {
+        // Previously the streak only incremented when completing a task on the
+        // same day it was due. This prevented users from keeping their streak
+        // if they forgot to check the app and completed the task a day later.
+        // Now the streak simply increments whenever the task is completed,
+        // regardless of the current timestamp.
+        newStreak = newStreak + 1;
+      }
+      const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now, streak:newStreak}) : t);
       const doneOne = updated.find(x => x.id === id);
       if (doneOne) { try { maybePublishTask(doneOne); } catch {} }
       const nextISO = cur.recurrence ? nextOccurrence(cur.dueISO, cur.recurrence) : null;
@@ -930,6 +951,7 @@ export default function App() {
           dueISO: nextISO,
           hiddenUntilISO: hiddenUntilForNext(nextISO, cur.recurrence, settings.weekStart),
           order: nextOrder,
+          streak: newStreak,
         };
         try { maybePublishTask(clone); } catch {}
         return [...updated, clone];
@@ -974,8 +996,25 @@ export default function App() {
   }
 
   function saveEdit(updated: Task) {
-    setTasks(prev => prev.map(t => t.id===updated.id ? updated : t));
-    try { maybePublishTask(updated); } catch {}
+    let newTask = updated;
+    setTasks(prev => prev.map(t => {
+      if (t.id !== updated.id) return t;
+      if (
+        settings.streaksEnabled &&
+        t.recurrence &&
+        (t.recurrence.type === "daily" || t.recurrence.type === "weekly") &&
+        !t.completed
+      ) {
+        const prevDue = startOfDay(new Date(t.dueISO));
+        const newDue = startOfDay(new Date(updated.dueISO));
+        if (newDue.getTime() > prevDue.getTime()) {
+          newTask = { ...updated, streak: 0 };
+          return newTask;
+        }
+      }
+      return updated;
+    }));
+    try { maybePublishTask(newTask); } catch {}
     setEditing(null);
   }
 
@@ -995,6 +1034,7 @@ export default function App() {
       const task = arr[fromIdx];
 
       const updated: Task = { ...task };
+      const prevDue = startOfDay(new Date(task.dueISO));
       if (target.type === "day") {
         updated.column = "day";
         updated.columnId = undefined;
@@ -1007,6 +1047,16 @@ export default function App() {
         updated.column = undefined;
         updated.columnId = target.columnId;
         updated.dueISO = isoForWeekday(0);
+      }
+      const newDue = startOfDay(new Date(updated.dueISO));
+      if (
+        settings.streaksEnabled &&
+        task.recurrence &&
+        (task.recurrence.type === "daily" || task.recurrence.type === "weekly") &&
+        !task.completed &&
+        newDue.getTime() > prevDue.getTime()
+      ) {
+        updated.streak = 0;
       }
       // reveal if user manually places it
       updated.hiddenUntilISO = undefined;
@@ -1248,6 +1298,7 @@ export default function App() {
                           onComplete={() => completeTask(t.id)}
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "day", day }, t.id)}
+                          showStreaks={settings.streaksEnabled}
                         />
                       ))}
                     </DroppableColumn>
@@ -1265,6 +1316,7 @@ export default function App() {
                           onComplete={() => completeTask(t.id)}
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
+                          showStreaks={settings.streaksEnabled}
                         />
                     ))}
                   </DroppableColumn>
@@ -1292,6 +1344,7 @@ export default function App() {
                           onComplete={() => completeTask(t.id)}
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
+                          showStreaks={settings.streaksEnabled}
                         />
                     ))}
                   </DroppableColumn>
@@ -1329,6 +1382,12 @@ export default function App() {
                             ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
                             : "Completed item"}
                           {t.completedAt ? ` • Completed ${new Date(t.completedAt).toLocaleString()}` : ""}
+                          {settings.streaksEnabled &&
+                            t.recurrence &&
+                            (t.recurrence.type === "daily" || t.recurrence.type === "weekly") &&
+                            typeof t.streak === "number" && t.streak > 0
+                              ? ` • 🔥 ${t.streak}`
+                              : ""}
                         </div>
                         <TaskMedia task={t} />
                         {t.bounty && (
@@ -1668,11 +1727,13 @@ function Card({
   onComplete,
   onEdit,
   onDropBefore,
+  showStreaks,
 }: {
   task: Task;
   onComplete: () => void;
   onEdit: () => void;
   onDropBefore: (dragId: string) => void;
+  showStreaks: boolean;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
@@ -1729,6 +1790,15 @@ function Card({
           <div className="text-sm font-medium leading-5 break-words">
             {renderTitleWithLink(task.title, task.note)}
           </div>
+          {showStreaks &&
+            task.recurrence &&
+            (task.recurrence.type === "daily" || task.recurrence.type === "weekly") &&
+            typeof task.streak === "number" && task.streak > 0 && (
+              <div className="text-xs text-amber-400 mt-1 flex items-center gap-1">
+                <span>🔥</span>
+                <span>{task.streak}</span>
+              </div>
+            )}
         </div>
 
       </div>
@@ -2509,6 +2579,20 @@ function SettingsModal({
             <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'top' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'top' })}>Top</button>
             <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'bottom' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'bottom' })}>Bottom</button>
           </div>
+        </section>
+
+        {/* Streaks */}
+        <section>
+          <div className="text-sm font-medium mb-2">Streaks</div>
+          <div className="flex gap-2">
+            <button
+              className={`px-3 py-2 rounded-xl ${settings.streaksEnabled ? "bg-emerald-600" : "bg-neutral-800"}`}
+              onClick={() => setSettings({ streaksEnabled: !settings.streaksEnabled })}
+            >
+              {settings.streaksEnabled ? "On" : "Off"}
+            </button>
+          </div>
+          <div className="text-xs text-neutral-400 mt-2">Track consecutive completions on recurring tasks.</div>
         </section>
 
         {/* Boards & Columns */}

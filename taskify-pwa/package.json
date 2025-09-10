@@ -11,6 +11,7 @@
     "test": "npm run lint"
   },
   "dependencies": {
+    "@cashu/cashu-ts": "^2.7.1",
     "@vitejs/plugin-react": "^4.3.0",
     "nostr-tools": "^2.16.2",
     "react": "^19.1.1",

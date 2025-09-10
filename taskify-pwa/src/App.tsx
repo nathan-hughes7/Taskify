@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19 } from "nostr-tools";
+import { CashuWalletModal } from "./components/CashuWalletModal";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sun
@@ -559,6 +560,7 @@ export default function App() {
   // header view
   const [view, setView] = useState<"board" | "completed">("board");
   const [showSettings, setShowSettings] = useState(false);
+  const [showWallet, setShowWallet] = useState(false);
 
   // add bar
   const newTitleRef = useRef<HTMLInputElement>(null);
@@ -1184,6 +1186,13 @@ export default function App() {
             >
               ⚙️
             </button>
+            <button
+              className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              onClick={() => setShowWallet(true)}
+              title="Wallet"
+            >
+              💰
+            </button>
             <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
               <button className={`px-3 py-2 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
               <button className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
@@ -1555,6 +1564,11 @@ export default function App() {
           }}
           onClose={() => setShowSettings(false)}
         />
+      )}
+
+      {/* Cashu Wallet */}
+      {showWallet && (
+        <CashuWalletModal open={showWallet} onClose={() => setShowWallet(false)} />
       )}
     </div>
   );

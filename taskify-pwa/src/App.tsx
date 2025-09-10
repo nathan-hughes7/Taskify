@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19 } from "nostr-tools";
+import Wallet from "./wallet";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sun
 type DayChoice = Weekday | "bounties" | string; // string = custom list columnId
 const WD_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+const WALLET_ID = "__wallet__";
 
 type Recurrence =
   | { type: "none"; untilISO?: string }
@@ -483,6 +485,7 @@ export default function App() {
   const [boards, setBoards] = useBoards();
   const [currentBoardId, setCurrentBoardId] = useState(boards[0]?.id || "");
   const currentBoard = boards.find(b => b.id === currentBoardId);
+  const [showWallet, setShowWallet] = useState(false);
 
   const [tasks, setTasks] = useTasks();
   const [settings, setSettings] = useSettings();
@@ -1144,6 +1147,39 @@ export default function App() {
 
   // horizontal scroller ref to enable iOS momentum scrolling
   const scrollerRef = useRef<HTMLDivElement>(null);
+  if (showWallet) {
+    return (
+      <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
+        <div className="max-w-7xl mx-auto">
+          <header className="flex flex-wrap gap-3 items-center mb-4">
+            <h1 className="text-2xl font-semibold tracking-tight">Taskify</h1>
+            <div className="ml-auto flex items-center gap-2">
+              <select
+                value={WALLET_ID}
+                onChange={(e)=>{
+                  const val = e.target.value;
+                  if (val !== WALLET_ID) {
+                    setShowWallet(false);
+                    setCurrentBoardId(val);
+                  }
+                }}
+                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                title="Boards"
+              >
+                <option value={WALLET_ID}>Wallet</option>
+                {boards.length === 0 ? (
+                  <option value="" disabled>No boards</option>
+                ) : (
+                  boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
+                )}
+              </select>
+            </div>
+          </header>
+          <Wallet />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
@@ -1155,13 +1191,22 @@ export default function App() {
           <div className="ml-auto flex items-center gap-2">
             {/* Board switcher */}
             <select
-              value={currentBoardId}
-              onChange={(e)=>setCurrentBoardId(e.target.value)}
+              value={showWallet ? WALLET_ID : currentBoardId}
+              onChange={(e)=>{
+                const val = e.target.value;
+                if (val === WALLET_ID) {
+                  setShowWallet(true);
+                } else {
+                  setShowWallet(false);
+                  setCurrentBoardId(val);
+                }
+              }}
               className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               title="Boards"
             >
-            {boards.length === 0 ? (
-                <option value="">No boards</option>
+              <option value={WALLET_ID}>Wallet</option>
+              {boards.length === 0 ? (
+                <option value="" disabled>No boards</option>
               ) : (
                 boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
               )}

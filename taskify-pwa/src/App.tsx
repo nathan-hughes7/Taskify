@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19 } from "nostr-tools";
+import Wallet from "./Wallet";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sun
@@ -66,6 +67,7 @@ type Settings = {
   weekStart: Weekday; // 0=Sun, 1=Mon, 6=Sat
   newTaskPosition: "top" | "bottom";
   streaksEnabled: boolean;
+  walletMint: string;
 };
 
 const R_NONE: Recurrence = { type: "none" };
@@ -403,9 +405,9 @@ function useSettings() {
   const [settings, setSettingsRaw] = useState<Settings>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}");
-      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, ...parsed };
+      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, walletMint: "https://mint.solife.me", ...parsed };
     } catch {
-      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true };
+      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, walletMint: "https://mint.solife.me" };
     }
   });
   const setSettings = (s: Partial<Settings>) => {
@@ -1190,6 +1192,8 @@ export default function App() {
             </div>
           </div>
         </header>
+
+        <Wallet mint={settings.walletMint} />
 
         {/* Add bar */}
         {view === "board" && currentBoard && (
@@ -2593,6 +2597,17 @@ function SettingsModal({
             </button>
           </div>
           <div className="text-xs text-neutral-400 mt-2">Track consecutive completions on recurring tasks.</div>
+        </section>
+
+        {/* Wallet */}
+        <section>
+          <div className="text-sm font-medium mb-2">Mint URL</div>
+          <input
+            value={settings.walletMint}
+            onChange={(e) => setSettings({ walletMint: e.target.value })}
+            className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+            placeholder="https://mint.solife.me"
+          />
         </section>
 
         {/* Boards & Columns */}

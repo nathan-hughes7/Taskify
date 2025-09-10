@@ -55,7 +55,12 @@ type BoardBase = {
   id: string;
   name: string;
   // Optional Nostr sharing metadata
-  nostr?: { boardId: string; relays: string[] };
+  nostr?: {
+    boardId: string;
+    relays: string[];
+    access?: "full" | "add" | "view";
+    admins?: string[];
+  };
 };
 
 type Board =
@@ -688,11 +693,34 @@ export default function App() {
   const getBoardRelays = useCallback((board: Board): string[] => {
     return (board.nostr?.relays?.length ? board.nostr!.relays : defaultRelays).filter(Boolean);
   }, [defaultRelays]);
+  const isBoardAdmin = useCallback((board: Board) => {
+    return !!(nostrPK && board.nostr?.admins?.includes(nostrPK));
+  }, [nostrPK]);
+  const boardAccess = (board: Board): "full" | "add" | "view" =>
+    board.nostr?.access || "full";
+  const canAddToBoard = useCallback((board: Board) => {
+    return isBoardAdmin(board) || boardAccess(board) !== "view";
+  }, [isBoardAdmin]);
+  const canEditBoard = useCallback((board: Board) => {
+    return isBoardAdmin(board) || boardAccess(board) === "full";
+  }, [isBoardAdmin]);
+  const canAdd = useCallback((boardId: string) => {
+    const b = boards.find(x => x.id === boardId);
+    return b ? canAddToBoard(b) : true;
+  }, [boards, canAddToBoard]);
+  const canEdit = useCallback((boardId: string) => {
+    const b = boards.find(x => x.id === boardId);
+    return b ? canEditBoard(b) : true;
+  }, [boards, canEditBoard]);
   function publishBoardMetadata(board: Board) {
     if (!board.nostr?.boardId) return;
     const relays = getBoardRelays(board);
     const tags: string[][] = [["d", board.nostr.boardId],["b", board.nostr.boardId],["k", board.kind],["name", board.name]];
-    const content = board.kind === "lists" ? JSON.stringify({ columns: board.columns }) : "";
+    const content = JSON.stringify({
+      ...(board.kind === "lists" ? { columns: board.columns } : {}),
+      access: board.nostr?.access || "full",
+      admins: board.nostr?.admins || [],
+    });
     nostrPublish(relays, { kind: 30300, tags, content, created_at: Math.floor(Date.now()/1000) });
   }
   function publishTaskDeleted(t: Task) {
@@ -736,12 +764,21 @@ export default function App() {
     setBoards(prev => prev.map(b => {
       if (b.nostr?.boardId !== boardId) return b;
       const nm = name || b.name;
-      if (kindTag === "week") return { id: b.id, name: nm, nostr: b.nostr, kind: "week" } as Board;
+      const nostr = {
+        ...b.nostr!,
+        access: payload.access || "full",
+        admins: Array.isArray(payload.admins) ? payload.admins : [],
+      };
+      if (kindTag === "week") return { id: b.id, name: nm, nostr, kind: "week" } as Board;
       if (kindTag === "lists") {
-        const cols: ListColumn[] = Array.isArray(payload.columns) ? payload.columns : (b.kind === "lists" ? b.columns : [{ id: crypto.randomUUID(), name: "Items" }]);
-        return { id: b.id, name: nm, nostr: b.nostr, kind: "lists", columns: cols } as Board;
+        const cols: ListColumn[] = Array.isArray(payload.columns)
+          ? payload.columns
+          : b.kind === "lists"
+            ? b.columns
+            : [{ id: crypto.randomUUID(), name: "Items" }];
+        return { id: b.id, name: nm, nostr, kind: "lists", columns: cols } as Board;
       }
-      return b;
+      return { ...b, name: nm, nostr };
     }));
   }, [setBoards, tagValue]);
   const applyTaskEvent = useCallback((ev: NostrEvent) => {
@@ -874,8 +911,9 @@ export default function App() {
   }
 
   function addTask() {
+    if (!currentBoard || !canAdd(currentBoard.id)) return;
     const title = newTitle.trim() || (newImages.length ? "Image" : "");
-    if ((!title && !newImages.length) || !currentBoard) return;
+    if (!title && !newImages.length) return;
 
     const candidate = resolveQuickRule();
     const recurrence = candidate.type === "none" ? undefined : candidate;
@@ -922,7 +960,7 @@ export default function App() {
   function completeTask(id: string) {
     setTasks(prev => {
       const cur = prev.find(t => t.id === id);
-      if (!cur) return prev;
+      if (!cur || !canEdit(cur.boardId)) return prev;
       const now = new Date().toISOString();
       let newStreak = typeof cur.streak === "number" ? cur.streak : 0;
       if (
@@ -963,7 +1001,7 @@ export default function App() {
 
   function deleteTask(id: string) {
     const t = tasks.find(x => x.id === id);
-    if (!t) return;
+    if (!t || !canEdit(t.boardId)) return;
     // Require confirmation if the task has a bounty that is not claimed yet
     if (t.bounty && t.bounty.state !== 'claimed') {
       const ok = confirm('This task has an ecash bounty that is not marked as claimed. Delete anyway?');
@@ -980,7 +1018,7 @@ export default function App() {
 
   function restoreTask(id: string) {
     const t = tasks.find((x) => x.id === id);
-    if (!t) return;
+    if (!t || !canEdit(t.boardId)) return;
     const updated: Task = { ...t, completed: false, completedAt: undefined };
     setTasks((prev) => prev.map((x) => (x.id === id ? updated : x)));
     try {
@@ -989,6 +1027,7 @@ export default function App() {
     setView("board");
   }
   function clearCompleted() {
+    if (!currentBoard || !canEdit(currentBoard.id)) return;
     try {
       for (const t of tasksForBoard) if (t.completed) publishTaskDeleted(t);
     } catch {}
@@ -996,6 +1035,18 @@ export default function App() {
   }
 
   function saveEdit(updated: Task) {
+    const allowEdit = canEdit(updated.boardId);
+    const allowAdd = canAdd(updated.boardId);
+    if (!allowEdit) {
+      const original = tasks.find(t => t.id === updated.id);
+      if (!original) { setEditing(null); return; }
+      const { bounty: oB, ...oRest } = original as any;
+      const { bounty: nB, ...nRest } = updated as any;
+      if (JSON.stringify(oRest) !== JSON.stringify(nRest) || oB || !nB || !allowAdd) {
+        setEditing(null);
+        return;
+      }
+    }
     let newTask = updated;
     setTasks(prev => prev.map(t => {
       if (t.id !== updated.id) return t;
@@ -1032,6 +1083,7 @@ export default function App() {
       const fromIdx = arr.findIndex(t => t.id === id);
       if (fromIdx < 0) return prev;
       const task = arr[fromIdx];
+      if (!canEdit(task.boardId)) return prev;
 
       const updated: Task = { ...task };
       const prevDue = startOfDay(new Date(task.dueISO));
@@ -1144,6 +1196,8 @@ export default function App() {
 
   // horizontal scroller ref to enable iOS momentum scrolling
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const canAddCurrent = currentBoard ? canAdd(currentBoard.id) : false;
+  const canEditCurrent = currentBoard ? canEdit(currentBoard.id) : false;
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
@@ -1207,6 +1261,7 @@ export default function App() {
               }}
               placeholder="New task…"
               className="flex-1 min-w-[220px] px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
+              disabled={!canAddCurrent}
             />
             {newImages.length > 0 && (
               <div className="w-full flex gap-2 mt-2">
@@ -1226,6 +1281,7 @@ export default function App() {
                   setScheduleDate("");
                 }}
                 className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                disabled={!canAddCurrent}
               >
                 {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
                 <option value="bounties">Bounties</option>
@@ -1235,6 +1291,7 @@ export default function App() {
                 value={String(dayChoice)}
                 onChange={(e)=>setDayChoice(e.target.value)}
                 className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                disabled={!canAddCurrent}
               >
                 {listColumns.map(c => (<option key={c.id} value={c.id}>{c.name}</option>))}
               </select>
@@ -1250,6 +1307,7 @@ export default function App() {
               }}
               className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               title="Recurrence"
+              disabled={!canAddCurrent}
             >
               <option value="none">No recurrence</option>
               <option value="daily">Daily</option>
@@ -1265,7 +1323,8 @@ export default function App() {
 
             <button
               onClick={addTask}
-              className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium"
+              className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium disabled:bg-neutral-800 disabled:text-neutral-500"
+              disabled={!canAddCurrent}
             >
               Add
             </button>
@@ -1291,16 +1350,22 @@ export default function App() {
                       title={WD_SHORT[day]}
                       onDropCard={(payload) => moveTask(payload.id, { type: "day", day })}
                     >
-                        {(byDay.get(day) || []).map((t) => (
-                        <Card
-                          key={t.id}
-                          task={t}
-                          onComplete={() => completeTask(t.id)}
-                          onEdit={() => setEditing(t)}
-                          onDropBefore={(dragId) => moveTask(dragId, { type: "day", day }, t.id)}
-                          showStreaks={settings.streaksEnabled}
-                        />
-                      ))}
+                        {(byDay.get(day) || []).map((t) => {
+                          const canO = canAdd(t.boardId);
+                          const canE = canEdit(t.boardId);
+                          return (
+                            <Card
+                              key={t.id}
+                              task={t}
+                              onComplete={() => completeTask(t.id)}
+                              onEdit={() => setEditing(t)}
+                              onDropBefore={(dragId) => moveTask(dragId, { type: "day", day }, t.id)}
+                              showStreaks={settings.streaksEnabled}
+                              canEdit={canE}
+                              canOpen={canO}
+                            />
+                          );
+                        })}
                     </DroppableColumn>
                   ))}
 
@@ -1309,16 +1374,22 @@ export default function App() {
                     title="Bounties"
                     onDropCard={(payload) => moveTask(payload.id, { type: "bounties" })}
                   >
-                      {bounties.map((t) => (
-                        <Card
-                          key={t.id}
-                          task={t}
-                          onComplete={() => completeTask(t.id)}
-                          onEdit={() => setEditing(t)}
-                          onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
-                          showStreaks={settings.streaksEnabled}
-                        />
-                    ))}
+                      {bounties.map((t) => {
+                        const canO = canAdd(t.boardId);
+                        const canE = canEdit(t.boardId);
+                        return (
+                          <Card
+                            key={t.id}
+                            task={t}
+                            onComplete={() => completeTask(t.id)}
+                            onEdit={() => setEditing(t)}
+                            onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
+                            showStreaks={settings.streaksEnabled}
+                            canEdit={canE}
+                            canOpen={canO}
+                          />
+                        );
+                      })}
                   </DroppableColumn>
                 </div>
               </div>
@@ -1337,16 +1408,22 @@ export default function App() {
                     title={col.name}
                     onDropCard={(payload) => moveTask(payload.id, { type: "list", columnId: col.id })}
                   >
-                      {(itemsByColumn.get(col.id) || []).map((t) => (
-                        <Card
-                          key={t.id}
-                          task={t}
-                          onComplete={() => completeTask(t.id)}
-                          onEdit={() => setEditing(t)}
-                          onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
-                          showStreaks={settings.streaksEnabled}
-                        />
-                    ))}
+                      {(itemsByColumn.get(col.id) || []).map((t) => {
+                        const canO = canAdd(t.boardId);
+                        const canE = canEdit(t.boardId);
+                        return (
+                          <Card
+                            key={t.id}
+                            task={t}
+                            onComplete={() => completeTask(t.id)}
+                            onEdit={() => setEditing(t)}
+                            onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
+                            showStreaks={settings.streaksEnabled}
+                            canEdit={canE}
+                            canOpen={canO}
+                          />
+                        );
+                      })}
                   </DroppableColumn>
                 ))}
               </div>
@@ -1359,8 +1436,9 @@ export default function App() {
               <div className="text-lg font-semibold">Completed</div>
               <div className="ml-auto">
                 <button
-                  className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600"
+                  className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600 disabled:bg-neutral-800 disabled:text-neutral-500"
                   onClick={clearCompleted}
+                  disabled={!canEditCurrent}
                 >
                   Clear completed
                 </button>
@@ -1398,10 +1476,12 @@ export default function App() {
                           </div>
                         )}
                       </div>
-                      <div className="flex gap-1">
-                        <IconButton label="Restore" onClick={() => restoreTask(t.id)} intent="success">↩︎</IconButton>
-                        <IconButton label="Delete" onClick={() => deleteTask(t.id)} intent="danger">✕</IconButton>
-                      </div>
+                      {canEditCurrent && (
+                        <div className="flex gap-1">
+                          <IconButton label="Restore" onClick={() => restoreTask(t.id)} intent="success">↩︎</IconButton>
+                          <IconButton label="Delete" onClick={() => deleteTask(t.id)} intent="danger">✕</IconButton>
+                        </div>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -1490,6 +1570,8 @@ export default function App() {
           onDelete={() => { deleteTask(editing.id); setEditing(null); }}
           onSave={saveEdit}
           weekStart={settings.weekStart}
+          canEdit={canEdit(editing.boardId)}
+          canAddBounty={canAdd(editing.boardId)}
         />
       )}
 
@@ -1529,13 +1611,13 @@ export default function App() {
             const relays = r.length ? r : defaultRelays;
             setBoards(prev => prev.map(b => {
               if (b.id !== boardId) return b;
-              const nostrId = b.nostr?.boardId || (/^[0-9a-f-]{8}-[0-9a-f-]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(b.id) ? b.id : crypto.randomUUID());
-              const nb: Board = b.kind === "week" ? { ...b, nostr: { boardId: nostrId, relays } } : { ...b, nostr: { boardId: nostrId, relays } };
+              const nostrId = b.nostr?.boardId || (/^[0-9a-f-]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(b.id) ? b.id : crypto.randomUUID());
+              const admins = b.nostr?.admins && b.nostr.admins.length ? b.nostr.admins : (nostrPK ? [nostrPK] : []);
+              const access = b.nostr?.access || 'full';
+              const nb: Board = b.kind === "week" ? { ...b, nostr: { boardId: nostrId, relays, access, admins } } : { ...b, nostr: { boardId: nostrId, relays, access, admins } };
               setTimeout(() => {
                 publishBoardMetadata(nb);
-                tasks.filter(t => t.boardId === nb.id).forEach(t => {
-                  try { maybePublishTask(t, nb); } catch {}
-                });
+                tasks.filter(t => t.boardId === nb.id).forEach(t => { try { maybePublishTask(t, nb); } catch {} });
               }, 0);
               return nb;
             }));
@@ -1545,7 +1627,7 @@ export default function App() {
             const id = nostrId.trim();
             if (!id) return;
             const defaultCols: ListColumn[] = [{ id: crypto.randomUUID(), name: "Items" }];
-            const newBoard: Board = { id, name: name || "Shared Board", kind: "lists", columns: defaultCols, nostr: { boardId: id, relays: relays.length ? relays : defaultRelays } };
+            const newBoard: Board = { id, name: name || "Shared Board", kind: "lists", columns: defaultCols, nostr: { boardId: id, relays: relays.length ? relays : defaultRelays, access: 'full', admins: [] } };
             setBoards(prev => [...prev, newBoard]);
             setCurrentBoardId(id);
           }}
@@ -1728,12 +1810,16 @@ function Card({
   onEdit,
   onDropBefore,
   showStreaks,
+  canEdit,
+  canOpen,
 }: {
   task: Task;
   onComplete: () => void;
   onEdit: () => void;
   onDropBefore: (dragId: string) => void;
   showStreaks: boolean;
+  canEdit: boolean;
+  canOpen: boolean;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
@@ -1761,7 +1847,7 @@ function Card({
     <div
       ref={cardRef}
       className="group relative p-3 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
-      draggable
+      draggable={canEdit}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
@@ -1775,10 +1861,11 @@ function Card({
       <div className="flex items-center gap-2">
         {/* Unchecked circular "complete" button (click only) */}
         <button
-          onClick={onComplete}
+          onClick={canEdit ? onComplete : undefined}
           aria-label="Complete task"
           title="Mark complete"
-          className="flex items-center justify-center w-9 h-9 rounded-full border border-neutral-600 text-neutral-300 hover:text-emerald-500 hover:border-emerald-500 transition"
+          disabled={!canEdit}
+          className="flex items-center justify-center w-9 h-9 rounded-full border border-neutral-600 text-neutral-300 hover:text-emerald-500 hover:border-emerald-500 transition disabled:text-neutral-500 disabled:border-neutral-700"
         >
           <svg width="22" height="22" viewBox="0 0 24 24" className="pointer-events-none">
             <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
@@ -1786,7 +1873,7 @@ function Card({
         </button>
 
         {/* Title (hyperlinked if note contains a URL) */}
-        <div className="flex-1 min-w-0 cursor-pointer" onClick={onEdit}>
+        <div className={`flex-1 min-w-0 ${canOpen ? 'cursor-pointer' : ''}`} onClick={canOpen ? onEdit : undefined}>
           <div className="text-sm font-medium leading-5 break-words">
             {renderTitleWithLink(task.title, task.note)}
           </div>
@@ -1839,8 +1926,8 @@ function labelOf(r: Recurrence): string {
 }
 
 /* Edit modal with Advanced recurrence */
-function EditModal({ task, onCancel, onDelete, onSave, weekStart }: { 
-  task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void; weekStart: Weekday;
+function EditModal({ task, onCancel, onDelete, onSave, weekStart, canEdit, canAddBounty }: {
+  task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void; weekStart: Weekday; canEdit: boolean; canAddBounty: boolean;
 }) {
   const [title, setTitle] = useState(task.title);
   const [note, setNote] = useState(task.note || "");
@@ -1891,27 +1978,28 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
     <Modal
       onClose={onCancel}
       title="Edit task"
-      actions={
+      actions={canEdit ? (
         <button
           className="pressable px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500"
           onClick={() => save()}
         >
           Save
         </button>
-      }
+      ) : undefined}
     >
       <div className="space-y-4">
         <input value={title} onChange={e=>setTitle(e.target.value)}
-               className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Title"/>
+               className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Title"
+               disabled={!canEdit} readOnly={!canEdit}/>
         <textarea value={note} onChange={e=>setNote(e.target.value)} onPaste={handlePaste}
                   className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" rows={3}
-                  placeholder="Notes (optional)"/>
+                  placeholder="Notes (optional)" disabled={!canEdit} readOnly={!canEdit}/>
         {images.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {images.map((img, i) => (
               <div key={i} className="relative">
                 <img src={img} className="max-h-40 rounded-lg" />
-                <button type="button" className="absolute top-1 right-1 bg-black/70 rounded-full px-1 text-xs" onClick={() => setImages(images.filter((_, j) => j !== i))}>×</button>
+                {canEdit && <button type="button" className="absolute top-1 right-1 bg-black/70 rounded-full px-1 text-xs" onClick={() => setImages(images.filter((_, j) => j !== i))}>×</button>}
               </div>
             ))}
           </div>
@@ -1926,6 +2014,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
             onChange={e=>setScheduledDate(e.target.value)}
             className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
             title="Scheduled date"
+            disabled={!canEdit}
           />
         </div>
 
@@ -1936,11 +2025,11 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
             <div className="ml-auto text-xs text-neutral-400">{labelOf(rule)}</div>
           </div>
           <div className="mt-2 flex gap-2 flex-wrap">
-            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule(R_NONE)}>None</button>
-            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "daily" })}>Daily</button>
-            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "weekly", days: [1,2,3,4,5] })}>Mon–Fri</button>
-            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "weekly", days: [0,6] })}>Weekends</button>
-            <button className="pressable ml-auto px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setShowAdvanced(true)} title="Advanced recurrence…">Advanced…</button>
+            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule(R_NONE)} disabled={!canEdit}>None</button>
+            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "daily" })} disabled={!canEdit}>Daily</button>
+            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "weekly", days: [1,2,3,4,5] })} disabled={!canEdit}>Mon–Fri</button>
+            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "weekly", days: [0,6] })} disabled={!canEdit}>Weekends</button>
+            <button className="pressable ml-auto px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setShowAdvanced(true)} title="Advanced recurrence…" disabled={!canEdit}>Advanced…</button>
           </div>
         </div>
 
@@ -1956,60 +2045,12 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
               </div>
             )}
           </div>
-          {!task.bounty ? (
-            <div className="mt-2 space-y-2">
-              <textarea
-                value={bountyToken}
-                onChange={(e)=>setBountyToken(e.target.value)}
-                placeholder="Paste Cashu token (can be locked to your pubkey)"
-                rows={3}
-                className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              />
-              <label className="flex items-center gap-2 text-xs text-neutral-300">
-                <input type="checkbox" checked={encryptWhenAttach} onChange={(e)=>setEncryptWhenAttach(e.target.checked)} />
-                Hide/encrypt token until I reveal (uses your local key)
-              </label>
-              <div className="flex items-center gap-2">
-                <input type="number" min={1} value={bountyAmount as number || ""}
-                       onChange={(e)=>setBountyAmount(e.target.value ? parseInt(e.target.value,10) : "")}
-                       placeholder="Amount (sats)"
-                       className="w-40 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                <button className="pressable px-3 py-2 rounded-xl bg-neutral-800"
-                        onClick={async () => {
-                          const tok = bountyToken.trim();
-                          if (!tok) return;
-                          const b: Task["bounty"] = {
-                            id: crypto.randomUUID(),
-                            token: tok,
-                            amount: typeof bountyAmount === 'number' ? bountyAmount : undefined,
-                            state: "locked",
-                            owner: task.createdBy || (window as any).nostrPK || "",
-                            sender: (window as any).nostrPK || "",
-                            updatedAt: new Date().toISOString(),
-                            lock: tok.includes("pubkey") ? "p2pk" : tok.includes("hash") ? "htlc" : "unknown",
-                          };
-                          if (encryptWhenAttach) {
-                            try {
-                              const enc = await encryptEcashTokenForFunder(tok);
-                              b.enc = enc;
-                              b.token = "";
-                            } catch (e) {
-                              alert("Encryption failed: "+ (e as Error).message);
-                              return;
-                            }
-                          }
-                          save({ bounty: b });
-                        }}
-                >Attach</button>
-              </div>
-              <div className="text-xs text-neutral-400">Tip: Ask the funder to lock the token to your Nostr pubkey so only you can unlock it later.</div>
-            </div>
-          ) : (
+          {task.bounty ? (
             <div className="mt-2 space-y-2">
               <div className="text-xs text-neutral-400">Amount</div>
               <input type="number" min={1} value={(bountyAmount as number) || task.bounty?.amount || ""}
                      onChange={(e)=>setBountyAmount(e.target.value ? parseInt(e.target.value,10) : "")}
-                     className="w-40 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                     className="w-40 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" disabled={!canEdit}/>
               <div className="text-xs text-neutral-400">Token</div>
               {task.bounty.enc && !task.bounty.token ? (
                 <div className="rounded-lg border border-neutral-800 p-2 text-xs text-neutral-300 bg-neutral-900/60">
@@ -2019,70 +2060,123 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                 <textarea readOnly value={task.bounty.token || ""}
                           className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" rows={3}/>
               )}
-              <div className="flex gap-2 flex-wrap">
-                {task.bounty.token && (
-                  <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=> navigator.clipboard?.writeText(task.bounty!.token!)}>
-                    Copy token
-                  </button>
-                )}
-                {task.bounty.enc && !task.bounty.token && (window as any).nostrPK && task.bounty.sender === (window as any).nostrPK && (
-                  <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
-                          onClick={async () => {
-                            try {
+              {canEdit && (
+                <div className="flex gap-2 flex-wrap">
+                  {task.bounty.token && (
+                    <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=> navigator.clipboard?.writeText(task.bounty!.token!)}>
+                      Copy token
+                    </button>
+                  )}
+                  {task.bounty.enc && !task.bounty.token && (window as any).nostrPK && task.bounty.sender === (window as any).nostrPK && (
+                    <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                            onClick={async () => {
+                              try {
                                 const pt = await decryptEcashTokenForFunder(task.bounty!.enc!);
                                 save({ bounty: { ...task.bounty!, token: pt, enc: undefined, state: 'unlocked', updatedAt: new Date().toISOString() } });
-                            } catch (e) { alert("Decrypt failed: " + (e as Error).message); }
-                          }}>Reveal (decrypt)</button>
-                )}
-                <button
-                  className={`px-3 py-2 rounded-xl ${task.bounty.token ? 'bg-neutral-800' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}`}
-                  disabled={!task.bounty.token}
-                  onClick={() => {
-                    if (!task.bounty.token) return;
-                    setBountyState('claimed');
-                    save({ bounty: { ...task.bounty!, state: 'claimed', updatedAt: new Date().toISOString() } });
-                  }}
-                >
-                  Mark claimed
-                </button>
-                {task.bounty.state === 'locked' && (
-                  <>
-                    <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
-                            onClick={() => {
-                              // Placeholder unlock: trust user has reissued unlocked token externally
-                              const newTok = prompt('Paste unlocked token (after you reissued in your wallet):');
-                              if (!newTok) return;
-                              save({ bounty: { ...task.bounty!, token: newTok, state: 'unlocked', updatedAt: new Date().toISOString() } });
-                            }}>Unlock…</button>
-                    <button
-                      className={`px-3 py-2 rounded-xl ${((window as any).nostrPK && (task.bounty!.sender === (window as any).nostrPK || task.createdBy === (window as any).nostrPK)) ? 'bg-rose-600/80 hover:bg-rose-600' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}`}
-                      disabled={!((window as any).nostrPK && (task.bounty!.sender === (window as any).nostrPK || task.createdBy === (window as any).nostrPK))}
-                      onClick={() => {
-                        if (!((window as any).nostrPK && (task.bounty!.sender === (window as any).nostrPK || task.createdBy === (window as any).nostrPK))) return;
-                        save({ bounty: { ...task.bounty!, state: 'revoked', updatedAt: new Date().toISOString() } });
-                      }}
-                    >
-                      Revoke
-                    </button>
-                  </>
-                )}
-                <button
-                  className={`ml-auto px-3 py-2 rounded-xl ${task.bounty.state==='claimed' ? 'bg-neutral-800' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}`}
-                  disabled={task.bounty.state !== 'claimed'}
-                  onClick={() => {
-                    if (task.bounty.state !== 'claimed') return;
-                    save({ bounty: undefined });
-                  }}
-                >
-                  Remove bounty
-                </button>
-              </div>
+                              } catch (e) { alert("Decrypt failed: " + (e as Error).message); }
+                            }}>Reveal (decrypt)</button>
+                  )}
+                  <button
+                    className={`px-3 py-2 rounded-xl ${task.bounty.token ? 'bg-neutral-800' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}`}
+                    disabled={!task.bounty.token}
+                    onClick={() => {
+                      if (!task.bounty.token) return;
+                      setBountyState('claimed');
+                      save({ bounty: { ...task.bounty!, state: 'claimed', updatedAt: new Date().toISOString() } });
+                    }}
+                  >
+                    Mark claimed
+                  </button>
+                  {task.bounty.state === 'locked' && (
+                    <>
+                      <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                              onClick={() => {
+                                const newTok = prompt('Paste unlocked token (after you reissued in your wallet):');
+                                if (!newTok) return;
+                                save({ bounty: { ...task.bounty!, token: newTok, state: 'unlocked', updatedAt: new Date().toISOString() } });
+                              }}>Unlock…</button>
+                      <button
+                        className={`px-3 py-2 rounded-xl ${((window as any).nostrPK && (task.bounty!.sender === (window as any).nostrPK || task.createdBy === (window as any).nostrPK)) ? 'bg-rose-600/80 hover:bg-rose-600' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}`}
+                        disabled={!((window as any).nostrPK && (task.bounty!.sender === (window as any).nostrPK || task.createdBy === (window as any).nostrPK))}
+                        onClick={() => {
+                          if (!((window as any).nostrPK && (task.bounty!.sender === (window as any).nostrPK || task.createdBy === (window as any).nostrPK))) return;
+                          save({ bounty: { ...task.bounty!, state: 'revoked', updatedAt: new Date().toISOString() } });
+                        }}
+                      >
+                        Revoke
+                      </button>
+                    </>
+                  )}
+                  <button
+                    className={`ml-auto px-3 py-2 rounded-xl ${task.bounty.state==='claimed' ? 'bg-neutral-800' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}`}
+                    disabled={task.bounty.state !== 'claimed'}
+                    onClick={() => {
+                      if (task.bounty.state !== 'claimed') return;
+                      save({ bounty: undefined });
+                    }}
+                  >
+                    Remove bounty
+                  </button>
+                </div>
+              )}
             </div>
+          ) : (
+            canAddBounty ? (
+              <div className="mt-2 space-y-2">
+                <textarea
+                  value={bountyToken}
+                  onChange={(e)=>setBountyToken(e.target.value)}
+                  placeholder="Paste Cashu token (can be locked to your pubkey)"
+                  rows={3}
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                />
+                <label className="flex items-center gap-2 text-xs text-neutral-300">
+                  <input type="checkbox" checked={encryptWhenAttach} onChange={(e)=>setEncryptWhenAttach(e.target.checked)} />
+                  Hide/encrypt token until I reveal (uses your local key)
+                </label>
+                <div className="flex items-center gap-2">
+                  <input type="number" min={1} value={bountyAmount as number || ""}
+                         onChange={(e)=>setBountyAmount(e.target.value ? parseInt(e.target.value,10) : "")}
+                         placeholder="Amount (sats)"
+                         className="w-40 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                  <button className="pressable px-3 py-2 rounded-xl bg-neutral-800"
+                          onClick={async () => {
+                            const tok = bountyToken.trim();
+                            if (!tok) return;
+                            const b: Task["bounty"] = {
+                              id: crypto.randomUUID(),
+                              token: tok,
+                              amount: typeof bountyAmount === 'number' ? bountyAmount : undefined,
+                              state: "locked",
+                              owner: task.createdBy || (window as any).nostrPK || "",
+                              sender: (window as any).nostrPK || "",
+                              updatedAt: new Date().toISOString(),
+                              lock: tok.includes("pubkey") ? "p2pk" : tok.includes("hash") ? "htlc" : "unknown",
+                            };
+                            if (encryptWhenAttach) {
+                              try {
+                                const enc = await encryptEcashTokenForFunder(tok);
+                                b.enc = enc;
+                                b.token = "";
+                              } catch (e) {
+                                alert("Encryption failed: "+ (e as Error).message);
+                                return;
+                              }
+                            }
+                            save({ bounty: b });
+                          }}
+                  >Attach</button>
+                </div>
+                <div className="text-xs text-neutral-400">Tip: Ask the funder to lock the token to your Nostr pubkey so only you can unlock it later.</div>
+              </div>
+            ) : (
+              <div className="mt-2 text-xs text-neutral-400">No permission to add bounty.</div>
+            )
           )}
         </div>
 
         <div className="pt-2 flex justify-between">
-          <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
+          {canEdit && <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>}
           <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
         </div>
       </div>
@@ -2337,6 +2431,7 @@ function SettingsModal({
   const [customSk, setCustomSk] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [reloadNeeded, setReloadNeeded] = useState(false);
+  const isBoardAdmin = !!(manageBoard && pubkeyHex && manageBoard.nostr?.admins?.includes(pubkeyHex));
 
   function backupData() {
     const data = {
@@ -2736,13 +2831,33 @@ function SettingsModal({
                     <div className="text-xs text-neutral-400">Relays (CSV)</div>
                     <input value={(manageBoard.nostr.relays || []).join(",")} onChange={(e)=>{
                       const relays = e.target.value.split(",").map(s=>s.trim()).filter(Boolean);
-                      setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays } }) : b));
+                      setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { ...b.nostr!, relays } }) : b));
+                      setTimeout(()=>onBoardChanged(manageBoard.id),0);
                     }} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
                   </>
                 )}
+                <div className="text-xs text-neutral-400">Access level</div>
+                <select value={manageBoard.nostr.access || 'full'} onChange={(e)=>{
+                    if(!isBoardAdmin) return;
+                    const access = e.target.value as 'full'|'add'|'view';
+                    setBoards(prev => prev.map(b => b.id===manageBoard.id ? ({...b, nostr:{...b.nostr!, access}}) : b));
+                    setTimeout(()=>onBoardChanged(manageBoard.id),0);
+                }} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" disabled={!isBoardAdmin}>
+                  <option value="view">View only</option>
+                  <option value="add">Add tasks & bounties</option>
+                  <option value="full">Full access</option>
+                </select>
+                <div className="text-xs text-neutral-400">Admins (CSV pubkeys)</div>
+                <input value={(manageBoard.nostr.admins || []).join(",")} onChange={(e)=>{
+                    if(!isBoardAdmin) return;
+                    const admins = e.target.value.split(",").map(s=>s.trim()).filter(Boolean);
+                    setBoards(prev => prev.map(b => b.id===manageBoard.id ? ({...b, nostr:{...b.nostr!, admins}}) : b));
+                    setTimeout(()=>onBoardChanged(manageBoard.id),0);
+                }} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" disabled={!isBoardAdmin}/>
                 <div className="flex gap-2">
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onBoardChanged(manageBoard.id)}>Republish metadata</button>
-                  <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>{
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800 disabled:bg-neutral-800/50" onClick={()=>onBoardChanged(manageBoard.id)} disabled={!isBoardAdmin}>Republish metadata</button>
+                  <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600 disabled:bg-neutral-800 disabled:text-neutral-500" disabled={!isBoardAdmin} onClick={()=>{
+                    if(!isBoardAdmin) return;
                     setBoards(prev => prev.map(b => b.id === manageBoard.id ? (b.kind === 'week' ? { id: b.id, name: b.name, kind: 'week' } as Board : { id: b.id, name: b.name, kind: 'lists', columns: b.columns } as Board) : b));
                   }}>Stop sharing</button>
                 </div>

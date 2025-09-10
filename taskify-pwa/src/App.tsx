@@ -1020,6 +1020,22 @@ export default function App() {
     setTasks(prev => prev.filter(t => !(t.completed && (!t.bounty || t.bounty.state === 'claimed'))));
   }
 
+  async function revealBounty(id: string) {
+    const t = tasks.find(x => x.id === id);
+    if (!t || !t.bounty || t.bounty.state !== 'locked' || !t.bounty.enc) return;
+    try {
+      const pt = await decryptEcashTokenForFunder(t.bounty.enc);
+      const updated: Task = {
+        ...t,
+        bounty: { ...t.bounty, token: pt, enc: undefined, state: 'unlocked', updatedAt: new Date().toISOString() },
+      };
+      setTasks(prev => prev.map(x => x.id === id ? updated : x));
+      try { maybePublishTask(updated); } catch {}
+    } catch (e) {
+      alert('Decrypt failed: ' + (e as Error).message);
+    }
+  }
+
   async function claimBounty(id: string) {
     const t = tasks.find(x => x.id === id);
     if (!t || !t.bounty || t.bounty.state !== 'unlocked' || !t.bounty.token) return;
@@ -1337,6 +1353,7 @@ export default function App() {
                           task={t}
                           onComplete={() => {
                             if (!t.completed) completeTask(t.id);
+                            else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
                             else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
                             else restoreTask(t.id);
                           }}
@@ -1359,6 +1376,7 @@ export default function App() {
                           task={t}
                           onComplete={() => {
                             if (!t.completed) completeTask(t.id);
+                            else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
                             else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
                             else restoreTask(t.id);
                           }}
@@ -1391,6 +1409,7 @@ export default function App() {
                           task={t}
                           onComplete={() => {
                             if (!t.completed) completeTask(t.id);
+                            else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
                             else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
                             else restoreTask(t.id);
                           }}

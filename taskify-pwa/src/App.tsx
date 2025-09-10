@@ -541,6 +541,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
 
   // add bar
+  const newTitleRef = useRef<HTMLInputElement>(null);
   const [newTitle, setNewTitle] = useState("");
   const [newImages, setNewImages] = useState<string[]>([]);
   const [dayChoice, setDayChoice] = useState<DayChoice>(() => {
@@ -874,6 +875,7 @@ export default function App() {
     setQuickRule("none");
     setAddCustomRule(R_NONE);
     setScheduleDate("");
+    newTitleRef.current?.focus();
   }
 
   function completeTask(id: string) {
@@ -1089,9 +1091,16 @@ export default function App() {
         {view === "board" && currentBoard && (
           <div className="flex flex-wrap gap-2 items-center mb-4">
             <input
+              ref={newTitleRef}
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
               onPaste={handleAddPaste}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addTask();
+                }
+              }}
               placeholder="New task…"
               className="flex-1 min-w-[220px] px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
             />

@@ -2558,47 +2558,46 @@ function SettingsModal({
               onClick={()=>setShowAdvanced(a=>!a)}
             >{showAdvanced ? "Hide advanced" : "Advanced"}</button>
           </div>
-          {manageBoard.nostr ? (
-            <div className="space-y-2">
-              <div className="text-xs text-neutral-400">Board ID</div>
-              <div className="flex gap-2 items-center">
-                <input readOnly value={manageBoard.nostr.boardId}
-                       className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{navigator.clipboard?.writeText(manageBoard.nostr!.boardId);}}>Copy</button>
-              </div>
-              {showAdvanced && (
-                <>
-                  <div className="text-xs text-neutral-400">Relays (CSV)</div>
-                  <input value={(manageBoard.nostr.relays || []).join(",")} onChange={(e)=>{
-                    const relays = e.target.value.split(",").map(s=>s.trim()).filter(Boolean);
-                    setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays } }) : b));
-                  }} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                </>
-              )}
-              <div className="flex gap-2">
-                <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onBoardChanged(manageBoard.id)}>Republish metadata</button>
-                <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>{
-                  setBoards(prev => prev.map(b => b.id === manageBoard.id ? (b.kind === 'week' ? { id: b.id, name: b.name, kind: 'week' } as Board : { id: b.id, name: b.name, kind: 'lists', columns: b.columns } as Board) : b));
-                }}>Stop sharing</button>
-              </div>
-              {manageBoard.kind === "lists" && (
-                <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {showAdvanced && (
-                <>
-                  <div className="text-xs text-neutral-400">Relays override (optional, CSV)</div>
-                  <input value={relaysCsv} onChange={(e)=>setRelaysCsv(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="wss://relay1, wss://relay2"/>
-                </>
-              )}
-              <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={()=>{onShareBoard(manageBoard.id, showAdvanced ? relaysCsv : ""); setRelaysCsv('');}}>Share this board</button>
-              {manageBoard.kind === "lists" && (
-                <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
-              )}
-            </div>
-          )}
+          <div className="space-y-2">
+            {manageBoard.nostr ? (
+              <>
+                <div className="text-xs text-neutral-400">Board ID</div>
+                <div className="flex gap-2 items-center">
+                  <input readOnly value={manageBoard.nostr.boardId}
+                         className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{navigator.clipboard?.writeText(manageBoard.nostr!.boardId);}}>Copy</button>
+                </div>
+                {showAdvanced && (
+                  <>
+                    <div className="text-xs text-neutral-400">Relays (CSV)</div>
+                    <input value={(manageBoard.nostr.relays || []).join(",")} onChange={(e)=>{
+                      const relays = e.target.value.split(",").map(s=>s.trim()).filter(Boolean);
+                      setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays } }) : b));
+                    }} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                  </>
+                )}
+                <div className="flex gap-2">
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onBoardChanged(manageBoard.id)}>Republish metadata</button>
+                  <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>{
+                    setBoards(prev => prev.map(b => b.id === manageBoard.id ? (b.kind === 'week' ? { id: b.id, name: b.name, kind: 'week' } as Board : { id: b.id, name: b.name, kind: 'lists', columns: b.columns } as Board) : b));
+                  }}>Stop sharing</button>
+                </div>
+              </>
+            ) : (
+              <>
+                {showAdvanced && (
+                  <>
+                    <div className="text-xs text-neutral-400">Relays override (optional, CSV)</div>
+                    <input value={relaysCsv} onChange={(e)=>setRelaysCsv(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="wss://relay1, wss://relay2"/>
+                  </>
+                )}
+                <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={()=>{onShareBoard(manageBoard.id, showAdvanced ? relaysCsv : ""); setRelaysCsv('');}}>Share this board</button>
+              </>
+            )}
+            {manageBoard.kind === "lists" && (
+              <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
+            )}
+          </div>
         </div>
       </Modal>
     )}

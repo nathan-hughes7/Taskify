@@ -574,6 +574,15 @@ export default function App() {
   });
   const [scheduleDate, setScheduleDate] = useState<string>("");
 
+  function handleBoardSelect(e: React.ChangeEvent<HTMLSelectElement>) {
+    const val = e.target.value;
+    if (val === "__wallet") {
+      setShowWallet(true);
+      return;
+    }
+    setCurrentBoardId(val);
+  }
+
   // recurrence select (with Custom… option)
   const [quickRule, setQuickRule] = useState<
     "none" | "daily" | "weeklyMonFri" | "weeklyWeekends" | "every2d" | "custom"
@@ -1159,11 +1168,12 @@ export default function App() {
             {/* Board switcher */}
             <select
               value={currentBoardId}
-              onChange={(e)=>setCurrentBoardId(e.target.value)}
+              onChange={handleBoardSelect}
               className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               title="Boards"
             >
-            {boards.length === 0 ? (
+              <option value="__wallet">💰 Wallet</option>
+              {boards.length === 0 ? (
                 <option value="">No boards</option>
               ) : (
                 boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
@@ -1186,13 +1196,6 @@ export default function App() {
               title="Settings"
             >
               ⚙️
-            </button>
-            <button
-              className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              onClick={() => setShowWallet(true)}
-              title="Wallet"
-            >
-              💰
             </button>
             <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
               <button className={`px-3 py-2 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>

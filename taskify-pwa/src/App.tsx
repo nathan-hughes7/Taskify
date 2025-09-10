@@ -2451,9 +2451,14 @@ function SettingsModal({
               value={newBoardName}
               onChange={e=>setNewBoardName(e.target.value)}
               placeholder="Board name or shared ID"
-              className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
             />
-            <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={addBoard}>Create/Join</button>
+            <button
+              className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 shrink-0"
+              onClick={addBoard}
+            >
+              Create/Join
+            </button>
           </div>
         </section>
 
@@ -2539,9 +2544,6 @@ function SettingsModal({
               <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>addColumn(manageBoard.id)}>Add list</button>
             </div>
             <div className="text-xs text-neutral-400 mt-2">Tasks can be dragged between lists directly on the board.</div>
-            <div className="mt-4 flex justify-end">
-              <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
-            </div>
           </>
         ) : (
           <div className="text-xs text-neutral-400">The Week board has fixed columns (Sun–Sat, Bounties).</div>
@@ -2592,6 +2594,11 @@ function SettingsModal({
             </div>
           )}
         </div>
+        {manageBoard.kind === "lists" && (
+          <div className="mt-4 flex justify-end">
+            <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
+          </div>
+        )}
       </Modal>
     )}
     </>

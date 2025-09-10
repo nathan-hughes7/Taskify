@@ -29,6 +29,7 @@ type Task = {
   // Custom boards (multi-list):
   columnId?: string;
   hiddenUntilISO?: string;        // controls visibility (appear at/after this date)
+  order?: number;                 // order within the board for manual reordering
   bounty?: {
     id: string;                   // bounty id (uuid)
     token: string;                // cashu token string (locked or unlocked)
@@ -62,6 +63,7 @@ type Board =
 
 type Settings = {
   weekStart: Weekday; // 0=Sun, 1=Mon, 6=Sat
+  newTaskPosition: "top" | "bottom";
 };
 
 const R_NONE: Recurrence = { type: "none" };
@@ -396,13 +398,17 @@ function hiddenUntilForNext(
 
 /* ================= Storage hooks ================= */
 function useSettings() {
-  const [settings, setSettings] = useState<Settings>(() => {
+  const [settings, setSettingsRaw] = useState<Settings>(() => {
     try {
-      return JSON.parse(localStorage.getItem(LS_SETTINGS) || "") || { weekStart: 0 };
+      const parsed = JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}");
+      return { weekStart: 0, newTaskPosition: "bottom", ...parsed };
     } catch {
-      return { weekStart: 0 };
+      return { weekStart: 0, newTaskPosition: "bottom" };
     }
   });
+  const setSettings = (s: Partial<Settings>) => {
+    setSettingsRaw(prev => ({ ...prev, ...s }));
+  };
   useEffect(() => {
     localStorage.setItem(LS_SETTINGS, JSON.stringify(settings));
   }, [settings]);
@@ -446,7 +452,19 @@ function useBoards() {
 
 function useTasks() {
   const [tasks, setTasks] = useState<Task[]>(() => {
-    try { return JSON.parse(localStorage.getItem(LS_TASKS) || "[]"); } catch { return []; }
+    try {
+      const raw = JSON.parse(localStorage.getItem(LS_TASKS) || "[]");
+      if (Array.isArray(raw)) {
+        const orderMap = new Map<string, number>();
+        return raw.map((t: Task) => {
+          const next = orderMap.get(t.boardId) ?? 0;
+          const order = typeof t.order === 'number' ? t.order : next;
+          orderMap.set(t.boardId, order + 1);
+          return { ...t, order } as Task;
+        });
+      }
+      return [];
+    } catch { return []; }
   });
   useEffect(() => {
     try {
@@ -591,10 +609,11 @@ export default function App() {
   }
 
   /* ---------- Derived: board-scoped lists ---------- */
-  const tasksForBoard = useMemo(
-    () => tasks.filter(t => t.boardId === currentBoardId),
-    [tasks, currentBoardId]
-  );
+  const tasksForBoard = useMemo(() => {
+    return tasks
+      .filter(t => t.boardId === currentBoardId)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }, [tasks, currentBoardId]);
 
   // Week board
   const byDay = useMemo(() => {
@@ -694,7 +713,7 @@ export default function App() {
     const status = t.completed ? "done" : "open";
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
     const tags: string[][] = [["d", t.id],["b", boardId],["col", String(colTag)],["status", status]];
-    const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy };
+    const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, order: t.order };
     // Include explicit nulls to signal removals when undefined
     body.images = (typeof t.images === 'undefined') ? null : t.images;
     body.bounty = (typeof t.bounty === 'undefined') ? null : t.bounty;
@@ -750,6 +769,7 @@ export default function App() {
       completedAt: payload.completedAt,
       recurrence: payload.recurrence,
       hiddenUntilISO: payload.hiddenUntilISO,
+      order: typeof payload.order === 'number' ? payload.order : undefined,
     };
     if (lb.kind === "week") base.column = col === "bounties" ? "bounties" : "day";
     else if (lb.kind === "lists") base.columnId = col || (lb.columns[0]?.id || "");
@@ -801,13 +821,15 @@ export default function App() {
         // Determine incoming images raw (allow explicit null removal)
         const incomingImgs: string[] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'images') ? payload.images : undefined;
         const mergedImages = incomingImgs === undefined ? current.images : incomingImgs === null ? undefined : incomingImgs;
-        copy[idx] = { ...current, ...base, images: mergedImages, bounty: mergeBounty(current.bounty, incomingB as any) };
+        const newOrder = typeof base.order === 'number' ? base.order : current.order;
+        copy[idx] = { ...current, ...base, order: newOrder, images: mergedImages, bounty: mergeBounty(current.bounty, incomingB as any) };
         return copy;
       } else {
         const incomingB: Task["bounty"] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'bounty') ? payload.bounty : undefined;
         const incomingImgs: string[] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'images') ? payload.images : undefined;
         const imgs = incomingImgs === null ? undefined : Array.isArray(incomingImgs) ? incomingImgs : undefined;
-        return [...prev, { ...base, images: imgs, bounty: incomingB === null ? undefined : incomingB }];
+        const newOrder = typeof base.order === 'number' ? base.order : 0;
+        return [...prev, { ...base, order: newOrder, images: imgs, bounty: incomingB === null ? undefined : incomingB }];
       }
     });
   }, [setTasks, tagValue]);
@@ -835,6 +857,15 @@ export default function App() {
     else t.hiddenUntilISO = undefined;
   }
 
+  function nextOrderForBoard(boardId: string, arr: Task[]): number {
+    const boardTasks = arr.filter(x => x.boardId === boardId);
+    if (settings.newTaskPosition === "top") {
+      const minOrder = boardTasks.reduce((min, t) => Math.min(min, t.order ?? 0), 0);
+      return minOrder - 1;
+    }
+    return boardTasks.reduce((max, t) => Math.max(max, t.order ?? -1), -1) + 1;
+  }
+
   function addTask() {
     const title = newTitle.trim() || (newImages.length ? "Image" : "");
     if ((!title && !newImages.length) || !currentBoard) return;
@@ -848,6 +879,7 @@ export default function App() {
       dueISO = isoForWeekday(dayChoice as Weekday);
     }
 
+    const nextOrder = nextOrderForBoard(currentBoard.id, tasks);
     const t: Task = {
       id: crypto.randomUUID(),
       boardId: currentBoard.id,
@@ -856,6 +888,7 @@ export default function App() {
       dueISO,
       completed: false,
       recurrence,
+      order: nextOrder,
     };
     if (newImages.length) t.images = newImages;
     if (currentBoard.kind === "week") {
@@ -888,6 +921,7 @@ export default function App() {
       if (doneOne) { try { maybePublishTask(doneOne); } catch {} }
       const nextISO = cur.recurrence ? nextOccurrence(cur.dueISO, cur.recurrence) : null;
       if (nextISO && cur.recurrence) {
+        const nextOrder = nextOrderForBoard(cur.boardId, updated);
         const clone: Task = {
           ...cur,
           id: crypto.randomUUID(),
@@ -895,6 +929,7 @@ export default function App() {
           completedAt: undefined,
           dueISO: nextISO,
           hiddenUntilISO: hiddenUntilForNext(nextISO, cur.recurrence, settings.weekStart),
+          order: nextOrder,
         };
         try { maybePublishTask(clone); } catch {}
         return [...updated, clone];
@@ -988,7 +1023,26 @@ export default function App() {
       let insertIdx = typeof beforeId === "string" ? arr.findIndex(t => t.id === beforeId) : -1;
       if (insertIdx < 0) insertIdx = arr.length;
       arr.splice(insertIdx, 0, updated);
-      try { maybePublishTask(updated); } catch {}
+
+      // recompute order for all tasks on this board
+      const boardTasks: Task[] = [];
+      let order = 0;
+      for (let i = 0; i < arr.length; i++) {
+        const t = arr[i];
+        if (t.boardId === updated.boardId) {
+          if (t === updated) {
+            updated.order = order;
+          } else {
+            arr[i] = { ...t, order };
+          }
+          boardTasks.push(arr[i]);
+          order++;
+        }
+      }
+      try {
+        for (const t of boardTasks) maybePublishTask(t);
+      } catch {}
+
       return arr;
     });
   }
@@ -2193,7 +2247,7 @@ function SettingsModal({
   settings: Settings;
   boards: Board[];
   currentBoardId: string;
-  setSettings: (s: Settings) => void;
+  setSettings: (s: Partial<Settings>) => void;
   setBoards: React.Dispatch<React.SetStateAction<Board[]>>;
   setCurrentBoardId: (id: string) => void;
   defaultRelays: string[];
@@ -2446,6 +2500,15 @@ function SettingsModal({
             <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 1 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 1 })}>Monday</button>
           </div>
           <div className="text-xs text-neutral-400 mt-2">Affects when weekly recurring tasks re-appear.</div>
+        </section>
+
+        {/* New task position */}
+        <section>
+          <div className="text-sm font-medium mb-2">Add new tasks to</div>
+          <div className="flex gap-2">
+            <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'top' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'top' })}>Top</button>
+            <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'bottom' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'bottom' })}>Bottom</button>
+          </div>
         </section>
 
         {/* Boards & Columns */}

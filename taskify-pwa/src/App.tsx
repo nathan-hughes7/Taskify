@@ -2450,7 +2450,7 @@ function SettingsModal({
             <input
               value={newBoardName}
               onChange={e=>setNewBoardName(e.target.value)}
-              placeholder="Board name or shared ID"
+              placeholder="Board name or ID"
               className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
             />
             <button
@@ -2581,6 +2581,9 @@ function SettingsModal({
                   setBoards(prev => prev.map(b => b.id === manageBoard.id ? (b.kind === 'week' ? { id: b.id, name: b.name, kind: 'week' } as Board : { id: b.id, name: b.name, kind: 'lists', columns: b.columns } as Board) : b));
                 }}>Stop sharing</button>
               </div>
+              {manageBoard.kind === "lists" && (
+                <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
+              )}
             </div>
           ) : (
             <div className="space-y-2">
@@ -2591,14 +2594,12 @@ function SettingsModal({
                 </>
               )}
               <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={()=>{onShareBoard(manageBoard.id, showAdvanced ? relaysCsv : ""); setRelaysCsv('');}}>Share this board</button>
+              {manageBoard.kind === "lists" && (
+                <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
+              )}
             </div>
           )}
         </div>
-        {manageBoard.kind === "lists" && (
-          <div className="mt-4 flex justify-end">
-            <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
-          </div>
-        )}
       </Modal>
     )}
     </>

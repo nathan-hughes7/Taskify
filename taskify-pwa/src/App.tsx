@@ -1863,10 +1863,10 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
   const [rule, setRule] = useState<Recurrence>(task.recurrence ?? R_NONE);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [scheduledDate, setScheduledDate] = useState(task.dueISO.slice(0,10));
-  const [bountyToken, setBountyToken] = useState(task.bounty?.token || "");
   const [bountyAmount, setBountyAmount] = useState<number | "">(task.bounty?.amount ?? "");
   const [, setBountyState] = useState<Task["bounty"]["state"]>(task.bounty?.state || "locked");
   const [encryptWhenAttach, setEncryptWhenAttach] = useState(true);
+  const { createSendToken, receiveToken } = useCashu();
 
   async function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
     const items = e.clipboardData?.items;
@@ -1973,17 +1973,6 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
           </div>
           {!task.bounty ? (
             <div className="mt-2 space-y-2">
-              <textarea
-                value={bountyToken}
-                onChange={(e)=>setBountyToken(e.target.value)}
-                placeholder="Paste Cashu token (can be locked to your pubkey)"
-                rows={3}
-                className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              />
-              <label className="flex items-center gap-2 text-xs text-neutral-300">
-                <input type="checkbox" checked={encryptWhenAttach} onChange={(e)=>setEncryptWhenAttach(e.target.checked)} />
-                Hide/encrypt token until I reveal (uses your local key)
-              </label>
               <div className="flex items-center gap-2">
                 <input type="number" min={1} value={bountyAmount as number || ""}
                        onChange={(e)=>setBountyAmount(e.target.value ? parseInt(e.target.value,10) : "")}
@@ -1991,33 +1980,40 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                        className="w-40 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
                 <button className="pressable px-3 py-2 rounded-xl bg-neutral-800"
                         onClick={async () => {
-                          const tok = bountyToken.trim();
-                          if (!tok) return;
-                          const b: Task["bounty"] = {
-                            id: crypto.randomUUID(),
-                            token: tok,
-                            amount: typeof bountyAmount === 'number' ? bountyAmount : undefined,
-                            state: "locked",
-                            owner: task.createdBy || (window as any).nostrPK || "",
-                            sender: (window as any).nostrPK || "",
-                            updatedAt: new Date().toISOString(),
-                            lock: tok.includes("pubkey") ? "p2pk" : tok.includes("hash") ? "htlc" : "unknown",
-                          };
-                          if (encryptWhenAttach) {
-                            try {
-                              const enc = await encryptEcashTokenForFunder(tok);
-                              b.enc = enc;
-                              b.token = "";
-                            } catch (e) {
-                              alert("Encryption failed: "+ (e as Error).message);
-                              return;
+                          if (typeof bountyAmount !== 'number' || bountyAmount <= 0) return;
+                          try {
+                            const { token: tok } = await createSendToken(bountyAmount);
+                            const b: Task["bounty"] = {
+                              id: crypto.randomUUID(),
+                              token: tok,
+                              amount: bountyAmount,
+                              state: "locked",
+                              owner: task.createdBy || (window as any).nostrPK || "",
+                              sender: (window as any).nostrPK || "",
+                              updatedAt: new Date().toISOString(),
+                              lock: tok.includes("pubkey") ? "p2pk" : tok.includes("hash") ? "htlc" : "unknown",
+                            };
+                            if (encryptWhenAttach) {
+                              try {
+                                const enc = await encryptEcashTokenForFunder(tok);
+                                b.enc = enc;
+                                b.token = "";
+                              } catch (e) {
+                                alert("Encryption failed: "+ (e as Error).message);
+                                return;
+                              }
                             }
+                            save({ bounty: b });
+                          } catch (e) {
+                            alert("Failed to create token: "+ (e as Error).message);
                           }
-                          save({ bounty: b });
                         }}
                 >Attach</button>
               </div>
-              <div className="text-xs text-neutral-400">Tip: Ask the funder to lock the token to your Nostr pubkey so only you can unlock it later.</div>
+              <label className="flex items-center gap-2 text-xs text-neutral-300">
+                <input type="checkbox" checked={encryptWhenAttach} onChange={(e)=>setEncryptWhenAttach(e.target.checked)} />
+                Hide/encrypt token until I reveal (uses your local key)
+              </label>
             </div>
           ) : (
             <div className="mt-2 space-y-2">
@@ -2036,9 +2032,29 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
               )}
               <div className="flex gap-2 flex-wrap">
                 {task.bounty.token && (
-                  <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=> navigator.clipboard?.writeText(task.bounty!.token!)}>
-                    Copy token
-                  </button>
+                  task.bounty.state === 'unlocked' ? (
+                    <button
+                      className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                      onClick={async () => {
+                        try {
+                          await receiveToken(task.bounty!.token!);
+                          setBountyState('claimed');
+                          save({ bounty: { ...task.bounty!, token: '', state: 'claimed', updatedAt: new Date().toISOString() } });
+                        } catch (e) {
+                          alert('Redeem failed: ' + (e as Error).message);
+                        }
+                      }}
+                    >
+                      Redeem
+                    </button>
+                  ) : (
+                    <button
+                      className="pressable px-3 py-2 rounded-xl bg-neutral-800"
+                      onClick={() => navigator.clipboard?.writeText(task.bounty!.token!)}
+                    >
+                      Copy token
+                    </button>
+                  )
                 )}
                 {task.bounty.enc && !task.bounty.token && (window as any).nostrPK && task.bounty.sender === (window as any).nostrPK && (
                   <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"

@@ -696,14 +696,15 @@ export default function App() {
   const isBoardAdmin = useCallback((board: Board) => {
     return !!(nostrPK && board.nostr?.admins?.includes(nostrPK));
   }, [nostrPK]);
-  const boardAccess = (board: Board): "full" | "add" | "view" =>
-    board.nostr?.access || "full";
+  const boardAccess = useCallback((board: Board): "full" | "add" | "view" =>
+    isBoardAdmin(board) ? "full" : (board.nostr?.access || "full"),
+  [isBoardAdmin]);
   const canAddToBoard = useCallback((board: Board) => {
     return isBoardAdmin(board) || boardAccess(board) !== "view";
-  }, [isBoardAdmin]);
+  }, [isBoardAdmin, boardAccess]);
   const canEditBoard = useCallback((board: Board) => {
     return isBoardAdmin(board) || boardAccess(board) === "full";
-  }, [isBoardAdmin]);
+  }, [isBoardAdmin, boardAccess]);
   const canAdd = useCallback((boardId: string) => {
     const b = boards.find(x => x.id === boardId);
     return b ? canAddToBoard(b) : true;
@@ -2854,6 +2855,29 @@ function SettingsModal({
                     setBoards(prev => prev.map(b => b.id===manageBoard.id ? ({...b, nostr:{...b.nostr!, admins}}) : b));
                     setTimeout(()=>onBoardChanged(manageBoard.id),0);
                 }} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" disabled={!isBoardAdmin}/>
+                {isBoardAdmin && (
+                  <button
+                    className="mt-2 px-3 py-2 rounded-xl bg-neutral-800"
+                    onClick={() => {
+                      const npub = prompt("Admin npub");
+                      if (!npub) return;
+                      try {
+                        const dec = nip19.decode(npub.trim());
+                        const hex = dec.type === "npub" && typeof dec.data === "string" ? dec.data : undefined;
+                        if (!hex) throw new Error("bad");
+                        setBoards(prev => prev.map(b => {
+                          if (b.id !== manageBoard.id) return b;
+                          const current = b.nostr?.admins || [];
+                          if (current.includes(hex)) return b;
+                          return { ...b, nostr: { ...b.nostr!, admins: [...current, hex] } };
+                        }));
+                        setTimeout(()=>onBoardChanged(manageBoard.id),0);
+                      } catch {
+                        alert("Invalid npub");
+                      }
+                    }}
+                  >Add admin</button>
+                )}
                 <div className="flex gap-2">
                   <button className="px-3 py-2 rounded-xl bg-neutral-800 disabled:bg-neutral-800/50" onClick={()=>onBoardChanged(manageBoard.id)} disabled={!isBoardAdmin}>Republish metadata</button>
                   <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600 disabled:bg-neutral-800 disabled:text-neutral-500" disabled={!isBoardAdmin} onClick={()=>{

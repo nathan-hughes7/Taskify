@@ -1633,7 +1633,7 @@ export default function App() {
             setCurrentBoardId(id);
           }}
           onBoardChanged={(boardId) => {
-            const b = boards.find(x => x.id === boardId);
+            const b = boardsRef.current.find(x => x.id === boardId);
             if (b) publishBoardMetadata(b);
           }}
           onClose={() => setShowSettings(false)}

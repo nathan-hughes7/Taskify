@@ -2808,7 +2808,7 @@ function SettingsModal({
               className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               value={mintInput}
               onChange={(e)=>setMintInput(e.target.value)}
-              placeholder="https://mint.solife.me"
+              placeholder="https://mint.minibits.cash"
             />
             <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={handleMintSave}>Save</button>
           </div>

@@ -896,7 +896,7 @@ export default function App() {
     return boardTasks.reduce((max, t) => Math.max(max, t.order ?? -1), -1) + 1;
   }
 
-  function addTask() {
+  function addTask(keepKeyboard = false) {
     const title = newTitle.trim() || (newImages.length ? "Image" : "");
     if ((!title && !newImages.length) || !currentBoard) return;
 
@@ -939,7 +939,8 @@ export default function App() {
     setQuickRule("none");
     setAddCustomRule(R_NONE);
     setScheduleDate("");
-    newTitleRef.current?.focus();
+    if (keepKeyboard) newTitleRef.current?.focus();
+    else newTitleRef.current?.blur();
   }
 
   function completeTask(id: string) {
@@ -1182,7 +1183,7 @@ export default function App() {
     return () => { unsubs.forEach(u => u()); };
   }, [nostrBoardsKey, pool, applyBoardEvent, applyTaskEvent, nostrRefresh]);
 
-  // reset dayChoice when board changes or columns update
+  // reset dayChoice when board changes and center current day for week boards
   useEffect(() => {
     if (!currentBoard) return;
     if (currentBoard.kind === "lists") {
@@ -1190,9 +1191,16 @@ export default function App() {
       const valid = currentBoard.columns.some(c => c.id === dayChoice);
       if (!valid) setDayChoice(firstCol?.id || crypto.randomUUID());
     } else {
-      if (typeof dayChoice !== "number") {
-        setDayChoice(new Date().getDay() as Weekday);
-      }
+      const today = new Date().getDay() as Weekday;
+      setDayChoice(today);
+      requestAnimationFrame(() => {
+        const scroller = scrollerRef.current;
+        if (!scroller) return;
+        const el = scroller.querySelector(`[data-day='${today}']`) as HTMLElement | null;
+        if (!el) return;
+        const offset = el.offsetLeft - scroller.clientWidth / 2 + el.clientWidth / 2;
+        scroller.scrollTo({ left: offset, behavior: "smooth" });
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentBoardId, currentBoard?.columns, currentBoard?.kind]);
@@ -1258,7 +1266,7 @@ export default function App() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
-                  addTask();
+                  addTask(true);
                 }
               }}
               placeholder="New task…"
@@ -1320,7 +1328,7 @@ export default function App() {
             )}
 
             <button
-              onClick={addTask}
+              onClick={() => addTask()}
               className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium"
             >
               Add
@@ -1346,6 +1354,7 @@ export default function App() {
                       key={day}
                       title={WD_SHORT[day]}
                       onDropCard={(payload) => moveTask(payload.id, { type: "day", day })}
+                      data-day={day}
                     >
                         {(byDay.get(day) || []).map((t) => (
                         <Card
@@ -1744,7 +1753,12 @@ function TaskMedia({ task }: { task: Task }) {
   return (
     <>
       {noteText && (
-        <div className="text-xs text-neutral-400 mt-1 break-words">{autolink(noteText)}</div>
+        <div
+          className="text-xs text-neutral-400 mt-1 break-words"
+          style={{ display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}
+        >
+          {autolink(noteText)}
+        </div>
       )}
       {task.images?.length ? (
         <div className="mt-2 space-y-2">
@@ -1763,11 +1777,12 @@ function DroppableColumn({
   title,
   onDropCard,
   children,
+  ...props
 }: {
   title: string;
   onDropCard: (payload: { id: string }) => void;
   children: React.ReactNode;
-}) {
+} & React.HTMLAttributes<HTMLDivElement>) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1791,6 +1806,7 @@ function DroppableColumn({
       ref={ref}
       className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 min-h-[18rem] w-[18rem] shrink-0"
       // No touchAction lock so horizontal scrolling stays fluid
+      {...props}
     >
       <div className="font-semibold mb-2">{title}</div>
       <div className="space-y-2">{children}</div>
@@ -1837,6 +1853,7 @@ function Card({
     <div
       ref={cardRef}
       className="group relative p-3 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
+      style={{ touchAction: "pan-y" }}
       draggable
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}

@@ -158,6 +158,8 @@ function createNostrPool(): NostrPool {
     {
       onEvent: (ev: NostrEvent, from: string) => void;
       onEose?: (from: string) => void;
+      filters: any[];
+      relays: string[];
     }
   >();
 
@@ -173,10 +175,16 @@ function createNostrPool(): NostrPool {
         r.ws = new WebSocket(url);
         r.ws.onopen = () => {
           r!.status = "open";
-          // flush queue
+          // flush queued messages
           const q = r!.queue.slice();
           r!.queue.length = 0;
           for (const msg of q) r!.ws?.send(JSON.stringify(msg));
+          // re-subscribe to active subscriptions for this relay
+          for (const [subId, sub] of subs) {
+            if (sub.relays.includes(url)) {
+              try { r!.ws?.send(JSON.stringify(["REQ", subId, ...sub.filters])); } catch {}
+            }
+          }
         };
         r.ws.onclose = () => {
           r!.status = "closed";
@@ -231,7 +239,7 @@ function createNostrPool(): NostrPool {
     },
     subscribe(relayUrls, filters, onEvent, onEose) {
       const subId = `taskify-${Math.random().toString(36).slice(2, 10)}`;
-      subs.set(subId, { onEvent, onEose });
+      subs.set(subId, { onEvent, onEose, filters, relays: relayUrls.slice() });
       for (const u of relayUrls) {
         send(u, ["REQ", subId, ...filters]);
       }
@@ -721,18 +729,20 @@ export default function App() {
     return (board.nostr?.relays?.length ? board.nostr!.relays : defaultRelays).filter(Boolean);
   }, [defaultRelays]);
   async function publishBoardMetadata(board: Board) {
-    if (!board.nostr?.boardId) return;
-    const relays = getBoardRelays(board);
-    const idTag = boardTag(board.nostr.boardId);
-    const tags: string[][] = [["d", idTag],["b", idTag],["k", board.kind],["name", board.name]];
-    const raw = board.kind === "lists" ? JSON.stringify({ columns: board.columns }) : "";
-    const content = await encryptToBoard(board.nostr.boardId, raw);
-    nostrPublish(relays, { kind: 30300, tags, content, created_at: Math.floor(Date.now()/1000) });
+    try {
+      if (!board.nostr?.boardId) return;
+      const relays = getBoardRelays(board);
+      const idTag = boardTag(board.nostr.boardId);
+      const tags: string[][] = [["d", idTag],["b", idTag],["k", board.kind],["name", board.name]];
+      const raw = board.kind === "lists" ? JSON.stringify({ columns: board.columns }) : "";
+      const content = await encryptToBoard(board.nostr.boardId, raw);
+      nostrPublish(relays, { kind: 30300, tags, content, created_at: Math.floor(Date.now()/1000) });
+    } catch {}
   }
   async function publishTaskDeleted(t: Task) {
     const b = boards.find((x) => x.id === t.boardId);
     if (!b || !isShared(b) || !b.nostr) return;
-    await publishBoardMetadata(b);
+    publishBoardMetadata(b).catch(() => {});
     const relays = getBoardRelays(b);
     const boardId = b.nostr.boardId;
     const bTag = boardTag(boardId);
@@ -745,7 +755,7 @@ export default function App() {
   async function maybePublishTask(t: Task, boardOverride?: Board) {
     const b = boardOverride || boards.find((x) => x.id === t.boardId);
     if (!b || !isShared(b) || !b.nostr) return;
-    await publishBoardMetadata(b);
+    publishBoardMetadata(b).catch(() => {});
     const relays = getBoardRelays(b);
     const boardId = b.nostr.boardId;
     const bTag = boardTag(boardId);
@@ -1040,9 +1050,7 @@ export default function App() {
       }
       return updated;
     });
-    try {
-      for (const t of publish) await maybePublishTask(t);
-    } catch {}
+    await Promise.all(publish.map(t => maybePublishTask(t).catch(() => {})));
     burst();
   }
 
@@ -1059,9 +1067,7 @@ export default function App() {
         return updated;
       })
     );
-    if (publish) {
-      try { await maybePublishTask(publish); } catch {}
-    }
+    if (publish) await maybePublishTask(publish).catch(() => {});
   }
 
   function deleteTask(id: string) {
@@ -1236,10 +1242,7 @@ export default function App() {
 
       return arr;
     });
-
-    try {
-      for (const t of publish) await maybePublishTask(t);
-    } catch {}
+    await Promise.all(publish.map(t => maybePublishTask(t).catch(() => {})));
   }
 
   // Subscribe to Nostr for all shared boards
@@ -1255,10 +1258,11 @@ export default function App() {
     let parsed: Array<{id:string; relays:string}> = [];
     try { parsed = JSON.parse(nostrBoardsKey || "[]"); } catch {}
     const unsubs: Array<() => void> = [];
+    const relaySet = new Set<string>();
     for (const it of parsed) {
       const rls = it.relays.split(",").filter(Boolean);
       if (!rls.length) continue;
-      pool.setRelays(rls);
+      rls.forEach(r => relaySet.add(r));
       const filters = [
         { kinds: [30300, 30301], "#b": [it.id], limit: 500 },
         { kinds: [30300], "#d": [it.id], limit: 1 },
@@ -1269,6 +1273,7 @@ export default function App() {
       });
       unsubs.push(unsub);
     }
+    pool.setRelays(Array.from(relaySet));
     return () => { unsubs.forEach(u => u()); };
   }, [nostrBoardsKey, pool, applyBoardEvent, applyTaskEvent, nostrRefresh]);
 

@@ -1193,19 +1193,31 @@ export default function App() {
       if (insertIdx < 0) insertIdx = arr.length;
       arr.splice(insertIdx, 0, updated);
 
-      // recompute order for all tasks on this board
+      // helper to determine grouping for ordering
+      const groupKey = (t: Task) => {
+        if (t.columnId) return `c:${t.columnId}`;
+        if (t.column === "bounties") return "bounties";
+        if (t.column === "day") return `d:${new Date(t.dueISO).getDay()}`;
+        return "";
+      };
+
+      // recompute order within affected groups only
       const boardTasks: Task[] = [];
-      let order = 0;
-      for (let i = 0; i < arr.length; i++) {
-        const t = arr[i];
-        if (t.boardId === updated.boardId) {
-          if (t === updated) {
-            updated.order = order;
-          } else {
-            arr[i] = { ...t, order };
+      const affected = new Set<string>([groupKey(task), groupKey(updated)]);
+      for (const key of affected) {
+        if (!key) continue;
+        let order = 0;
+        for (let i = 0; i < arr.length; i++) {
+          const t = arr[i];
+          if (t.boardId === updated.boardId && groupKey(t) === key) {
+            if (t === updated) {
+              updated.order = order;
+            } else {
+              arr[i] = { ...t, order };
+            }
+            boardTasks.push(arr[i]);
+            order++;
           }
-          boardTasks.push(arr[i]);
-          order++;
         }
       }
       try {

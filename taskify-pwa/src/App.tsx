@@ -2590,6 +2590,7 @@ function SettingsModal({
       }
       return next;
     });
+    setTasks(prev => prev.filter(t => t.boardId !== id));
     if (manageBoardId === id) setManageBoardId(null);
   }
 
@@ -2955,9 +2956,7 @@ function SettingsModal({
                 <button className="block w-full px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={()=>{onShareBoard(manageBoard.id, showAdvanced ? relaysCsv : ""); setRelaysCsv('');}}>Share this board</button>
               </>
             )}
-            {manageBoard.kind === "lists" && (
-              <button className="pressable block w-full px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
-            )}
+            <button className="pressable block w-full px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
           </div>
         </div>
       </Modal>

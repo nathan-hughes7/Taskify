@@ -17,6 +17,12 @@ type Recurrence =
   | { type: "every"; n: number; unit: "day" | "week"; untilISO?: string }
   | { type: "monthlyDay"; day: number; untilISO?: string };
 
+type Subtask = {
+  id: string;
+  title: string;
+  completed?: boolean;
+};
+
 type Task = {
   id: string;
   boardId: string;
@@ -35,6 +41,7 @@ type Task = {
   hiddenUntilISO?: string;        // controls visibility (appear at/after this date)
   order?: number;                 // order within the board for manual reordering
   streak?: number;                // consecutive completion count
+  subtasks?: Subtask[];           // optional list of subtasks
   bounty?: {
     id: string;                   // bounty id (uuid)
     token: string;                // cashu token string (locked or unlocked)
@@ -730,7 +737,7 @@ export default function App() {
     const bTag = boardTag(boardId);
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
     const tags: string[][] = [["d", t.id],["b", bTag],["col", String(colTag)],["status","deleted"]];
-    const raw = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, streak: t.streak });
+    const raw = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, streak: t.streak, subtasks: t.subtasks });
     const content = await encryptToBoard(boardId, raw);
     nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
   }
@@ -748,6 +755,7 @@ export default function App() {
     // Include explicit nulls to signal removals when undefined
     body.images = (typeof t.images === 'undefined') ? null : t.images;
     body.bounty = (typeof t.bounty === 'undefined') ? null : t.bounty;
+    body.subtasks = (typeof t.subtasks === 'undefined') ? null : t.subtasks;
     const raw = JSON.stringify(body);
     const content = await encryptToBoard(boardId, raw);
     nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
@@ -834,6 +842,7 @@ export default function App() {
       hiddenUntilISO: payload.hiddenUntilISO,
       order: typeof payload.order === 'number' ? payload.order : undefined,
       streak: typeof payload.streak === 'number' ? payload.streak : undefined,
+      subtasks: Array.isArray(payload.subtasks) ? payload.subtasks : undefined,
     };
     if (lb.kind === "week") base.column = col === "bounties" ? "bounties" : "day";
     else if (lb.kind === "lists") base.columnId = col || (lb.columns[0]?.id || "");
@@ -888,7 +897,9 @@ export default function App() {
         const newOrder = typeof base.order === 'number' ? base.order : current.order;
         const incomingStreak: number | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'streak') ? payload.streak : undefined;
         const newStreak = incomingStreak === undefined ? current.streak : incomingStreak === null ? undefined : incomingStreak;
-        copy[idx] = { ...current, ...base, order: newOrder, images: mergedImages, bounty: mergeBounty(current.bounty, incomingB as any), streak: newStreak };
+        const incomingSubs: Subtask[] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'subtasks') ? payload.subtasks : undefined;
+        const mergedSubs = incomingSubs === undefined ? current.subtasks : incomingSubs === null ? undefined : incomingSubs;
+        copy[idx] = { ...current, ...base, order: newOrder, images: mergedImages, bounty: mergeBounty(current.bounty, incomingB as any), streak: newStreak, subtasks: mergedSubs };
         return copy;
       } else {
         const incomingB: Task["bounty"] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'bounty') ? payload.bounty : undefined;
@@ -896,8 +907,10 @@ export default function App() {
         const imgs = incomingImgs === null ? undefined : Array.isArray(incomingImgs) ? incomingImgs : undefined;
         const incomingStreak: number | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'streak') ? payload.streak : undefined;
         const st = incomingStreak === null ? undefined : typeof incomingStreak === 'number' ? incomingStreak : undefined;
+        const incomingSubs: Subtask[] | null | undefined = Object.prototype.hasOwnProperty.call(payload, 'subtasks') ? payload.subtasks : undefined;
+        const subs = incomingSubs === null ? undefined : Array.isArray(incomingSubs) ? incomingSubs : undefined;
         const newOrder = typeof base.order === 'number' ? base.order : 0;
-        return [...prev, { ...base, order: newOrder, images: imgs, bounty: incomingB === null ? undefined : incomingB, streak: st }];
+        return [...prev, { ...base, order: newOrder, images: imgs, bounty: incomingB === null ? undefined : incomingB, streak: st, subtasks: subs }];
       }
     });
   }, [setTasks, tagValue]);
@@ -1014,6 +1027,7 @@ export default function App() {
           hiddenUntilISO: hiddenUntilForNext(nextISO, cur.recurrence, settings.weekStart),
           order: nextOrder,
           streak: newStreak,
+          subtasks: cur.subtasks?.map(s => ({ ...s, completed: false })),
         };
         maybePublishTask(clone).catch(() => {});
         return [...updated, clone];
@@ -1021,6 +1035,17 @@ export default function App() {
       return updated;
     });
     burst();
+  }
+
+  function toggleSubtask(taskId: string, subId: string) {
+    let updated: Task | undefined;
+    setTasks(prev => prev.map(t => {
+      if (t.id !== taskId) return t;
+      const subs = (t.subtasks || []).map(s => s.id === subId ? { ...s, completed: !s.completed } : s);
+      updated = { ...t, subtasks: subs };
+      return updated;
+    }));
+    if (updated) maybePublishTask(updated).catch(() => {});
   }
 
   function deleteTask(id: string) {
@@ -1403,6 +1428,7 @@ export default function App() {
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "day", day }, t.id)}
                           showStreaks={settings.streaksEnabled}
+                          onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
                         />
                       ))}
                     </DroppableColumn>
@@ -1426,6 +1452,7 @@ export default function App() {
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
                           showStreaks={settings.streaksEnabled}
+                          onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
                         />
                     ))}
                   </DroppableColumn>
@@ -1459,6 +1486,7 @@ export default function App() {
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
                           showStreaks={settings.streaksEnabled}
+                          onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
                         />
                     ))}
                   </DroppableColumn>
@@ -1504,6 +1532,16 @@ export default function App() {
                               : ""}
                         </div>
                         <TaskMedia task={t} />
+                        {t.subtasks?.length ? (
+                          <ul className="mt-2 space-y-1">
+                            {t.subtasks.map(st => (
+                              <li key={st.id} className="flex items-center gap-2 text-xs">
+                                <input type="checkbox" checked={!!st.completed} disabled className="accent-emerald-600"/>
+                                <span className={st.completed ? 'line-through text-neutral-400' : ''}>{st.title}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
                         {t.bounty && (
                           <div className="mt-2">
                             <span className={`text-[11px] px-2 py-0.5 rounded-full border ${t.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : t.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : t.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
@@ -1553,6 +1591,16 @@ export default function App() {
                         {t.hiddenUntilISO ? ` • Reveals ${new Date(t.hiddenUntilISO).toLocaleDateString()}` : ""}
                       </div>
                       <TaskMedia task={t} />
+                      {t.subtasks?.length ? (
+                        <ul className="mt-2 space-y-1">
+                          {t.subtasks.map(st => (
+                            <li key={st.id} className="flex items-center gap-2 text-xs">
+                              <input type="checkbox" checked={!!st.completed} disabled className="accent-emerald-600"/>
+                              <span className={st.completed ? 'line-through text-neutral-400' : ''}>{st.title}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
                     </div>
                   </div>
                   <div className="mt-2 flex gap-2">
@@ -1855,12 +1903,14 @@ function Card({
   onEdit,
   onDropBefore,
   showStreaks,
+  onToggleSubtask,
 }: {
   task: Task;
   onComplete: () => void;
   onEdit: () => void;
   onDropBefore: (dragId: string) => void;
   showStreaks: boolean;
+  onToggleSubtask: (subId: string) => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
@@ -1945,6 +1995,21 @@ function Card({
       </div>
 
       <TaskMedia task={task} />
+      {task.subtasks?.length ? (
+        <ul className="mt-2 space-y-1">
+          {task.subtasks.map((st) => (
+            <li key={st.id} className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={!!st.completed}
+                onChange={() => onToggleSubtask(st.id)}
+                className="accent-emerald-600"
+              />
+              <span className={st.completed ? "line-through text-neutral-400" : ""}>{st.title}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {task.completed && task.bounty && task.bounty.state !== 'claimed' && (
         <div className="mt-2 text-xs text-emerald-400">
           {task.bounty.state === 'unlocked' ? 'Bounty unlocked!' : 'Complete! - Unlock bounty'}
@@ -1991,6 +2056,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
   const [title, setTitle] = useState(task.title);
   const [note, setNote] = useState(task.note || "");
   const [images, setImages] = useState<string[]>(task.images || []);
+  const [subtasks, setSubtasks] = useState<Subtask[]>(task.subtasks || []);
   const [rule, setRule] = useState<Recurrence>(task.recurrence ?? R_NONE);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [scheduledDate, setScheduledDate] = useState(task.dueISO.slice(0,10));
@@ -2025,6 +2091,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
       title,
       note: note || undefined,
       images: images.length ? images : undefined,
+      subtasks: subtasks.length ? subtasks : undefined,
       recurrence: rule.type === "none" ? undefined : rule,
       dueISO,
       hiddenUntilISO,
@@ -2062,6 +2129,42 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
             ))}
           </div>
         )}
+
+        <div>
+          <div className="flex items-center mb-2">
+            <label className="text-sm font-medium">Subtasks</label>
+            <button
+              type="button"
+              className="ml-auto text-xs px-2 py-1 rounded bg-neutral-800"
+              onClick={() => setSubtasks([...subtasks, { id: crypto.randomUUID(), title: "", completed: false }])}
+            >
+              Add
+            </button>
+          </div>
+          {subtasks.map((st) => (
+            <div key={st.id} className="flex items-center gap-2 mb-1">
+              <input
+                type="checkbox"
+                checked={!!st.completed}
+                onChange={() => setSubtasks(prev => prev.map(s => s.id === st.id ? { ...s, completed: !s.completed } : s))}
+                className="accent-emerald-600"
+              />
+              <input
+                className="flex-1 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                value={st.title}
+                onChange={(e) => setSubtasks(prev => prev.map(s => s.id === st.id ? { ...s, title: e.target.value } : s))}
+                placeholder="Subtask"
+              />
+              <button
+                type="button"
+                className="text-sm text-rose-500"
+                onClick={() => setSubtasks(prev => prev.filter(s => s.id !== st.id))}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
 
         <div>
           <label htmlFor="edit-schedule" className="block mb-1 text-sm font-medium">Scheduled for</label>

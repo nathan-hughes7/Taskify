@@ -1216,41 +1216,51 @@ export default function App() {
           <h1 className="text-2xl font-semibold tracking-tight">Taskify</h1>
           <div ref={confettiRef} className="relative h-0 w-full" />
           <div className="ml-auto flex items-center gap-2">
-            {/* Board switcher */}
-            <select
-              value={currentBoardId}
-              onChange={handleBoardSelect}
-              className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              title="Boards"
-            >
-              <option value="__wallet">💰 Wallet</option>
-              {boards.length === 0 ? (
-                <option value="">No boards</option>
-              ) : (
-                boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
-              )}
-            </select>
-            {currentBoard?.nostr?.boardId && (
-              <button
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                onClick={() => setNostrRefresh(n => n + 1)}
-                title="Refresh shared board"
+            <div className="flex items-stretch bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
+              {/* Board switcher */}
+              <select
+                value={currentBoardId}
+                onChange={handleBoardSelect}
+                className="px-3 py-2 bg-neutral-900 border-none outline-none"
+                title="Boards"
               >
-                🔄
+                <option value="__wallet">💰 Wallet</option>
+                {boards.length === 0 ? (
+                  <option value="">No boards</option>
+                ) : (
+                  boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
+                )}
+              </select>
+              {currentBoard?.nostr?.boardId && (
+                <button
+                  className="px-3 py-2 border-l border-neutral-800"
+                  onClick={() => setNostrRefresh(n => n + 1)}
+                  title="Refresh shared board"
+                >
+                  🔄
+                </button>
+              )}
+              <button
+                className="px-3 py-2 border-l border-neutral-800"
+                onClick={() => setShowSettings(true)}
+                title="Settings"
+              >
+                ⚙️
               </button>
-            )}
-
-            {/* Settings + View */}
-            <button
-              className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              onClick={() => setShowSettings(true)}
-              title="Settings"
-            >
-              ⚙️
-            </button>
-            <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
-              <button className={`px-3 py-2 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
-              <button className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
+            </div>
+            <div className="flex items-stretch bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
+              <button
+                className={`px-3 py-2 ${view==="board" ? "bg-neutral-800" : ""}`}
+                onClick={() => setView("board")}
+              >
+                Board
+              </button>
+              <button
+                className={`px-3 py-2 border-l border-neutral-800 ${view==="completed" ? "bg-neutral-800" : ""}`}
+                onClick={() => setView("completed")}
+              >
+                Completed
+              </button>
             </div>
           </div>
         </header>

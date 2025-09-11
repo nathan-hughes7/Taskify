@@ -1240,7 +1240,7 @@ export default function App() {
               </button>
             )}
 
-            {/* Settings + View */}
+            {/* Settings + Completed toggle */}
             <button
               className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               onClick={() => setShowSettings(true)}
@@ -1248,30 +1248,41 @@ export default function App() {
             >
               ⚙️
             </button>
-            <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
-              <button className={`px-3 py-2 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
-              <button className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
-            </div>
+            <button
+              className={`px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 ${view === "completed" ? "bg-neutral-800" : ""}`}
+              onClick={() => setView(view === "board" ? "completed" : "board")}
+            >
+              Completed
+            </button>
           </div>
         </header>
 
         {/* Add bar */}
         {view === "board" && currentBoard && (
           <div className="flex flex-wrap gap-2 items-center mb-4">
-            <input
-              ref={newTitleRef}
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              onPaste={handleAddPaste}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addTask(true);
-                }
-              }}
-              placeholder="New task…"
-              className="flex-1 min-w-[220px] px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
-            />
+            <div className="relative flex-1 min-w-[120px] max-w-[200px]">
+              <input
+                ref={newTitleRef}
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                onPaste={handleAddPaste}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addTask(true);
+                  }
+                }}
+                placeholder="New task…"
+                className="w-full pr-8 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
+              />
+              <button
+                onClick={() => addTask()}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-emerald-500"
+                title="Add task"
+              >
+                +
+              </button>
+            </div>
             {newImages.length > 0 && (
               <div className="w-full flex gap-2 mt-2">
                 {newImages.map((img, i) => (
@@ -1326,13 +1337,6 @@ export default function App() {
             {quickRule === "custom" && addCustomRule.type !== "none" && (
               <span className="text-xs text-neutral-400">({labelOf(addCustomRule)})</span>
             )}
-
-            <button
-              onClick={() => addTask()}
-              className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium"
-            >
-              Add
-            </button>
           </div>
         )}
 

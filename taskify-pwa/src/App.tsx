@@ -2572,6 +2572,15 @@ function SettingsModal({
     if (manageBoardId === id) setManageBoardId(null);
   }
 
+  function regenerateBoardId(id: string) {
+    setBoards(prev => prev.map(b => {
+      if (b.id !== id || !b.nostr) return b;
+      const newId = crypto.randomUUID();
+      return { ...b, nostr: { ...b.nostr, boardId: newId } };
+    }));
+    setTimeout(() => onBoardChanged(id), 0);
+  }
+
   function reorderBoards(dragId: string, targetId: string, before: boolean) {
     setBoards(prev => {
       const list = [...prev];
@@ -2906,17 +2915,18 @@ function SettingsModal({
                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
                   <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{navigator.clipboard?.writeText(manageBoard.nostr!.boardId);}}>Copy</button>
                 </div>
-                {showAdvanced && (
-                  <>
-                    <div className="text-xs text-neutral-400">Relays (CSV)</div>
-                    <input value={(manageBoard.nostr.relays || []).join(",")} onChange={(e)=>{
-                      const relays = e.target.value.split(",").map(s=>s.trim()).filter(Boolean);
-                      setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays } }) : b));
-                    }} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                  </>
-                )}
-                <div className="flex gap-2">
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onBoardChanged(manageBoard.id)}>Republish metadata</button>
+                  {showAdvanced && (
+                    <>
+                      <div className="text-xs text-neutral-400">Relays (CSV)</div>
+                      <input value={(manageBoard.nostr.relays || []).join(",")} onChange={(e)=>{
+                        const relays = e.target.value.split(",").map(s=>s.trim()).filter(Boolean);
+                        setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays } }) : b));
+                      }} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                      <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>regenerateBoardId(manageBoard.id)}>Generate new board ID</button>
+                    </>
+                  )}
+                  <div className="flex gap-2">
+                    <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onBoardChanged(manageBoard.id)}>Republish metadata</button>
                   <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>{
                     setBoards(prev => prev.map(b => b.id === manageBoard.id ? (b.kind === 'week' ? { id: b.id, name: b.name, kind: 'week' } as Board : { id: b.id, name: b.name, kind: 'lists', columns: b.columns } as Board) : b));
                   }}>Stop sharing</button>

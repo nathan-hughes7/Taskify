@@ -158,6 +158,8 @@ function createNostrPool(): NostrPool {
     {
       onEvent: (ev: NostrEvent, from: string) => void;
       onEose?: (from: string) => void;
+      filters: any[];
+      relays: string[];
     }
   >();
 
@@ -173,10 +175,16 @@ function createNostrPool(): NostrPool {
         r.ws = new WebSocket(url);
         r.ws.onopen = () => {
           r!.status = "open";
-          // flush queue
+          // flush queued messages
           const q = r!.queue.slice();
           r!.queue.length = 0;
           for (const msg of q) r!.ws?.send(JSON.stringify(msg));
+          // re-subscribe to active subscriptions for this relay
+          for (const [subId, sub] of subs) {
+            if (sub.relays.includes(url)) {
+              try { r!.ws?.send(JSON.stringify(["REQ", subId, ...sub.filters])); } catch {}
+            }
+          }
         };
         r.ws.onclose = () => {
           r!.status = "closed";
@@ -231,7 +239,7 @@ function createNostrPool(): NostrPool {
     },
     subscribe(relayUrls, filters, onEvent, onEose) {
       const subId = `taskify-${Math.random().toString(36).slice(2, 10)}`;
-      subs.set(subId, { onEvent, onEose });
+      subs.set(subId, { onEvent, onEose, filters, relays: relayUrls.slice() });
       for (const u of relayUrls) {
         send(u, ["REQ", subId, ...filters]);
       }
@@ -1040,9 +1048,7 @@ export default function App() {
       }
       return updated;
     });
-    try {
-      for (const t of publish) await maybePublishTask(t);
-    } catch {}
+    await Promise.all(publish.map(t => maybePublishTask(t).catch(() => {})));
     burst();
   }
 
@@ -1059,9 +1065,7 @@ export default function App() {
         return updated;
       })
     );
-    if (publish) {
-      try { await maybePublishTask(publish); } catch {}
-    }
+    if (publish) await maybePublishTask(publish).catch(() => {});
   }
 
   function deleteTask(id: string) {
@@ -1236,10 +1240,7 @@ export default function App() {
 
       return arr;
     });
-
-    try {
-      for (const t of publish) await maybePublishTask(t);
-    } catch {}
+    await Promise.all(publish.map(t => maybePublishTask(t).catch(() => {})));
   }
 
   // Subscribe to Nostr for all shared boards

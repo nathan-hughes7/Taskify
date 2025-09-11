@@ -999,7 +999,8 @@ export default function App() {
     else newTitleRef.current?.blur();
   }
 
-  function completeTask(id: string) {
+  async function completeTask(id: string) {
+    const publish: Task[] = [];
     setTasks(prev => {
       const cur = prev.find(t => t.id === id);
       if (!cur) return prev;
@@ -1019,7 +1020,7 @@ export default function App() {
       }
       const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now, streak:newStreak}) : t);
       const doneOne = updated.find(x => x.id === id);
-      if (doneOne) { maybePublishTask(doneOne).catch(() => {}); }
+      if (doneOne) publish.push(doneOne);
       const nextISO = cur.recurrence ? nextOccurrence(cur.dueISO, cur.recurrence) : null;
       if (nextISO && cur.recurrence) {
         const nextOrder = nextOrderForBoard(cur.boardId, updated);
@@ -1034,15 +1035,19 @@ export default function App() {
           streak: newStreak,
           subtasks: cur.subtasks?.map(s => ({ ...s, completed: false })),
         };
-        maybePublishTask(clone).catch(() => {});
+        publish.push(clone);
         return [...updated, clone];
       }
       return updated;
     });
+    try {
+      for (const t of publish) await maybePublishTask(t);
+    } catch {}
     burst();
   }
 
-  function toggleSubtask(taskId: string, subId: string) {
+  async function toggleSubtask(taskId: string, subId: string) {
+    let publish: Task | null = null;
     setTasks(prev =>
       prev.map((t) => {
         if (t.id !== taskId) return t;
@@ -1050,10 +1055,13 @@ export default function App() {
           s.id === subId ? { ...s, completed: !s.completed } : s
         );
         const updated: Task = { ...t, subtasks: subs };
-        maybePublishTask(updated).catch(() => {});
+        publish = updated;
         return updated;
       })
     );
+    if (publish) {
+      try { await maybePublishTask(publish); } catch {}
+    }
   }
 
   function deleteTask(id: string) {
@@ -1073,12 +1081,12 @@ export default function App() {
     if (undoTask) { setTasks(prev => [...prev, undoTask]); setUndoTask(null); }
   }
 
-  function restoreTask(id: string) {
+  async function restoreTask(id: string) {
     const t = tasks.find((x) => x.id === id);
     if (!t) return;
     const updated: Task = { ...t, completed: false, completedAt: undefined };
     setTasks((prev) => prev.map((x) => (x.id === id ? updated : x)));
-    maybePublishTask(updated).catch(() => {});
+    try { await maybePublishTask(updated); } catch {}
     setView("board");
   }
   function clearCompleted() {
@@ -1143,7 +1151,7 @@ export default function App() {
   }
 
   /* ---------- Drag & Drop: move or reorder ---------- */
-  function moveTask(
+  async function moveTask(
     id: string,
     target:
       | { type: "day"; day: Weekday }
@@ -1230,7 +1238,7 @@ export default function App() {
     });
 
     try {
-      for (const t of publish) maybePublishTask(t).catch(() => {});
+      for (const t of publish) await maybePublishTask(t);
     } catch {}
   }
 
@@ -1434,7 +1442,7 @@ export default function App() {
                     <DroppableColumn
                       key={day}
                       title={WD_SHORT[day]}
-                      onDropCard={(payload) => moveTask(payload.id, { type: "day", day })}
+                      onDropCard={(payload) => { void moveTask(payload.id, { type: "day", day }); }}
                       data-day={day}
                     >
                         {(byDay.get(day) || []).map((t) => (
@@ -1442,15 +1450,15 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onComplete={() => {
-                            if (!t.completed) completeTask(t.id);
-                            else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
-                            else restoreTask(t.id);
+                            if (!t.completed) void completeTask(t.id);
+                            else if (t.bounty && t.bounty.state === 'locked') void revealBounty(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) void claimBounty(t.id);
+                            else void restoreTask(t.id);
                           }}
                           onEdit={() => setEditing(t)}
-                          onDropBefore={(dragId) => moveTask(dragId, { type: "day", day }, t.id)}
+                          onDropBefore={(dragId) => { void moveTask(dragId, { type: "day", day }, t.id); }}
                           showStreaks={settings.streaksEnabled}
-                          onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
+                          onToggleSubtask={(subId) => { void toggleSubtask(t.id, subId); }}
                         />
                       ))}
                     </DroppableColumn>
@@ -1459,22 +1467,22 @@ export default function App() {
                   {/* Bounties */}
                   <DroppableColumn
                     title="Bounties"
-                    onDropCard={(payload) => moveTask(payload.id, { type: "bounties" })}
+                    onDropCard={(payload) => { void moveTask(payload.id, { type: "bounties" }); }}
                   >
                       {bounties.map((t) => (
                         <Card
                           key={t.id}
                           task={t}
                           onComplete={() => {
-                            if (!t.completed) completeTask(t.id);
-                            else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
-                            else restoreTask(t.id);
+                            if (!t.completed) void completeTask(t.id);
+                            else if (t.bounty && t.bounty.state === 'locked') void revealBounty(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) void claimBounty(t.id);
+                            else void restoreTask(t.id);
                           }}
                           onEdit={() => setEditing(t)}
-                          onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
+                          onDropBefore={(dragId) => { void moveTask(dragId, { type: "bounties" }, t.id); }}
                           showStreaks={settings.streaksEnabled}
-                          onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
+                          onToggleSubtask={(subId) => { void toggleSubtask(t.id, subId); }}
                         />
                     ))}
                   </DroppableColumn>
@@ -1493,22 +1501,22 @@ export default function App() {
                   <DroppableColumn
                     key={col.id}
                     title={col.name}
-                    onDropCard={(payload) => moveTask(payload.id, { type: "list", columnId: col.id })}
+                    onDropCard={(payload) => { void moveTask(payload.id, { type: "list", columnId: col.id }); }}
                   >
                       {(itemsByColumn.get(col.id) || []).map((t) => (
                         <Card
                           key={t.id}
                           task={t}
                           onComplete={() => {
-                            if (!t.completed) completeTask(t.id);
-                            else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
-                            else restoreTask(t.id);
+                            if (!t.completed) void completeTask(t.id);
+                            else if (t.bounty && t.bounty.state === 'locked') void revealBounty(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) void claimBounty(t.id);
+                            else void restoreTask(t.id);
                           }}
                           onEdit={() => setEditing(t)}
-                          onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
+                          onDropBefore={(dragId) => { void moveTask(dragId, { type: "list", columnId: col.id }, t.id); }}
                           showStreaks={settings.streaksEnabled}
-                          onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
+                          onToggleSubtask={(subId) => { void toggleSubtask(t.id, subId); }}
                         />
                     ))}
                   </DroppableColumn>
@@ -1573,7 +1581,7 @@ export default function App() {
                         )}
                       </div>
                       <div className="flex gap-1">
-                        <IconButton label="Restore" onClick={() => restoreTask(t.id)} intent="success">↩︎</IconButton>
+                        <IconButton label="Restore" onClick={() => { void restoreTask(t.id); }} intent="success">↩︎</IconButton>
                         <IconButton label="Delete" onClick={() => deleteTask(t.id)} intent="danger">✕</IconButton>
                       </div>
                     </div>

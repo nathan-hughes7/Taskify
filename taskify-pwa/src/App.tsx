@@ -558,9 +558,10 @@ export default function App() {
     const ev = finalizeEvent({ ...template, created_at: createdAt }, nostrSK);
     pool.publishEvent(relays, ev as unknown as NostrEvent);
   }
+  type TaskClockEntry = { ts: number; id: string };
   type NostrIndex = {
     boardMeta: Map<string, number>; // nostrBoardId -> created_at
-    taskClock: Map<string, Map<string, number>>; // nostrBoardId -> (taskId -> created_at)
+    taskClock: Map<string, Map<string, TaskClockEntry>>; // nostrBoardId -> (taskId -> last event meta)
   };
   const nostrIdxRef = useRef<NostrIndex>({ boardMeta: new Map(), taskClock: new Map() });
   const boardsRef = useRef<Board[]>(boards);
@@ -813,9 +814,11 @@ export default function App() {
     if (!bTag || !taskId) return;
     if (!nostrIdxRef.current.taskClock.has(bTag)) nostrIdxRef.current.taskClock.set(bTag, new Map());
     const m = nostrIdxRef.current.taskClock.get(bTag)!;
-    const last = m.get(taskId) || 0;
-    if (ev.created_at <= last) return;
-    m.set(taskId, ev.created_at);
+    const lastEntry = m.get(taskId);
+    const lastTs = lastEntry?.ts || 0;
+    const lastId = lastEntry?.id || "";
+    if (ev.created_at < lastTs || (ev.created_at === lastTs && ev.id <= lastId)) return;
+    m.set(taskId, { ts: ev.created_at, id: ev.id });
 
     const lb = boardsRef.current.find((b) => b.nostr?.boardId && boardTag(b.nostr.boardId) === bTag);
     if (!lb || !lb.nostr) return;
@@ -856,10 +859,12 @@ export default function App() {
         if (incoming === null) return undefined; // explicit removal
         if (!incoming) return oldB;
         if (!oldB) return incoming;
-        // Prefer the bounty with the latest updatedAt; fallback to event created_at
+        // Prefer the bounty with the latest updatedAt; fallback to event created_at and id
         const oldT = Date.parse(oldB.updatedAt || '') || 0;
         const incT = Date.parse(incoming.updatedAt || '') || 0;
-      const incNewer = incT > oldT || (incT === oldT && ev.created_at > (nostrIdxRef.current.taskClock.get(bTag)?.get(taskId) || 0));
+        const incNewer =
+          incT > oldT ||
+          (incT === oldT && (ev.created_at > lastTs || (ev.created_at === lastTs && ev.id > lastId)));
 
         // Different ids: pick the newer one
         if (oldB.id !== incoming.id) return incNewer ? incoming : oldB;

@@ -1146,6 +1146,7 @@ export default function App() {
       | { type: "list"; columnId: string },
     beforeId?: string
   ) {
+    const publish: Task[] = [];
     setTasks(prev => {
       const arr = [...prev];
       const fromIdx = arr.findIndex(t => t.id === id);
@@ -1202,7 +1203,6 @@ export default function App() {
       };
 
       // recompute order within affected groups only
-      const boardTasks: Task[] = [];
       const affected = new Set<string>([groupKey(task), groupKey(updated)]);
       for (const key of affected) {
         if (!key) continue;
@@ -1215,17 +1215,18 @@ export default function App() {
             } else {
               arr[i] = { ...t, order };
             }
-            boardTasks.push(arr[i]);
+            publish.push(arr[i]);
             order++;
           }
         }
       }
-      try {
-        for (const t of boardTasks) maybePublishTask(t).catch(() => {});
-      } catch {}
 
       return arr;
     });
+
+    try {
+      for (const t of publish) maybePublishTask(t).catch(() => {});
+    } catch {}
   }
 
   // Subscribe to Nostr for all shared boards

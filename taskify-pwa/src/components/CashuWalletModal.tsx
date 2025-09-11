@@ -1,9 +1,15 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useCashu } from "../context/CashuContext";
 import { ActionSheet } from "./ActionSheet";
 
 export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { mintUrl, balance, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice } = useCashu();
+
+  interface HistoryItem {
+    id: string;
+    summary: string;
+    detail?: string;
+  }
 
   const [showReceiveOptions, setShowReceiveOptions] = useState(false);
   const [showSendOptions, setShowSendOptions] = useState(false);
@@ -21,17 +27,35 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
   const [recvTokenStr, setRecvTokenStr] = useState("");
   const [recvMsg, setRecvMsg] = useState("");
 
-  const [lnInvoice, setLnInvoice] = useState("");
+  const [lnInput, setLnInput] = useState("");
+  const [lnAddrAmt, setLnAddrAmt] = useState("");
   const [lnState, setLnState] = useState<"idle" | "sending" | "done" | "error">("idle");
   const [lnError, setLnError] = useState("");
+  const [history, setHistory] = useState<HistoryItem[]>(() => {
+    try {
+      const saved = localStorage.getItem("cashuHistory");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [showHistory, setShowHistory] = useState(false);
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const recvRef = useRef<HTMLTextAreaElement | null>(null);
+  const lnRef = useRef<HTMLTextAreaElement | null>(null);
+  const isLnAddress = useMemo(() => /^[^@\s]+@[^@\s]+$/.test(lnInput), [lnInput]);
+
+  useEffect(() => {
+    localStorage.setItem("cashuHistory", JSON.stringify(history));
+  }, [history]);
 
   useEffect(() => {
     if (!open) {
-      setMintQuote(null);
-      setMintStatus("idle");
-      setMintError("");
       setSendTokenStr("");
+      setRecvTokenStr("");
       setRecvMsg("");
+      setLnInput("");
+      setLnAddrAmt("");
       setLnState("idle");
       setLnError("");
       setShowReceiveOptions(false);
@@ -40,6 +64,40 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       setSendMode(null);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    (async () => {
+      try {
+        const t = (await navigator.clipboard.readText()).trim();
+        if (t.startsWith("cashu")) {
+          setReceiveMode("ecash");
+        } else if (/^ln\w+/i.test(t) || /^[^@\s]+@[^@\s]+$/.test(t)) {
+          setSendMode("lightning");
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || receiveMode !== "ecash") return;
+    const timer = setTimeout(() => {
+      recvRef.current?.focus();
+      navigator.clipboard.readText().catch(() => {});
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [open, receiveMode]);
+
+  useEffect(() => {
+    if (!open || sendMode !== "lightning") return;
+    const timer = setTimeout(() => {
+      lnRef.current?.focus();
+      navigator.clipboard.readText().catch(() => {});
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [open, sendMode]);
 
   const headerInfo = useMemo(() => {
     if (!mintUrl) return "No mint set";
@@ -55,6 +113,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       const q = await createMintInvoice(amt);
       setMintQuote(q);
       setMintStatus("waiting");
+      setHistory((h) => [{ id: q.quote, summary: `Invoice for ${amt} sats`, detail: q.request }, ...h]);
     } catch (e: any) {
       setMintError(e?.message || String(e));
     }
@@ -71,6 +130,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
           setMintStatus("minted");
           setMintQuote(null);
           setMintAmt("");
+           setHistory((h) => [{ id: `mint-${Date.now()}`, summary: `Minted ${amt} sats` }, ...h.filter((i) => i.id !== mintQuote.quote)]);
           clearInterval(timer);
         }
       } catch (e: any) {
@@ -88,6 +148,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       if (!amt) throw new Error("Enter amount in sats");
       const { token } = await createSendToken(amt);
       setSendTokenStr(token);
+      setHistory((h) => [{ id: `token-${Date.now()}`, summary: `Token for ${amt} sats`, detail: token }, ...h]);
     } catch (e: any) {
       setSendTokenStr("");
       alert(e?.message || String(e));
@@ -100,8 +161,10 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       const t = recvTokenStr.trim();
       if (!t) throw new Error("Paste a Cashu token");
       const recvd = await receiveToken(t);
-      setRecvMsg(`Received ${recvd.reduce((a,p)=>a+(p?.amount||0),0)} sats`);
+      const amt = recvd.reduce((a,p)=>a+(p?.amount||0),0);
+      setRecvMsg(`Received ${amt} sats`);
       setRecvTokenStr("");
+      setHistory((h) => [{ id: `recv-${Date.now()}`, summary: `Received ${amt} sats` }, ...h]);
     } catch (e: any) {
       setRecvMsg(e?.message || String(e));
     }
@@ -111,11 +174,25 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     setLnState("sending");
     setLnError("");
     try {
-      const inv = lnInvoice.trim();
-      if (!inv) throw new Error("Paste a BOLT11 invoice");
-      await payInvoice(inv);
+      const input = lnInput.trim();
+      if (!input) throw new Error("Paste an invoice or enter lightning address");
+        if (/^[^@\s]+@[^@\s]+$/.test(input)) {
+          const [name, domain] = input.split("@");
+          const infoRes = await fetch(`https://${domain}/.well-known/lnurlp/${name}`);
+          const info = await infoRes.json();
+          const amtMsat = Math.max(info.minSendable || 0, Math.min(info.maxSendable || Infinity, Math.floor(Number(lnAddrAmt) || 0) * 1000));
+          if (!amtMsat) throw new Error("Enter amount in sats");
+          const invRes = await fetch(`${info.callback}?amount=${amtMsat}`);
+          const inv = await invRes.json();
+          await payInvoice(inv.pr);
+          setHistory((h) => [{ id: `sent-${Date.now()}`, summary: `Sent ${amtMsat/1000} sats to ${input}` }, ...h]);
+        } else {
+          await payInvoice(input);
+          setHistory((h) => [{ id: `paid-${Date.now()}`, summary: `Paid lightning invoice` }, ...h]);
+        }
       setLnState("done");
-      setLnInvoice("");
+      setLnInput("");
+      setLnAddrAmt("");
     } catch (e: any) {
       setLnState("error");
       setLnError(e?.message || String(e));
@@ -129,6 +206,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       <div className="flex items-center justify-between p-4">
         <button className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" onClick={onClose}>Close</button>
         <div className="text-sm font-medium">{info?.unit?.toUpperCase() || "SAT"}</div>
+        <button className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" onClick={()=>setShowHistory(true)}>History</button>
       </div>
       <div className="flex-1 flex flex-col items-center justify-center">
         <div className="text-5xl font-semibold mb-1">{balance} sat</div>
@@ -147,8 +225,8 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         </div>
       </ActionSheet>
 
-      <ActionSheet open={receiveMode === "ecash"} onClose={()=>{setReceiveMode(null); setShowReceiveOptions(false);}} title="Receive eCash">
-        <textarea className="w-full h-24 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Paste Cashu token (cashuA...)" value={recvTokenStr} onChange={(e)=>setRecvTokenStr(e.target.value)} />
+      <ActionSheet open={receiveMode === "ecash"} onClose={()=>{setReceiveMode(null); setShowReceiveOptions(false); setRecvTokenStr(""); setRecvMsg("");}} title="Receive eCash">
+        <textarea ref={recvRef} className="w-full h-24 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Paste Cashu token (cashuA...)" value={recvTokenStr} onChange={(e)=>setRecvTokenStr(e.target.value)} />
         <div className="mt-2 flex gap-2 items-center">
           <button className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700" onClick={handleReceive} disabled={!mintUrl || !recvTokenStr}>Redeem</button>
           {recvMsg && <div className="text-xs">{recvMsg}</div>}
@@ -197,14 +275,37 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         )}
       </ActionSheet>
 
-      <ActionSheet open={sendMode === "lightning"} onClose={()=>{setSendMode(null); setShowSendOptions(false);}} title="Pay Lightning Invoice">
-        <textarea className="w-full h-20 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Paste BOLT11 invoice" value={lnInvoice} onChange={(e)=>setLnInvoice(e.target.value)} />
+      <ActionSheet open={sendMode === "lightning"} onClose={()=>{setSendMode(null); setShowSendOptions(false); setLnInput(""); setLnAddrAmt(""); setLnState("idle"); setLnError("");}} title="Pay Lightning Invoice">
+        <textarea ref={lnRef} className="w-full h-20 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Paste BOLT11 invoice or enter lightning address" value={lnInput} onChange={(e)=>setLnInput(e.target.value)} />
+        {isLnAddress && (
+          <input className="mt-2 w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Amount (sats)" value={lnAddrAmt} onChange={(e)=>setLnAddrAmt(e.target.value)} />
+        )}
         <div className="mt-2 flex gap-2">
-          <button className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700" onClick={handlePayInvoice} disabled={!mintUrl || !lnInvoice}>Pay</button>
+          <button className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700" onClick={handlePayInvoice} disabled={!mintUrl || !lnInput || (isLnAddress && !lnAddrAmt)}>Pay</button>
           {lnState === "sending" && <div className="text-xs">Paying…</div>}
           {lnState === "done" && <div className="text-xs text-emerald-400">Paid</div>}
           {lnState === "error" && <div className="text-xs text-rose-400">{lnError}</div>}
         </div>
+      </ActionSheet>
+
+      <ActionSheet open={showHistory} onClose={()=>{setShowHistory(false); setExpandedIdx(null);}} title="History">
+        {history.length ? (
+          <ul className="text-sm space-y-2">
+            {history.map((h, i) => (
+              <li key={h.id}>
+                <button className="w-full text-left" onClick={()=>setExpandedIdx(expandedIdx===i?null:i)}>{h.summary}</button>
+                {expandedIdx === i && h.detail && (
+                  <div className="mt-1">
+                    <textarea readOnly className="w-full h-24 bg-neutral-950 border border-neutral-800 rounded-xl p-2" value={h.detail} />
+                    <button className="mt-1 px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" onClick={()=>navigator.clipboard.writeText(h.detail)}>Copy</button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="text-sm">No history yet</div>
+        )}
       </ActionSheet>
     </div>
   );

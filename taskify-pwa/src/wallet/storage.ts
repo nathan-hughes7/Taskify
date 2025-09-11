@@ -59,9 +59,9 @@ export function clearProofs(mintUrl: string) {
 
 export function getActiveMint(): string {
   try {
-    return localStorage.getItem(LS_ACTIVE_MINT) || "https://mint.minibits.cash";
+    return localStorage.getItem(LS_ACTIVE_MINT) || "https://mint.minibits.cash/Bitcoin";
   } catch {
-    return "https://mint.minibits.cash";
+    return "https://mint.minibits.cash/Bitcoin";
   }
 }
 

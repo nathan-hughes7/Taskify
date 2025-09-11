@@ -2889,13 +2889,13 @@ function SettingsModal({
     </Modal>
     {manageBoard && (
       <Modal onClose={() => setManageBoardId(null)} title="Manage board">
+        <input
+          value={manageBoard.name}
+          onChange={e => renameBoard(manageBoard.id, e.target.value)}
+          className="w-full mb-4 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+        />
         {manageBoard.kind === "lists" ? (
           <>
-            <input
-              value={manageBoard.name}
-              onChange={e => renameBoard(manageBoard.id, e.target.value)}
-              className="w-full mb-4 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-            />
             <ul className="space-y-2">
               {manageBoard.columns.map(col => (
                 <ColumnItem key={col.id} boardId={manageBoard.id} column={col} />

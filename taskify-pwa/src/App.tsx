@@ -1183,9 +1183,9 @@ export default function App() {
     return () => { unsubs.forEach(u => u()); };
   }, [nostrBoardsKey, pool, applyBoardEvent, applyTaskEvent, nostrRefresh]);
 
-  // reset dayChoice when board changes and center current day for week boards
+  // reset dayChoice when board/view changes and center current day for week boards
   useEffect(() => {
-    if (!currentBoard) return;
+    if (!currentBoard || view !== "board") return;
     if (currentBoard.kind === "lists") {
       const firstCol = currentBoard.columns[0];
       const valid = currentBoard.columns.some(c => c.id === dayChoice);
@@ -1203,7 +1203,7 @@ export default function App() {
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentBoardId, currentBoard?.columns, currentBoard?.kind]);
+  }, [currentBoardId, currentBoard?.columns, currentBoard?.kind, view]);
 
   // horizontal scroller ref to enable iOS momentum scrolling
   const scrollerRef = useRef<HTMLDivElement>(null);

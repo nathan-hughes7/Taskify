@@ -3,6 +3,7 @@ import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip
 import { CashuWalletModal } from "./components/CashuWalletModal";
 import { useCashu } from "./context/CashuContext";
 import { loadStore as loadProofStore, saveStore as saveProofStore, getActiveMint, setActiveMint } from "./wallet/storage";
+import { encryptToBoard, decryptFromBoard, boardTag } from "./boardCrypto";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sun
@@ -711,53 +712,66 @@ export default function App() {
   const getBoardRelays = useCallback((board: Board): string[] => {
     return (board.nostr?.relays?.length ? board.nostr!.relays : defaultRelays).filter(Boolean);
   }, [defaultRelays]);
-  function publishBoardMetadata(board: Board) {
+  async function publishBoardMetadata(board: Board) {
     if (!board.nostr?.boardId) return;
     const relays = getBoardRelays(board);
-    const tags: string[][] = [["d", board.nostr.boardId],["b", board.nostr.boardId],["k", board.kind],["name", board.name]];
-    const content = board.kind === "lists" ? JSON.stringify({ columns: board.columns }) : "";
+    const idTag = boardTag(board.nostr.boardId);
+    const tags: string[][] = [["d", idTag],["b", idTag],["k", board.kind],["name", board.name]];
+    const raw = board.kind === "lists" ? JSON.stringify({ columns: board.columns }) : "";
+    const content = await encryptToBoard(board.nostr.boardId, raw);
     nostrPublish(relays, { kind: 30300, tags, content, created_at: Math.floor(Date.now()/1000) });
   }
-  function publishTaskDeleted(t: Task) {
+  async function publishTaskDeleted(t: Task) {
     const b = boards.find((x) => x.id === t.boardId);
     if (!b || !isShared(b) || !b.nostr) return;
-    publishBoardMetadata(b);
+    await publishBoardMetadata(b);
     const relays = getBoardRelays(b);
     const boardId = b.nostr.boardId;
+    const bTag = boardTag(boardId);
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
-    const tags: string[][] = [["d", t.id],["b", boardId],["col", String(colTag)],["status","deleted"]];
-    const content = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, streak: t.streak });
+    const tags: string[][] = [["d", t.id],["b", bTag],["col", String(colTag)],["status","deleted"]];
+    const raw = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, streak: t.streak });
+    const content = await encryptToBoard(boardId, raw);
     nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
   }
-  function maybePublishTask(t: Task, boardOverride?: Board) {
+  async function maybePublishTask(t: Task, boardOverride?: Board) {
     const b = boardOverride || boards.find((x) => x.id === t.boardId);
     if (!b || !isShared(b) || !b.nostr) return;
-    publishBoardMetadata(b);
+    await publishBoardMetadata(b);
     const relays = getBoardRelays(b);
     const boardId = b.nostr.boardId;
+    const bTag = boardTag(boardId);
     const status = t.completed ? "done" : "open";
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
-    const tags: string[][] = [["d", t.id],["b", boardId],["col", String(colTag)],["status", status]];
+    const tags: string[][] = [["d", t.id],["b", bTag],["col", String(colTag)],["status", status]];
     const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, order: t.order, streak: t.streak };
     // Include explicit nulls to signal removals when undefined
     body.images = (typeof t.images === 'undefined') ? null : t.images;
     body.bounty = (typeof t.bounty === 'undefined') ? null : t.bounty;
-    const content = JSON.stringify(body);
+    const raw = JSON.stringify(body);
+    const content = await encryptToBoard(boardId, raw);
     nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
   }
-  const applyBoardEvent = useCallback((ev: NostrEvent) => {
+  const applyBoardEvent = useCallback(async (ev: NostrEvent) => {
     const d = tagValue(ev, "d");
     if (!d) return;
-    const boardId = d;
-    const last = nostrIdxRef.current.boardMeta.get(boardId) || 0;
+    const last = nostrIdxRef.current.boardMeta.get(d) || 0;
     if (ev.created_at <= last) return;
-    nostrIdxRef.current.boardMeta.set(boardId, ev.created_at);
+    nostrIdxRef.current.boardMeta.set(d, ev.created_at);
+    const board = boardsRef.current.find((b) => b.nostr?.boardId && boardTag(b.nostr.boardId) === d);
+    if (!board || !board.nostr) return;
+    const boardId = board.nostr.boardId;
     const kindTag = tagValue(ev, "k");
     const name = tagValue(ev, "name");
     let payload: any = {};
-    try { payload = ev.content ? JSON.parse(ev.content) : {}; } catch {}
+    try {
+      const dec = await decryptFromBoard(boardId, ev.content);
+      payload = dec ? JSON.parse(dec) : {};
+    } catch {
+      try { payload = ev.content ? JSON.parse(ev.content) : {}; } catch {}
+    }
     setBoards(prev => prev.map(b => {
-      if (b.nostr?.boardId !== boardId) return b;
+      if (b.id !== board.id) return b;
       const nm = name || b.name;
       if (kindTag === "week") return { id: b.id, name: nm, nostr: b.nostr, kind: "week" } as Board;
       if (kindTag === "lists") {
@@ -767,20 +781,26 @@ export default function App() {
       return b;
     }));
   }, [setBoards, tagValue]);
-  const applyTaskEvent = useCallback((ev: NostrEvent) => {
-    const boardId = tagValue(ev, "b");
+  const applyTaskEvent = useCallback(async (ev: NostrEvent) => {
+    const bTag = tagValue(ev, "b");
     const taskId = tagValue(ev, "d");
-    if (!boardId || !taskId) return;
-    if (!nostrIdxRef.current.taskClock.has(boardId)) nostrIdxRef.current.taskClock.set(boardId, new Map());
-    const m = nostrIdxRef.current.taskClock.get(boardId)!;
+    if (!bTag || !taskId) return;
+    if (!nostrIdxRef.current.taskClock.has(bTag)) nostrIdxRef.current.taskClock.set(bTag, new Map());
+    const m = nostrIdxRef.current.taskClock.get(bTag)!;
     const last = m.get(taskId) || 0;
     if (ev.created_at <= last) return;
     m.set(taskId, ev.created_at);
 
-    const lb = boardsRef.current.find((b) => b.nostr?.boardId === boardId);
-    if (!lb) return;
+    const lb = boardsRef.current.find((b) => b.nostr?.boardId && boardTag(b.nostr.boardId) === bTag);
+    if (!lb || !lb.nostr) return;
+    const boardId = lb.nostr.boardId;
     let payload: any = {};
-    try { payload = ev.content ? JSON.parse(ev.content) : {}; } catch {}
+    try {
+      const dec = await decryptFromBoard(boardId, ev.content);
+      payload = dec ? JSON.parse(dec) : {};
+    } catch {
+      try { payload = ev.content ? JSON.parse(ev.content) : {}; } catch {}
+    }
     const status = tagValue(ev, "status");
     const col = tagValue(ev, "col");
     const base: Task = {
@@ -812,7 +832,7 @@ export default function App() {
         // Prefer the bounty with the latest updatedAt; fallback to event created_at
         const oldT = Date.parse(oldB.updatedAt || '') || 0;
         const incT = Date.parse(incoming.updatedAt || '') || 0;
-        const incNewer = incT > oldT || (incT === oldT && ev.created_at > (nostrIdxRef.current.taskClock.get(boardId)?.get(taskId) || 0));
+      const incNewer = incT > oldT || (incT === oldT && ev.created_at > (nostrIdxRef.current.taskClock.get(bTag)?.get(taskId) || 0));
 
         // Different ids: pick the newer one
         if (oldB.id !== incoming.id) return incNewer ? incoming : oldB;
@@ -933,7 +953,7 @@ export default function App() {
     applyHiddenForFuture(t);
     setTasks(prev => [...prev, t]);
     // Publish to Nostr if board is shared
-    try { maybePublishTask(t); } catch {}
+    maybePublishTask(t).catch(() => {});
     setNewTitle("");
     setNewImages([]);
     setQuickRule("none");
@@ -963,7 +983,7 @@ export default function App() {
       }
       const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now, streak:newStreak}) : t);
       const doneOne = updated.find(x => x.id === id);
-      if (doneOne) { try { maybePublishTask(doneOne); } catch {} }
+      if (doneOne) { maybePublishTask(doneOne).catch(() => {}); }
       const nextISO = cur.recurrence ? nextOccurrence(cur.dueISO, cur.recurrence) : null;
       if (nextISO && cur.recurrence) {
         const nextOrder = nextOrderForBoard(cur.boardId, updated);
@@ -977,7 +997,7 @@ export default function App() {
           order: nextOrder,
           streak: newStreak,
         };
-        try { maybePublishTask(clone); } catch {}
+        maybePublishTask(clone).catch(() => {});
         return [...updated, clone];
       }
       return updated;
@@ -995,7 +1015,7 @@ export default function App() {
     }
     setUndoTask(t);
     setTasks(prev => prev.filter(x => x.id !== id));
-    try { publishTaskDeleted(t); } catch {}
+    publishTaskDeleted(t).catch(() => {});
     setTimeout(() => setUndoTask(null), 5000); // undo duration
   }
   function undoDelete() {
@@ -1007,17 +1027,13 @@ export default function App() {
     if (!t) return;
     const updated: Task = { ...t, completed: false, completedAt: undefined };
     setTasks((prev) => prev.map((x) => (x.id === id ? updated : x)));
-    try {
-      maybePublishTask(updated);
-    } catch {}
+    maybePublishTask(updated).catch(() => {});
     setView("board");
   }
   function clearCompleted() {
-    try {
-      for (const t of tasksForBoard)
-        if (t.completed && (!t.bounty || t.bounty.state === 'claimed'))
-          publishTaskDeleted(t);
-    } catch {}
+    for (const t of tasksForBoard)
+      if (t.completed && (!t.bounty || t.bounty.state === 'claimed'))
+        publishTaskDeleted(t).catch(() => {});
     setTasks(prev => prev.filter(t => !(t.completed && (!t.bounty || t.bounty.state === 'claimed'))));
   }
 
@@ -1031,7 +1047,7 @@ export default function App() {
         bounty: { ...t.bounty, token: pt, enc: undefined, state: 'unlocked', updatedAt: new Date().toISOString() },
       };
       setTasks(prev => prev.map(x => x.id === id ? updated : x));
-      try { maybePublishTask(updated); } catch {}
+      maybePublishTask(updated).catch(() => {});
     } catch (e) {
       alert('Decrypt failed: ' + (e as Error).message);
     }
@@ -1048,7 +1064,7 @@ export default function App() {
       bounty: { ...t.bounty, token: '', state: 'claimed', updatedAt: new Date().toISOString() },
     };
     setTasks(prev => prev.map(x => x.id === id ? updated : x));
-    try { maybePublishTask(updated); } catch {}
+    maybePublishTask(updated).catch(() => {});
   }
 
   function saveEdit(updated: Task) {
@@ -1070,7 +1086,7 @@ export default function App() {
       }
       return updated;
     }));
-    try { maybePublishTask(newTask); } catch {}
+    maybePublishTask(newTask).catch(() => {});
     setEditing(null);
   }
 
@@ -1146,7 +1162,7 @@ export default function App() {
         }
       }
       try {
-        for (const t of boardTasks) maybePublishTask(t);
+        for (const t of boardTasks) maybePublishTask(t).catch(() => {});
       } catch {}
 
       return arr;
@@ -1157,7 +1173,7 @@ export default function App() {
   const nostrBoardsKey = useMemo(() => {
     const items = boards
       .filter(b => b.nostr?.boardId)
-      .map(b => ({ id: b.nostr!.boardId, relays: getBoardRelays(b).join(",") }))
+      .map(b => ({ id: boardTag(b.nostr!.boardId), relays: getBoardRelays(b).join(",") }))
       .sort((a,b) => (a.id + a.relays).localeCompare(b.id + b.relays));
     return JSON.stringify(items);
   }, [boards, getBoardRelays]);
@@ -1175,8 +1191,8 @@ export default function App() {
         { kinds: [30300], "#d": [it.id], limit: 1 },
       ];
       const unsub = pool.subscribe(rls, filters, (ev) => {
-        if (ev.kind === 30300) applyBoardEvent(ev);
-        else if (ev.kind === 30301) applyTaskEvent(ev);
+        if (ev.kind === 30300) applyBoardEvent(ev).catch(() => {});
+        else if (ev.kind === 30301) applyTaskEvent(ev).catch(() => {});
       });
       unsubs.push(unsub);
     }
@@ -1612,9 +1628,9 @@ export default function App() {
               const nostrId = b.nostr?.boardId || (/^[0-9a-f-]{8}-[0-9a-f-]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(b.id) ? b.id : crypto.randomUUID());
               const nb: Board = b.kind === "week" ? { ...b, nostr: { boardId: nostrId, relays } } : { ...b, nostr: { boardId: nostrId, relays } };
               setTimeout(() => {
-                publishBoardMetadata(nb);
+                publishBoardMetadata(nb).catch(() => {});
                 tasks.filter(t => t.boardId === nb.id).forEach(t => {
-                  try { maybePublishTask(t, nb); } catch {}
+                  maybePublishTask(t, nb).catch(() => {});
                 });
               }, 0);
               return nb;
@@ -1631,7 +1647,7 @@ export default function App() {
           }}
           onBoardChanged={(boardId) => {
             const b = boards.find(x => x.id === boardId);
-            if (b) publishBoardMetadata(b);
+            if (b) publishBoardMetadata(b).catch(() => {});
           }}
           onClose={() => setShowSettings(false)}
         />

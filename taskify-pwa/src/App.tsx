@@ -156,6 +156,8 @@ function createNostrPool(): NostrPool {
   const subs = new Map<
     string,
     {
+      relays: string[];
+      filters: any[];
       onEvent: (ev: NostrEvent, from: string) => void;
       onEose?: (from: string) => void;
     }
@@ -177,6 +179,13 @@ function createNostrPool(): NostrPool {
           const q = r!.queue.slice();
           r!.queue.length = 0;
           for (const msg of q) r!.ws?.send(JSON.stringify(msg));
+          // re-subscribe existing subscriptions on reconnect
+          for (const [subId, sub] of subs) {
+            if (sub.relays.includes(url)) {
+              try { r!.ws?.send(JSON.stringify(["REQ", subId, ...sub.filters])); }
+              catch { r!.queue.push(["REQ", subId, ...sub.filters]); }
+            }
+          }
         };
         r.ws.onclose = () => {
           r!.status = "closed";
@@ -231,7 +240,7 @@ function createNostrPool(): NostrPool {
     },
     subscribe(relayUrls, filters, onEvent, onEose) {
       const subId = `taskify-${Math.random().toString(36).slice(2, 10)}`;
-      subs.set(subId, { onEvent, onEose });
+      subs.set(subId, { relays: relayUrls.slice(), filters, onEvent, onEose });
       for (const u of relayUrls) {
         send(u, ["REQ", subId, ...filters]);
       }
@@ -557,6 +566,7 @@ export default function App() {
     lastNostrCreated.current = createdAt;
     const ev = finalizeEvent({ ...template, created_at: createdAt }, nostrSK);
     pool.publishEvent(relays, ev as unknown as NostrEvent);
+    return createdAt;
   }
   type NostrIndex = {
     boardMeta: Map<string, number>; // nostrBoardId -> created_at
@@ -726,7 +736,13 @@ export default function App() {
     const tags: string[][] = [["d", idTag],["b", idTag],["k", board.kind],["name", board.name]];
     const raw = board.kind === "lists" ? JSON.stringify({ columns: board.columns }) : "";
     const content = await encryptToBoard(board.nostr.boardId, raw);
-    nostrPublish(relays, { kind: 30300, tags, content, created_at: Math.floor(Date.now()/1000) });
+    const createdAt = await nostrPublish(relays, {
+      kind: 30300,
+      tags,
+      content,
+      created_at: Math.floor(Date.now() / 1000),
+    });
+    nostrIdxRef.current.boardMeta.set(idTag, createdAt);
   }
   async function publishTaskDeleted(t: Task) {
     const b = boards.find((x) => x.id === t.boardId);
@@ -739,7 +755,16 @@ export default function App() {
     const tags: string[][] = [["d", t.id],["b", bTag],["col", String(colTag)],["status","deleted"]];
     const raw = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, streak: t.streak, subtasks: t.subtasks });
     const content = await encryptToBoard(boardId, raw);
-    nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
+    const createdAt = await nostrPublish(relays, {
+      kind: 30301,
+      tags,
+      content,
+      created_at: Math.floor(Date.now() / 1000),
+    });
+    if (!nostrIdxRef.current.taskClock.has(bTag)) {
+      nostrIdxRef.current.taskClock.set(bTag, new Map());
+    }
+    nostrIdxRef.current.taskClock.get(bTag)!.set(t.id, createdAt);
   }
   async function maybePublishTask(t: Task, boardOverride?: Board) {
     const b = boardOverride || boards.find((x) => x.id === t.boardId);
@@ -758,7 +783,17 @@ export default function App() {
     body.subtasks = (typeof t.subtasks === 'undefined') ? null : t.subtasks;
     const raw = JSON.stringify(body);
     const content = await encryptToBoard(boardId, raw);
-    nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
+    const createdAt = await nostrPublish(relays, {
+      kind: 30301,
+      tags,
+      content,
+      created_at: Math.floor(Date.now() / 1000),
+    });
+    // Update local task clock so immediate refreshes don't revert state
+    if (!nostrIdxRef.current.taskClock.has(bTag)) {
+      nostrIdxRef.current.taskClock.set(bTag, new Map());
+    }
+    nostrIdxRef.current.taskClock.get(bTag)!.set(t.id, createdAt);
   }
 
   function regenerateBoardId(id: string) {
@@ -782,7 +817,8 @@ export default function App() {
     const d = tagValue(ev, "d");
     if (!d) return;
     const last = nostrIdxRef.current.boardMeta.get(d) || 0;
-    if (ev.created_at <= last) return;
+    if (ev.created_at < last) return;
+    // Accept events with the same timestamp to avoid missing updates
     nostrIdxRef.current.boardMeta.set(d, ev.created_at);
     const board = boardsRef.current.find((b) => b.nostr?.boardId && boardTag(b.nostr.boardId) === d);
     if (!board || !board.nostr) return;
@@ -814,7 +850,8 @@ export default function App() {
     if (!nostrIdxRef.current.taskClock.has(bTag)) nostrIdxRef.current.taskClock.set(bTag, new Map());
     const m = nostrIdxRef.current.taskClock.get(bTag)!;
     const last = m.get(taskId) || 0;
-    if (ev.created_at <= last) return;
+    if (ev.created_at < last) return;
+    // Accept equal timestamps so rapid consecutive updates still apply
     m.set(taskId, ev.created_at);
 
     const lb = boardsRef.current.find((b) => b.nostr?.boardId && boardTag(b.nostr.boardId) === bTag);

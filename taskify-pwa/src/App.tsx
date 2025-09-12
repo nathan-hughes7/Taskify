@@ -1603,7 +1603,7 @@ export default function App() {
                           task={t}
                           onFlyToCompleted={(rect) => flyToCompleted(rect)}
                           onFlyToWallet={(rect) => flyCoinsToWallet(rect)}
-                          onComplete={() => {
+                          onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
                             else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, from);
@@ -1629,7 +1629,7 @@ export default function App() {
                           task={t}
                           onFlyToCompleted={(rect) => flyToCompleted(rect)}
                           onFlyToWallet={(rect) => flyCoinsToWallet(rect)}
-                          onComplete={() => {
+                          onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
                             else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, from);
@@ -1665,7 +1665,7 @@ export default function App() {
                           task={t}
                           onFlyToCompleted={(rect) => flyToCompleted(rect)}
                           onFlyToWallet={(rect) => flyCoinsToWallet(rect)}
-                          onComplete={() => {
+                          onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
                             else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, from);
@@ -2147,12 +2147,8 @@ function Card({
         {task.completed ? (
           <button
             onClick={(e) => {
-              try {
-                if (task.bounty && task.bounty.state === 'unlocked' && task.bounty.token) {
-                  onFlyToWallet((e.currentTarget as HTMLButtonElement).getBoundingClientRect());
-                }
-              } catch {}
-              onComplete();
+              const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+              onComplete(rect);
             }}
             aria-label="Mark incomplete"
             title="Mark incomplete"

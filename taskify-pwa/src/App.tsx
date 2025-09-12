@@ -1064,7 +1064,7 @@ export default function App() {
     }
   }
 
-  function deleteTask(id: string) {
+  async function deleteTask(id: string) {
     const t = tasks.find(x => x.id === id);
     if (!t) return;
     // Require confirmation if the task has a bounty that is not claimed yet
@@ -1074,7 +1074,7 @@ export default function App() {
     }
     setUndoTask(t);
     setTasks(prev => prev.filter(x => x.id !== id));
-    publishTaskDeleted(t).catch(() => {});
+    try { await publishTaskDeleted(t); } catch {}
     setTimeout(() => setUndoTask(null), 5000); // undo duration
   }
   function undoDelete() {
@@ -1089,10 +1089,12 @@ export default function App() {
     try { await maybePublishTask(updated); } catch {}
     setView("board");
   }
-  function clearCompleted() {
-    for (const t of tasksForBoard)
-      if (t.completed && (!t.bounty || t.bounty.state === 'claimed'))
-        publishTaskDeleted(t).catch(() => {});
+  async function clearCompleted() {
+    const toDelete = tasksForBoard.filter(t => t.completed && (!t.bounty || t.bounty.state === 'claimed'));
+    // Publish deletions sequentially to keep created_at ordering stable
+    for (const t of toDelete) {
+      try { await publishTaskDeleted(t); } catch {}
+    }
     setTasks(prev => prev.filter(t => !(t.completed && (!t.bounty || t.bounty.state === 'claimed'))));
   }
 
@@ -1255,10 +1257,18 @@ export default function App() {
     let parsed: Array<{id:string; relays:string}> = [];
     try { parsed = JSON.parse(nostrBoardsKey || "[]"); } catch {}
     const unsubs: Array<() => void> = [];
+
+    // Open all needed relays once (avoid closing between boards)
+    const relaySet = new Set<string>();
+    for (const it of parsed) {
+      for (const r of it.relays.split(",").filter(Boolean)) relaySet.add(r);
+    }
+    pool.setRelays(Array.from(relaySet));
+
+    // Subscribe per-board
     for (const it of parsed) {
       const rls = it.relays.split(",").filter(Boolean);
       if (!rls.length) continue;
-      pool.setRelays(rls);
       const filters = [
         { kinds: [30300, 30301], "#b": [it.id], limit: 500 },
         { kinds: [30300], "#d": [it.id], limit: 1 },

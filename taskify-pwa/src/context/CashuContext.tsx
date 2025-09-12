@@ -20,7 +20,7 @@ type CashuContextType = {
   checkMintQuote: (quoteId: string) => Promise<"UNPAID" | "PAID" | "ISSUED">;
   claimMint: (quoteId: string, amount: number) => Promise<Proof[]>;
   receiveToken: (encoded: string) => Promise<Proof[]>;
-  createSendToken: (amount: number) => Promise<{ token: string }>;
+  createSendToken: (amount: number, pubkey?: string) => Promise<{ token: string }>;
   payInvoice: (invoice: string) => Promise<{ state: string }>;
 };
 
@@ -100,9 +100,9 @@ export function CashuProvider({ children }: { children: React.ReactNode }) {
     return proofs;
   }, [manager]);
 
-  const createSendToken = useCallback(async (amount: number) => {
+  const createSendToken = useCallback(async (amount: number, pubkey?: string) => {
     if (!manager) throw new Error("Wallet not ready");
-    const res = await manager.createSendToken(amount);
+    const res = await manager.createSendToken(amount, pubkey);
     setBalance(manager.balance);
     setProofs(manager.proofs);
     return { token: res.token };

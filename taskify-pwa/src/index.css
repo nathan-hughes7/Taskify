@@ -47,3 +47,16 @@ button, input, select, textarea {
 ::-webkit-scrollbar-track {
   background: #18181b; /* neutral-900 */
 }
+
+/* Checkmark animation for task completion */
+.checkmark-path {
+  stroke-dasharray: 20;
+  stroke-dashoffset: 20;
+  animation: checkmark-draw 0.3s forwards ease;
+}
+
+@keyframes checkmark-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}

@@ -120,6 +120,7 @@ const DEFAULT_RELAYS = [
   "wss://relay.damus.io",
   "wss://nos.lol",
   "wss://relay.snort.social",
+  "wss://solife.me/nostrrelay/1",
 ];
 
 function loadDefaultRelays(): string[] {
@@ -646,6 +647,8 @@ export default function App() {
   // fly-to-completed overlay + target
   const flyLayerRef = useRef<HTMLDivElement>(null);
   const completedTabRef = useRef<HTMLButtonElement>(null);
+  // board selector target for coin animation
+  const boardSelectorRef = useRef<HTMLSelectElement>(null);
   function burst() {
     const el = confettiRef.current;
     if (!el) return;
@@ -707,6 +710,56 @@ export default function App() {
         try { layer.removeChild(dot); } catch {}
       }, 750);
     });
+  }
+
+  function flyCoinsToWallet(from: DOMRect) {
+    const layer = flyLayerRef.current;
+    const targetEl = boardSelectorRef.current || completedTabRef.current;
+    if (!layer || !targetEl) return;
+
+    const target = targetEl.getBoundingClientRect();
+    const startX = from.left + from.width / 2;
+    const startY = from.top + from.height / 2;
+    const endX = target.left + target.width / 2;
+    const endY = target.top + target.height / 2;
+
+    const spawn = (i: number) => {
+      const coin = document.createElement('div');
+      coin.textContent = '🪙';
+      coin.style.position = 'fixed';
+      coin.style.left = `${startX - 10}px`;
+      coin.style.top = `${startY - 10}px`;
+      coin.style.width = '22px';
+      coin.style.height = '22px';
+      coin.style.display = 'grid';
+      coin.style.placeItems = 'center';
+      coin.style.fontSize = '20px';
+      coin.style.lineHeight = '22px';
+      coin.style.zIndex = '1000';
+      coin.style.transform = 'translate(0, 0) scale(1)';
+      coin.style.transition = 'transform 700ms cubic-bezier(.2,.7,.3,1), opacity 350ms ease 520ms';
+      coin.style.willChange = 'transform, opacity';
+      coin.style.filter = 'drop-shadow(0 4px 8px rgba(0,0,0,.45))';
+      layer.appendChild(coin);
+
+      const wobbleX = (Math.random() * 60 - 30);
+      const wobbleY = (Math.random() * 40 - 20);
+
+      requestAnimationFrame(() => {
+        const dx = endX - startX + wobbleX;
+        const dy = endY - startY + wobbleY;
+        coin.style.transform = `translate(${dx}px, ${dy}px) scale(0.6)`;
+        coin.style.opacity = '0.7';
+        setTimeout(() => {
+          try { layer.removeChild(coin); } catch {}
+        }, 800);
+      });
+    };
+
+    // Stagger three coins
+    spawn(0);
+    setTimeout(() => spawn(1), 120);
+    setTimeout(() => spawn(2), 240);
   }
 
   /* ---------- Derived: board-scoped lists ---------- */
@@ -1215,7 +1268,7 @@ export default function App() {
     }
   }
 
-  async function claimBounty(id: string) {
+  async function claimBounty(id: string, from?: DOMRect) {
     const t = tasks.find(x => x.id === id);
     if (!t || !t.bounty || t.bounty.state !== 'unlocked' || !t.bounty.token) return;
     try {
@@ -1223,6 +1276,7 @@ export default function App() {
       if (res.crossMint) {
         alert(`Redeemed to a different mint: ${res.usedMintUrl}. Switch to that mint to view the balance.`);
       }
+      try { if (from) flyCoinsToWallet(from); } catch {}
       const updated: Task = {
         ...t,
         bounty: { ...t.bounty, token: '', state: 'claimed', updatedAt: new Date().toISOString() },
@@ -1402,6 +1456,7 @@ export default function App() {
           <div className="ml-auto flex items-center gap-2">
             {/* Board switcher */}
             <select
+              ref={boardSelectorRef}
               value={currentBoardId}
               onChange={handleBoardSelect}
               className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
@@ -1439,8 +1494,8 @@ export default function App() {
           </div>
         </header>
 
-        {/* Animation overlay for fly-to-completed */}
-        <div ref={flyLayerRef} className="pointer-events-none fixed inset-0 z-50" />
+        {/* Animation overlay for fly effects (coins, etc.) */}
+        <div ref={flyLayerRef} className="pointer-events-none fixed inset-0 z-[9999]" />
 
         {/* Add bar */}
         {view === "board" && currentBoard && (
@@ -1548,10 +1603,10 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onFlyToCompleted={(rect) => flyToCompleted(rect)}
-                          onComplete={() => {
+                          onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, from);
                             else restoreTask(t.id);
                           }}
                           onEdit={() => setEditing(t)}
@@ -1573,10 +1628,10 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onFlyToCompleted={(rect) => flyToCompleted(rect)}
-                          onComplete={() => {
+                          onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, from);
                             else restoreTask(t.id);
                           }}
                           onEdit={() => setEditing(t)}
@@ -1608,10 +1663,10 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onFlyToCompleted={(rect) => flyToCompleted(rect)}
-                          onComplete={() => {
+                          onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, from);
                             else restoreTask(t.id);
                           }}
                           onEdit={() => setEditing(t)}
@@ -1783,6 +1838,7 @@ export default function App() {
           onDelete={() => { deleteTask(editing.id); setEditing(null); }}
           onSave={saveEdit}
           weekStart={settings.weekStart}
+          onRedeemCoins={(rect)=>flyCoinsToWallet(rect)}
         />
       )}
 
@@ -2038,7 +2094,7 @@ function Card({
   onFlyToCompleted,
 }: {
   task: Task;
-  onComplete: () => void;
+  onComplete: (from?: DOMRect) => void;
   onEdit: () => void;
   onDropBefore: (dragId: string) => void;
   showStreaks: boolean;
@@ -2086,7 +2142,7 @@ function Card({
       <div className="flex items-center gap-2">
         {task.completed ? (
           <button
-            onClick={onComplete}
+            onClick={(e) => onComplete((e.currentTarget as HTMLButtonElement).getBoundingClientRect())}
             aria-label="Mark incomplete"
             title="Mark incomplete"
             className="flex items-center justify-center w-9 h-9 rounded-full border border-emerald-500 text-emerald-500"
@@ -2099,8 +2155,9 @@ function Card({
         ) : (
           <button
             onClick={(e) => {
-              try { onFlyToCompleted((e.currentTarget as HTMLButtonElement).getBoundingClientRect()); } catch {}
-              onComplete();
+              const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+              try { onFlyToCompleted(rect); } catch {}
+              onComplete(rect);
             }}
             aria-label="Complete task"
             title="Mark complete"
@@ -2186,8 +2243,8 @@ function labelOf(r: Recurrence): string {
 }
 
 /* Edit modal with Advanced recurrence */
-function EditModal({ task, onCancel, onDelete, onSave, weekStart }: { 
-  task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void; weekStart: Weekday;
+function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins }: { 
+  task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void; weekStart: Weekday; onRedeemCoins?: (from: DOMRect)=>void;
 }) {
   const [title, setTitle] = useState(task.title);
   const [note, setNote] = useState(task.note || "");
@@ -2508,12 +2565,15 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                   task.bounty.state === 'unlocked' ? (
                     <button
                       className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
-                      onClick={async () => {
+                      onClick={async (e) => {
+                        const fromRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                         try {
                           const res = await receiveToken(task.bounty!.token!);
                           if (res.crossMint) {
                             alert(`Redeemed to a different mint: ${res.usedMintUrl}. Switch to that mint to view the balance.`);
                           }
+                          // Coins fly from the button to the selector target
+                          try { onRedeemCoins?.(fromRect); } catch {}
                           setBountyState('claimed');
                           save({ bounty: { ...task.bounty!, token: '', state: 'claimed', updatedAt: new Date().toISOString() } });
                         } catch (e) {

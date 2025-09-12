@@ -34,6 +34,7 @@ type Task = {
   dueISO: string;                 // for week board day grouping
   completed?: boolean;
   completedAt?: string;
+  completedBy?: string;           // nostr pubkey of user who marked complete
   recurrence?: Recurrence;
   // Week board columns:
   column?: "day" | "bounties";
@@ -919,7 +920,7 @@ export default function App() {
     const status = t.completed ? "done" : "open";
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
     const tags: string[][] = [["d", t.id],["b", bTag],["col", String(colTag)],["status", status]];
-    const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, order: t.order, streak: t.streak };
+    const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, completedBy: t.completedBy, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, order: t.order, streak: t.streak };
     // Include explicit nulls to signal removals when undefined
     body.images = (typeof t.images === 'undefined') ? null : t.images;
     body.bounty = (typeof t.bounty === 'undefined') ? null : t.bounty;
@@ -1018,6 +1019,7 @@ export default function App() {
       dueISO: payload.dueISO || isoForWeekday(0),
       completed: status === "done",
       completedAt: payload.completedAt,
+      completedBy: payload.completedBy,
       recurrence: payload.recurrence,
       hiddenUntilISO: payload.hiddenUntilISO,
       order: typeof payload.order === 'number' ? payload.order : undefined,
@@ -1193,7 +1195,7 @@ export default function App() {
         // regardless of the current timestamp.
         newStreak = newStreak + 1;
       }
-      const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now, streak:newStreak}) : t);
+      const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now, completedBy: (window as any).nostrPK || undefined, streak:newStreak}) : t);
       const doneOne = updated.find(x => x.id === id);
       if (doneOne) { maybePublishTask(doneOne).catch(() => {}); }
       const nextISO = cur.recurrence ? nextOccurrence(cur.dueISO, cur.recurrence) : null;
@@ -1204,6 +1206,7 @@ export default function App() {
           id: crypto.randomUUID(),
           completed: false,
           completedAt: undefined,
+          completedBy: undefined,
           dueISO: nextISO,
           hiddenUntilISO: hiddenUntilForNext(nextISO, cur.recurrence, settings.weekStart),
           order: nextOrder,
@@ -1252,7 +1255,7 @@ export default function App() {
   function restoreTask(id: string) {
     const t = tasks.find((x) => x.id === id);
     if (!t) return;
-    const updated: Task = { ...t, completed: false, completedAt: undefined };
+    const updated: Task = { ...t, completed: false, completedAt: undefined, completedBy: undefined };
     setTasks((prev) => prev.map((x) => (x.id === id ? updated : x)));
     maybePublishTask(updated).catch(() => {});
   }
@@ -1382,6 +1385,7 @@ export default function App() {
       if (updated.completed && (!updated.bounty || updated.bounty.state === "claimed")) {
         updated.completed = false;
         updated.completedAt = undefined;
+        updated.completedBy = undefined;
       }
 
       // remove original
@@ -2684,11 +2688,16 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
         {/* Creator info */}
         <div className="pt-2">
           {(() => {
-            const hex = task.createdBy || "";
-            let display = hex;
+            const raw = task.createdBy || "";
+            let display = raw;
             try {
-              if (/^[0-9a-fA-F]{64}$/.test(hex)) {
-                display = nip19.npubEncode(hex);
+              if (raw.startsWith("npub")) {
+                const dec = nip19.decode(raw);
+                if (typeof dec.data === 'string') display = dec.data;
+                else if (dec.data && (dec.data as any).length) {
+                  const arr = dec.data as unknown as ArrayLike<number>;
+                  display = Array.from(arr).map((x)=>x.toString(16).padStart(2,'0')).join('');
+                }
               }
             } catch {}
             const short = display
@@ -2696,7 +2705,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                 ? display.slice(0, 10) + "…" + display.slice(-6)
                 : display
               : "(not set)";
-            const canCopy = !!hex;
+            const canCopy = !!display;
             return (
               <div className="flex items-center justify-between text-[11px] text-neutral-400">
                 <div>
@@ -2704,7 +2713,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                 </div>
                 <button
                   className={`px-2 py-1 rounded-lg bg-neutral-800 ${canCopy ? '' : 'opacity-50 cursor-not-allowed'} text-xs`}
-                  title={canCopy ? 'Copy creator key' : 'No key to copy'}
+                  title={canCopy ? 'Copy creator key (hex)' : 'No key to copy'}
                   onClick={async () => { if (canCopy) { try { await navigator.clipboard?.writeText(display); } catch {} } }}
                   disabled={!canCopy}
                 >
@@ -2714,6 +2723,47 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
             );
           })()}
         </div>
+
+        {/* Completed by info (only when completed) */}
+        {task.completed && (
+          <div className="pt-1">
+            {(() => {
+              const raw = task.completedBy || "";
+              let display = raw;
+              try {
+                if (raw.startsWith("npub")) {
+                  const dec = nip19.decode(raw);
+                  if (typeof dec.data === 'string') display = dec.data;
+                  else if (dec.data && (dec.data as any).length) {
+                    const arr = dec.data as unknown as ArrayLike<number>;
+                    display = Array.from(arr).map((x)=>x.toString(16).padStart(2,'0')).join('');
+                  }
+                }
+              } catch {}
+              const short = display
+                ? display.length > 16
+                  ? display.slice(0, 10) + "…" + display.slice(-6)
+                  : display
+                : "(not set)";
+              const canCopy = !!display;
+              return (
+                <div className="flex items-center justify-between text-[11px] text-neutral-400">
+                  <div>
+                    Completed by: <span className="font-mono text-neutral-300">{short}</span>
+                  </div>
+                  <button
+                    className={`px-2 py-1 rounded-lg bg-neutral-800 ${canCopy ? '' : 'opacity-50 cursor-not-allowed'} text-xs`}
+                    title={canCopy ? 'Copy completer key (hex)' : 'No key to copy'}
+                    onClick={async () => { if (canCopy) { try { await navigator.clipboard?.writeText(display); } catch {} } }}
+                    disabled={!canCopy}
+                  >
+                    Copy
+                  </button>
+                </div>
+              );
+            })()}
+          </div>
+        )}
 
         <div className="pt-2 flex justify-between">
           <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>

@@ -650,10 +650,16 @@ export default function App() {
     const end = walletEl.getBoundingClientRect();
     const launch = () => {
       const coin = document.createElement("span");
-      coin.textContent = "🪙️";
+      // Render a gold coin instead of the default silver emoji
       coin.style.position = "fixed";
       coin.style.left = start.left + start.width / 2 + "px";
       coin.style.top = start.top + start.height / 2 + "px";
+      coin.style.width = "20px";
+      coin.style.height = "20px";
+      coin.style.borderRadius = "50%";
+      coin.style.background = "radial-gradient(circle at 30% 30%, #fef08a, #facc15, #d97706)";
+      coin.style.border = "2px solid #b45309";
+      coin.style.display = "inline-block";
       coin.style.transition = "transform 0.6s ease-in, opacity 0.6s ease-in";
       coin.style.pointerEvents = "none";
       coin.style.zIndex = "1000";

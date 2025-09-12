@@ -156,6 +156,8 @@ function createNostrPool(): NostrPool {
   const subs = new Map<
     string,
     {
+      relays: string[];
+      filters: any[];
       onEvent: (ev: NostrEvent, from: string) => void;
       onEose?: (from: string) => void;
     }
@@ -177,6 +179,13 @@ function createNostrPool(): NostrPool {
           const q = r!.queue.slice();
           r!.queue.length = 0;
           for (const msg of q) r!.ws?.send(JSON.stringify(msg));
+          // re-subscribe existing subscriptions on reconnect
+          for (const [subId, sub] of subs) {
+            if (sub.relays.includes(url)) {
+              try { r!.ws?.send(JSON.stringify(["REQ", subId, ...sub.filters])); }
+              catch { r!.queue.push(["REQ", subId, ...sub.filters]); }
+            }
+          }
         };
         r.ws.onclose = () => {
           r!.status = "closed";
@@ -231,7 +240,7 @@ function createNostrPool(): NostrPool {
     },
     subscribe(relayUrls, filters, onEvent, onEose) {
       const subId = `taskify-${Math.random().toString(36).slice(2, 10)}`;
-      subs.set(subId, { onEvent, onEose });
+      subs.set(subId, { relays: relayUrls.slice(), filters, onEvent, onEose });
       for (const u of relayUrls) {
         send(u, ["REQ", subId, ...filters]);
       }

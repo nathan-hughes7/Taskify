@@ -649,6 +649,8 @@ export default function App() {
   const completedTabRef = useRef<HTMLButtonElement>(null);
   // board selector target for coin animation
   const boardSelectorRef = useRef<HTMLSelectElement>(null);
+  // wallet button target for coin animation
+  const walletButtonRef = useRef<HTMLButtonElement>(null);
   function burst() {
     const el = confettiRef.current;
     if (!el) return;
@@ -714,52 +716,51 @@ export default function App() {
 
   function flyCoinsToWallet(from: DOMRect) {
     const layer = flyLayerRef.current;
-    const targetEl = boardSelectorRef.current || completedTabRef.current;
+    const targetEl = walletButtonRef.current;
     if (!layer || !targetEl) return;
-
     const target = targetEl.getBoundingClientRect();
+
     const startX = from.left + from.width / 2;
     const startY = from.top + from.height / 2;
     const endX = target.left + target.width / 2;
     const endY = target.top + target.height / 2;
 
-    const spawn = (i: number) => {
+    const makeCoin = () => {
       const coin = document.createElement('div');
-      coin.textContent = '🪙';
       coin.style.position = 'fixed';
       coin.style.left = `${startX - 10}px`;
       coin.style.top = `${startY - 10}px`;
-      coin.style.width = '22px';
-      coin.style.height = '22px';
+      coin.style.width = '20px';
+      coin.style.height = '20px';
+      coin.style.borderRadius = '9999px';
       coin.style.display = 'grid';
       coin.style.placeItems = 'center';
-      coin.style.fontSize = '20px';
-      coin.style.lineHeight = '22px';
+      coin.style.fontSize = '14px';
+      coin.style.lineHeight = '20px';
+      coin.style.background = 'radial-gradient(circle at 30% 30%, #fde68a, #f59e0b)';
+      coin.style.boxShadow = '0 0 0 1px rgba(245,158,11,0.5), 0 6px 16px rgba(0,0,0,0.35)';
       coin.style.zIndex = '1000';
       coin.style.transform = 'translate(0, 0) scale(1)';
-      coin.style.transition = 'transform 700ms cubic-bezier(.2,.7,.3,1), opacity 350ms ease 520ms';
-      coin.style.willChange = 'transform, opacity';
-      coin.style.filter = 'drop-shadow(0 4px 8px rgba(0,0,0,.45))';
+      coin.style.transition = 'transform 700ms cubic-bezier(.2,.7,.3,1), opacity 450ms ease 450ms';
+      coin.textContent = '🪙';
+      return coin;
+    };
+
+    for (let i = 0; i < 3; i++) {
+      const coin = makeCoin();
       layer.appendChild(coin);
-
-      const wobbleX = (Math.random() * 60 - 30);
-      const wobbleY = (Math.random() * 40 - 20);
-
-      requestAnimationFrame(() => {
-        const dx = endX - startX + wobbleX;
-        const dy = endY - startY + wobbleY;
-        coin.style.transform = `translate(${dx}px, ${dy}px) scale(0.6)`;
-        coin.style.opacity = '0.7';
+      const dx = endX - startX;
+      const dy = endY - startY;
+      // slight horizontal variance per coin
+      const wobble = (i - 1) * 8; // -8, 0, +8
+      setTimeout(() => {
+        coin.style.transform = `translate(${dx + wobble}px, ${dy}px) scale(0.6)`;
+        coin.style.opacity = '0.35';
         setTimeout(() => {
           try { layer.removeChild(coin); } catch {}
         }, 800);
-      });
-    };
-
-    // Stagger three coins
-    spawn(0);
-    setTimeout(() => spawn(1), 120);
-    setTimeout(() => spawn(2), 240);
+      }, i * 140);
+    }
   }
 
   /* ---------- Derived: board-scoped lists ---------- */
@@ -1454,6 +1455,8 @@ export default function App() {
           <h1 className="text-2xl font-semibold tracking-tight">Taskify</h1>
           <div ref={confettiRef} className="relative h-0 w-full" />
           <div className="ml-auto flex items-center gap-2">
+            {/* Quick Wallet button */}
+            <IconButton label="Wallet" onClick={() => setShowWallet(true)} buttonRef={walletButtonRef}>💰</IconButton>
             {/* Board switcher */}
             <select
               ref={boardSelectorRef}
@@ -1603,7 +1606,8 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onFlyToCompleted={(rect) => flyToCompleted(rect)}
-                          onComplete={(from) => {
+                          onFlyToWallet={(rect) => flyCoinsToWallet(rect)}
+                          onComplete={() => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
                             else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, from);
@@ -1628,7 +1632,8 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onFlyToCompleted={(rect) => flyToCompleted(rect)}
-                          onComplete={(from) => {
+                          onFlyToWallet={(rect) => flyCoinsToWallet(rect)}
+                          onComplete={() => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
                             else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, from);
@@ -1663,7 +1668,8 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onFlyToCompleted={(rect) => flyToCompleted(rect)}
-                          onComplete={(from) => {
+                          onFlyToWallet={(rect) => flyCoinsToWallet(rect)}
+                          onComplete={() => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
                             else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, from);
@@ -2092,6 +2098,7 @@ function Card({
   showStreaks,
   onToggleSubtask,
   onFlyToCompleted,
+  onFlyToWallet,
 }: {
   task: Task;
   onComplete: (from?: DOMRect) => void;
@@ -2100,6 +2107,7 @@ function Card({
   showStreaks: boolean;
   onToggleSubtask: (subId: string) => void;
   onFlyToCompleted: (rect: DOMRect) => void;
+  onFlyToWallet: (rect: DOMRect) => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
@@ -2142,7 +2150,14 @@ function Card({
       <div className="flex items-center gap-2">
         {task.completed ? (
           <button
-            onClick={(e) => onComplete((e.currentTarget as HTMLButtonElement).getBoundingClientRect())}
+            onClick={(e) => {
+              try {
+                if (task.bounty && task.bounty.state === 'unlocked' && task.bounty.token) {
+                  onFlyToWallet((e.currentTarget as HTMLButtonElement).getBoundingClientRect());
+                }
+              } catch {}
+              onComplete();
+            }}
             aria-label="Mark incomplete"
             title="Mark incomplete"
             className="flex items-center justify-center w-9 h-9 rounded-full border border-emerald-500 text-emerald-500"
@@ -2222,13 +2237,13 @@ function Card({
 
 /* Small circular icon button */
 function IconButton({
-  children, onClick, label, intent
-}: React.PropsWithChildren<{ onClick: ()=>void; label: string; intent?: "danger"|"success" }>) {
+  children, onClick, label, intent, buttonRef
+}: React.PropsWithChildren<{ onClick: ()=>void; label: string; intent?: "danger"|"success"; buttonRef?: React.Ref<HTMLButtonElement> }>) {
   const base = "w-9 h-9 rounded-full inline-flex items-center justify-center text-sm border border-transparent bg-neutral-700/40 hover:bg-neutral-700/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500";
   const danger = " border-rose-700";
   const success = " bg-emerald-700/30 hover:bg-emerald-700/50";
   const cls = base + (intent==="danger" ? danger : intent==="success" ? success : "");
-  return <button aria-label={label} title={label} className={cls} onClick={onClick}>{children}</button>;
+  return <button ref={buttonRef} aria-label={label} title={label} className={cls} onClick={onClick}>{children}</button>;
 }
 
 /* ---------- Recurrence helpers & UI ---------- */

@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useCashu } from "../context/CashuContext";
 import { loadStore } from "../wallet/storage";
 import { ActionSheet } from "./ActionSheet";
+import { useToast } from "../context/ToastContext";
 
 export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { mintUrl, setMintUrl, balance, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice } = useCashu();
+  const { show: showToast } = useToast();
 
   interface HistoryItem {
     id: string;
@@ -272,7 +274,10 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
             <textarea readOnly className="w-full h-20 bg-transparent outline-none" value={mintQuote.request} />
             <div className="flex gap-2 mt-2">
               <a className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" href={`lightning:${mintQuote.request}`}>Open Wallet</a>
-              <button className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" onClick={()=>navigator.clipboard.writeText(mintQuote.request)}>Copy</button>
+              <button
+                className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700"
+                onClick={async ()=>{ try { await navigator.clipboard.writeText(mintQuote.request); } catch {} finally { showToast(); } }}
+              >Copy</button>
             </div>
             <div className="mt-2 text-xs">Status: {mintStatus}</div>
             {mintError && <div className="mt-1 text-xs text-rose-400">{mintError}</div>}
@@ -297,7 +302,10 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
           <div className="text-xs bg-neutral-950 border border-neutral-800 rounded-xl p-2">
             <textarea readOnly className="w-full h-24 bg-transparent outline-none" value={sendTokenStr} />
             <div className="mt-2">
-              <button className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" onClick={()=>navigator.clipboard.writeText(sendTokenStr)}>Copy</button>
+              <button
+                className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700"
+                onClick={async ()=>{ try { await navigator.clipboard.writeText(sendTokenStr); } catch {} finally { showToast(); } }}
+              >Copy</button>
             </div>
           </div>
         )}
@@ -336,7 +344,10 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
                 {expandedIdx === i && h.detail && (
                   <div className="mt-1">
                     <textarea readOnly className="w-full h-24 bg-neutral-950 border border-neutral-800 rounded-xl p-2" value={h.detail} />
-                    <button className="mt-1 px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" onClick={()=>navigator.clipboard.writeText(h.detail)}>Copy</button>
+                    <button
+                      className="mt-1 px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700"
+                      onClick={async ()=>{ try { await navigator.clipboard.writeText(h.detail!); } catch {} finally { showToast(); } }}
+                    >Copy</button>
                   </div>
                 )}
               </li>
@@ -377,13 +388,20 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
                   <div key={m.url} className="flex items-center gap-2 border border-neutral-800 rounded-xl p-2">
                     <div className="flex-1 min-w-0">
                       <div className="text-xs text-neutral-400">{m.url === mintUrl ? 'Active' : 'Mint'}</div>
-                      <div className="truncate" title={m.url} onClick={()=>navigator.clipboard?.writeText(m.url)}>{m.url}</div>
+                      <div
+                        className="truncate"
+                        title={m.url}
+                        onClick={async ()=>{ try { await navigator.clipboard?.writeText(m.url); } catch {} finally { showToast(); } }}
+                      >{m.url}</div>
                     </div>
                     <div className="text-right mr-2">
                       <div className="text-xs text-neutral-400">Balance</div>
                       <div className="font-semibold">{m.balance} sat</div>
                     </div>
-                    <button className="px-2 py-1 rounded bg-neutral-800 text-xs" onClick={()=>navigator.clipboard?.writeText(m.url)}>Copy</button>
+                    <button
+                      className="px-2 py-1 rounded bg-neutral-800 text-xs"
+                      onClick={async ()=>{ try { await navigator.clipboard?.writeText(m.url); } catch {} finally { showToast(); } }}
+                    >Copy</button>
                     {m.url !== mintUrl && (
                       <button className="px-2 py-1 rounded bg-emerald-700/70 hover:bg-emerald-600 text-xs" onClick={async ()=>{ try { await setMintUrl(m.url); refreshMintEntries(); } catch (e: any) { alert(e?.message || String(e)); } }}>Set active</button>
                     )}

@@ -525,6 +525,28 @@ function useTasks() {
 /* ================= App ================= */
 export default function App() {
   const { show: showToast } = useToast();
+  // Show toast on any successful clipboard write across the app
+  useEffect(() => {
+    const clip: any = (navigator as any).clipboard;
+    if (!clip || typeof clip.writeText !== 'function') return;
+    const original = clip.writeText.bind(clip);
+    const patched = (text: string) => {
+      try {
+        const p = original(text);
+        if (p && typeof p.then === 'function') {
+          p.then(() => showToast()).catch(() => {});
+        } else {
+          showToast();
+        }
+        return p;
+      } catch (e) {
+        // swallow, behave like original
+        try { return original(text); } catch {}
+      }
+    };
+    try { clip.writeText = patched; } catch {}
+    return () => { try { clip.writeText = original; } catch {} };
+  }, [showToast]);
   const [boards, setBoards] = useBoards();
   const [currentBoardId, setCurrentBoardId] = useState(boards[0]?.id || "");
   const currentBoard = boards.find(b => b.id === currentBoardId);
@@ -2595,7 +2617,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                   ) : (
                     <button
                       className="pressable px-3 py-2 rounded-xl bg-neutral-800"
-                      onClick={async () => { try { await navigator.clipboard?.writeText(task.bounty!.token!); } catch {} finally { showToast(); } }}
+                      onClick={async () => { try { await navigator.clipboard?.writeText(task.bounty!.token!); } catch {} }}
                     >
                       Copy token
                     </button>
@@ -2683,7 +2705,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                 <button
                   className={`px-2 py-1 rounded-lg bg-neutral-800 ${canCopy ? '' : 'opacity-50 cursor-not-allowed'} text-xs`}
                   title={canCopy ? 'Copy creator key' : 'No key to copy'}
-                  onClick={async () => { if (canCopy) { try { await navigator.clipboard?.writeText(display); } catch {} finally { showToast(); } } }}
+                  onClick={async () => { if (canCopy) { try { await navigator.clipboard?.writeText(display); } catch {} } }}
                   disabled={!canCopy}
                 >
                   Copy
@@ -3266,7 +3288,7 @@ function SettingsModal({
                 <div className="flex gap-2 items-center">
                   <input readOnly value={pubkeyHex || "(generating…)"}
                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ if(pubkeyHex) { try { await navigator.clipboard?.writeText(pubkeyHex); } catch {} finally { showToast(); } } }}>Copy</button>
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ if(pubkeyHex) { try { await navigator.clipboard?.writeText(pubkeyHex); } catch {} } }}>Copy</button>
                 </div>
               </div>
 
@@ -3353,7 +3375,7 @@ function SettingsModal({
                 <div className="flex gap-2 items-center">
                   <input readOnly value={manageBoard.nostr.boardId}
                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ try { await navigator.clipboard?.writeText(manageBoard.nostr!.boardId); } catch {} finally { showToast(); } }}>Copy</button>
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ try { await navigator.clipboard?.writeText(manageBoard.nostr!.boardId); } catch {} }}>Copy</button>
                 </div>
                   {showAdvanced && (
                     <>

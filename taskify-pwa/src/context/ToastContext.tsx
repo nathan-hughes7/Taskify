@@ -15,7 +15,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const timerRef = useRef<number | null>(null);
 
   const show = useCallback((msg?: string, durationMs = 1000) => {
-    const m = msg || "Copied to clipboard";
+    const m = msg || "copied to clipboard";
     setMessage(m);
     setVisible(true);
     if (timerRef.current) window.clearTimeout(timerRef.current);
@@ -32,7 +32,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           }
         >
           <div className="rounded-md border border-neutral-700 bg-neutral-900/90 px-3 py-1 text-sm text-white shadow-lg">
-            {message || "Copied to clipboard"}
+            {message || "copied to clipboard"}
           </div>
         </div>
       </div>
@@ -43,4 +43,3 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 export function useToast() {
   return useContext(ToastContext);
 }
-

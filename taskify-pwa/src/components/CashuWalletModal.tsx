@@ -2,11 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useCashu } from "../context/CashuContext";
 import { loadStore } from "../wallet/storage";
 import { ActionSheet } from "./ActionSheet";
-import { useToast } from "../context/ToastContext";
 
 export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { mintUrl, setMintUrl, balance, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice } = useCashu();
-  const { show: showToast } = useToast();
 
   interface HistoryItem {
     id: string;
@@ -276,7 +274,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
               <a className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" href={`lightning:${mintQuote.request}`}>Open Wallet</a>
               <button
                 className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700"
-                onClick={async ()=>{ try { await navigator.clipboard.writeText(mintQuote.request); } catch {} finally { showToast(); } }}
+                onClick={async ()=>{ try { await navigator.clipboard.writeText(mintQuote.request); } catch {} }}
               >Copy</button>
             </div>
             <div className="mt-2 text-xs">Status: {mintStatus}</div>
@@ -304,7 +302,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
             <div className="mt-2">
               <button
                 className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700"
-                onClick={async ()=>{ try { await navigator.clipboard.writeText(sendTokenStr); } catch {} finally { showToast(); } }}
+                onClick={async ()=>{ try { await navigator.clipboard.writeText(sendTokenStr); } catch {} }}
               >Copy</button>
             </div>
           </div>
@@ -346,7 +344,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
                     <textarea readOnly className="w-full h-24 bg-neutral-950 border border-neutral-800 rounded-xl p-2" value={h.detail} />
                     <button
                       className="mt-1 px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700"
-                      onClick={async ()=>{ try { await navigator.clipboard.writeText(h.detail!); } catch {} finally { showToast(); } }}
+                      onClick={async ()=>{ try { await navigator.clipboard.writeText(h.detail!); } catch {} }}
                     >Copy</button>
                   </div>
                 )}
@@ -391,7 +389,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
                       <div
                         className="truncate"
                         title={m.url}
-                        onClick={async ()=>{ try { await navigator.clipboard?.writeText(m.url); } catch {} finally { showToast(); } }}
+                        onClick={async ()=>{ try { await navigator.clipboard?.writeText(m.url); } catch {} }}
                       >{m.url}</div>
                     </div>
                     <div className="text-right mr-2">
@@ -400,7 +398,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
                     </div>
                     <button
                       className="px-2 py-1 rounded bg-neutral-800 text-xs"
-                      onClick={async ()=>{ try { await navigator.clipboard?.writeText(m.url); } catch {} finally { showToast(); } }}
+                      onClick={async ()=>{ try { await navigator.clipboard?.writeText(m.url); } catch {} }}
                     >Copy</button>
                     {m.url !== mintUrl && (
                       <button className="px-2 py-1 rounded bg-emerald-700/70 hover:bg-emerald-600 text-xs" onClick={async ()=>{ try { await setMintUrl(m.url); refreshMintEntries(); } catch (e: any) { alert(e?.message || String(e)); } }}>Set active</button>

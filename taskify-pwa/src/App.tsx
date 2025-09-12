@@ -566,6 +566,7 @@ export default function App() {
     lastNostrCreated.current = createdAt;
     const ev = finalizeEvent({ ...template, created_at: createdAt }, nostrSK);
     pool.publishEvent(relays, ev as unknown as NostrEvent);
+    return createdAt;
   }
   type NostrIndex = {
     boardMeta: Map<string, number>; // nostrBoardId -> created_at
@@ -735,7 +736,13 @@ export default function App() {
     const tags: string[][] = [["d", idTag],["b", idTag],["k", board.kind],["name", board.name]];
     const raw = board.kind === "lists" ? JSON.stringify({ columns: board.columns }) : "";
     const content = await encryptToBoard(board.nostr.boardId, raw);
-    nostrPublish(relays, { kind: 30300, tags, content, created_at: Math.floor(Date.now()/1000) });
+    const createdAt = await nostrPublish(relays, {
+      kind: 30300,
+      tags,
+      content,
+      created_at: Math.floor(Date.now() / 1000),
+    });
+    nostrIdxRef.current.boardMeta.set(idTag, createdAt);
   }
   async function publishTaskDeleted(t: Task) {
     const b = boards.find((x) => x.id === t.boardId);
@@ -748,7 +755,16 @@ export default function App() {
     const tags: string[][] = [["d", t.id],["b", bTag],["col", String(colTag)],["status","deleted"]];
     const raw = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, streak: t.streak, subtasks: t.subtasks });
     const content = await encryptToBoard(boardId, raw);
-    nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
+    const createdAt = await nostrPublish(relays, {
+      kind: 30301,
+      tags,
+      content,
+      created_at: Math.floor(Date.now() / 1000),
+    });
+    if (!nostrIdxRef.current.taskClock.has(bTag)) {
+      nostrIdxRef.current.taskClock.set(bTag, new Map());
+    }
+    nostrIdxRef.current.taskClock.get(bTag)!.set(t.id, createdAt);
   }
   async function maybePublishTask(t: Task, boardOverride?: Board) {
     const b = boardOverride || boards.find((x) => x.id === t.boardId);
@@ -767,7 +783,17 @@ export default function App() {
     body.subtasks = (typeof t.subtasks === 'undefined') ? null : t.subtasks;
     const raw = JSON.stringify(body);
     const content = await encryptToBoard(boardId, raw);
-    nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
+    const createdAt = await nostrPublish(relays, {
+      kind: 30301,
+      tags,
+      content,
+      created_at: Math.floor(Date.now() / 1000),
+    });
+    // Update local task clock so immediate refreshes don't revert state
+    if (!nostrIdxRef.current.taskClock.has(bTag)) {
+      nostrIdxRef.current.taskClock.set(bTag, new Map());
+    }
+    nostrIdxRef.current.taskClock.get(bTag)!.set(t.id, createdAt);
   }
 
   function regenerateBoardId(id: string) {

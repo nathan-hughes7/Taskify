@@ -2480,6 +2480,40 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
           )}
         </div>
 
+        {/* Creator info */}
+        <div className="pt-2">
+          {(() => {
+            const hex = task.createdBy || "";
+            let display = hex;
+            try {
+              if (/^[0-9a-fA-F]{64}$/.test(hex)) {
+                display = nip19.npubEncode(hex);
+              }
+            } catch {}
+            const short = display
+              ? display.length > 16
+                ? display.slice(0, 10) + "…" + display.slice(-6)
+                : display
+              : "(not set)";
+            const canCopy = !!hex;
+            return (
+              <div className="flex items-center justify-between text-[11px] text-neutral-400">
+                <div>
+                  Created by: <span className="font-mono text-neutral-300">{short}</span>
+                </div>
+                <button
+                  className={`px-2 py-1 rounded-lg bg-neutral-800 ${canCopy ? '' : 'opacity-50 cursor-not-allowed'} text-xs`}
+                  title={canCopy ? 'Copy creator key' : 'No key to copy'}
+                  onClick={() => { if (canCopy) { try { navigator.clipboard?.writeText(display); } catch {} } }}
+                  disabled={!canCopy}
+                >
+                  Copy
+                </button>
+              </div>
+            );
+          })()}
+        </div>
+
         <div className="pt-2 flex justify-between">
           <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
           <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>

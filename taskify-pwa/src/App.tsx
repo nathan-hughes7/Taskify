@@ -633,6 +633,9 @@ export default function App() {
 
   // confetti
   const confettiRef = useRef<HTMLDivElement>(null);
+  // fly-to-completed overlay + target
+  const flyLayerRef = useRef<HTMLDivElement>(null);
+  const completedTabRef = useRef<HTMLButtonElement>(null);
   function burst() {
     const el = confettiRef.current;
     if (!el) return;
@@ -652,6 +655,48 @@ export default function App() {
         setTimeout(() => el.removeChild(s), 1200);
       });
     }
+  }
+
+  function flyToCompleted(from: DOMRect) {
+    const layer = flyLayerRef.current;
+    const targetEl = completedTabRef.current;
+    if (!layer || !targetEl) return;
+    const target = targetEl.getBoundingClientRect();
+
+    const startX = from.left + from.width / 2;
+    const startY = from.top + from.height / 2;
+    const endX = target.left + target.width / 2;
+    const endY = target.top + target.height / 2;
+
+    const dot = document.createElement('div');
+    dot.style.position = 'fixed';
+    dot.style.left = `${startX - 10}px`;
+    dot.style.top = `${startY - 10}px`;
+    dot.style.width = '20px';
+    dot.style.height = '20px';
+    dot.style.borderRadius = '9999px';
+    dot.style.background = '#10b981';
+    dot.style.color = 'white';
+    dot.style.display = 'grid';
+    dot.style.placeItems = 'center';
+    dot.style.fontSize = '14px';
+    dot.style.lineHeight = '20px';
+    dot.style.boxShadow = '0 0 0 2px rgba(16,185,129,0.3), 0 6px 16px rgba(0,0,0,0.35)';
+    dot.style.zIndex = '1000';
+    dot.style.transform = 'translate(0, 0) scale(1)';
+    dot.style.transition = 'transform 600ms cubic-bezier(.2,.7,.3,1), opacity 300ms ease 420ms';
+    dot.textContent = '✓';
+    layer.appendChild(dot);
+
+    requestAnimationFrame(() => {
+      const dx = endX - startX;
+      const dy = endY - startY;
+      dot.style.transform = `translate(${dx}px, ${dy}px) scale(0.5)`;
+      dot.style.opacity = '0.6';
+      setTimeout(() => {
+        try { layer.removeChild(dot); } catch {}
+      }, 750);
+    });
   }
 
   /* ---------- Derived: board-scoped lists ---------- */
@@ -1348,10 +1393,13 @@ export default function App() {
             </button>
             <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
               <button className={`px-3 py-2 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
-              <button className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
+              <button ref={completedTabRef} className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
             </div>
           </div>
         </header>
+
+        {/* Animation overlay for fly-to-completed */}
+        <div ref={flyLayerRef} className="pointer-events-none fixed inset-0 z-50" />
 
         {/* Add bar */}
         {view === "board" && currentBoard && (
@@ -1458,6 +1506,7 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
+                          onFlyToCompleted={(rect) => flyToCompleted(rect)}
                           onComplete={() => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
@@ -1482,6 +1531,7 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
+                          onFlyToCompleted={(rect) => flyToCompleted(rect)}
                           onComplete={() => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
@@ -1516,6 +1566,7 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
+                          onFlyToCompleted={(rect) => flyToCompleted(rect)}
                           onComplete={() => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
@@ -1943,6 +1994,7 @@ function Card({
   onDropBefore,
   showStreaks,
   onToggleSubtask,
+  onFlyToCompleted,
 }: {
   task: Task;
   onComplete: () => void;
@@ -1950,6 +2002,7 @@ function Card({
   onDropBefore: (dragId: string) => void;
   showStreaks: boolean;
   onToggleSubtask: (subId: string) => void;
+  onFlyToCompleted: (rect: DOMRect) => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
@@ -2004,7 +2057,10 @@ function Card({
           </button>
         ) : (
           <button
-            onClick={onComplete}
+            onClick={(e) => {
+              try { onFlyToCompleted((e.currentTarget as HTMLButtonElement).getBoundingClientRect()); } catch {}
+              onComplete();
+            }}
             aria-label="Complete task"
             title="Mark complete"
             className="flex items-center justify-center w-9 h-9 rounded-full border border-neutral-600 text-neutral-300 hover:text-emerald-500 hover:border-emerald-500 transition"

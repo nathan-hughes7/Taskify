@@ -582,6 +582,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showWallet, setShowWallet] = useState(false);
   const { receiveToken } = useCashu();
+  const walletRef = useRef<HTMLSelectElement>(null);
 
   // add bar
   const newTitleRef = useRef<HTMLInputElement>(null);
@@ -640,6 +641,31 @@ export default function App() {
         setTimeout(() => el.removeChild(s), 1200);
       });
     }
+  }
+
+  function flyCoin(fromEl: HTMLElement) {
+    const walletEl = walletRef.current;
+    if (!walletEl) return;
+    const start = fromEl.getBoundingClientRect();
+    const coin = document.createElement("span");
+    coin.textContent = "🪙";
+    coin.style.position = "fixed";
+    coin.style.left = start.left + start.width / 2 + "px";
+    coin.style.top = start.top + start.height / 2 + "px";
+    coin.style.transition = "transform 0.6s ease-in, opacity 0.6s ease-in";
+    coin.style.pointerEvents = "none";
+    coin.style.zIndex = "1000";
+    document.body.appendChild(coin);
+    const end = walletEl.getBoundingClientRect();
+    requestAnimationFrame(() => {
+      const dx = end.left + end.width / 2 - (start.left + start.width / 2);
+      const dy = end.top + end.height / 2 - (start.top + start.height / 2);
+      coin.style.transform = `translate(${dx}px, ${dy}px) scale(0.3)`;
+      coin.style.opacity = "0";
+    });
+    setTimeout(() => {
+      document.body.removeChild(coin);
+    }, 700);
   }
 
   /* ---------- Derived: board-scoped lists ---------- */
@@ -1136,7 +1162,7 @@ export default function App() {
     }
   }
 
-  async function claimBounty(id: string) {
+  async function claimBounty(id: string, originEl?: HTMLElement) {
     const t = tasks.find(x => x.id === id);
     if (!t || !t.bounty || t.bounty.state !== 'unlocked' || !t.bounty.token) return;
     try {
@@ -1148,6 +1174,7 @@ export default function App() {
     };
     setTasks(prev => prev.map(x => x.id === id ? updated : x));
     maybePublishTask(updated).catch(() => {});
+    if (originEl) flyCoin(originEl);
   }
 
   function saveEdit(updated: Task) {
@@ -1318,6 +1345,7 @@ export default function App() {
           <div className="ml-auto flex items-center gap-2">
             {/* Board switcher */}
             <select
+              ref={walletRef}
               value={currentBoardId}
               onChange={handleBoardSelect}
               className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
@@ -1460,10 +1488,10 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
-                          onComplete={() => {
+                          onComplete={(el) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, el);
                             else restoreTask(t.id);
                           }}
                           onEdit={() => setEditing(t)}
@@ -1484,10 +1512,10 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
-                          onComplete={() => {
+                          onComplete={(el) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, el);
                             else restoreTask(t.id);
                           }}
                           onEdit={() => setEditing(t)}
@@ -1518,10 +1546,10 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
-                          onComplete={() => {
+                          onComplete={(el) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, el);
                             else restoreTask(t.id);
                           }}
                           onEdit={() => setEditing(t)}
@@ -1947,7 +1975,7 @@ function Card({
   onToggleSubtask,
 }: {
   task: Task;
-  onComplete: () => void;
+  onComplete: (el: HTMLElement) => void;
   onEdit: () => void;
   onDropBefore: (dragId: string) => void;
   showStreaks: boolean;
@@ -1994,7 +2022,7 @@ function Card({
       <div className="flex items-center gap-2">
         {task.completed ? (
           <button
-            onClick={onComplete}
+            onClick={(e) => onComplete(e.currentTarget as HTMLElement)}
             aria-label="Mark incomplete"
             title="Mark incomplete"
             className="flex items-center justify-center w-9 h-9 rounded-full border border-emerald-500 text-emerald-500"
@@ -2006,7 +2034,7 @@ function Card({
           </button>
         ) : (
           <button
-            onClick={onComplete}
+            onClick={(e) => onComplete(e.currentTarget as HTMLElement)}
             aria-label="Complete task"
             title="Mark complete"
             className="flex items-center justify-center w-9 h-9 rounded-full border border-neutral-600 text-neutral-300 hover:text-emerald-500 hover:border-emerald-500 transition"

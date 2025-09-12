@@ -647,25 +647,28 @@ export default function App() {
     const walletEl = walletRef.current;
     if (!walletEl) return;
     const start = fromEl.getBoundingClientRect();
-    const coin = document.createElement("span");
-    coin.textContent = "🪙";
-    coin.style.position = "fixed";
-    coin.style.left = start.left + start.width / 2 + "px";
-    coin.style.top = start.top + start.height / 2 + "px";
-    coin.style.transition = "transform 0.6s ease-in, opacity 0.6s ease-in";
-    coin.style.pointerEvents = "none";
-    coin.style.zIndex = "1000";
-    document.body.appendChild(coin);
     const end = walletEl.getBoundingClientRect();
-    requestAnimationFrame(() => {
-      const dx = end.left + end.width / 2 - (start.left + start.width / 2);
-      const dy = end.top + end.height / 2 - (start.top + start.height / 2);
-      coin.style.transform = `translate(${dx}px, ${dy}px) scale(0.3)`;
-      coin.style.opacity = "0";
-    });
-    setTimeout(() => {
-      document.body.removeChild(coin);
-    }, 700);
+    const launch = () => {
+      const coin = document.createElement("span");
+      coin.textContent = "🪙️";
+      coin.style.position = "fixed";
+      coin.style.left = start.left + start.width / 2 + "px";
+      coin.style.top = start.top + start.height / 2 + "px";
+      coin.style.transition = "transform 0.6s ease-in, opacity 0.6s ease-in";
+      coin.style.pointerEvents = "none";
+      coin.style.zIndex = "1000";
+      document.body.appendChild(coin);
+      requestAnimationFrame(() => {
+        const dx = end.left + end.width / 2 - (start.left + start.width / 2);
+        const dy = end.top + end.height / 2 - (start.top + start.height / 2);
+        coin.style.transform = `translate(${dx}px, ${dy}px) scale(0.3)`;
+        coin.style.opacity = "0";
+      });
+      setTimeout(() => {
+        document.body.removeChild(coin);
+      }, 700);
+    };
+    [0, 200, 400].forEach(d => setTimeout(launch, d));
   }
 
   /* ---------- Derived: board-scoped lists ---------- */

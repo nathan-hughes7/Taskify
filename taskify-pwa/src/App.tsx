@@ -2395,6 +2395,16 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                                 return;
                               }
                             }
+                            try {
+                              const raw = localStorage.getItem("cashuHistory");
+                              const existing = raw ? JSON.parse(raw) : [];
+                              const historyItem = {
+                                id: `bounty-${Date.now()}`,
+                                summary: `Attached bounty • ${bountyAmount} sats`,
+                                detail: tok,
+                              };
+                              localStorage.setItem("cashuHistory", JSON.stringify([historyItem, ...existing]));
+                            } catch {}
                             save({ bounty: b });
                           } catch (e) {
                             alert("Failed to create token: "+ (e as Error).message);

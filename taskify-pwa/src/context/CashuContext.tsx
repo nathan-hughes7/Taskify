@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { Proof } from "@cashu/cashu-ts";
+import { getDecodedToken } from "@cashu/cashu-ts";
 import { CashuManager } from "../wallet/CashuManager";
 import { getActiveMint, setActiveMint as persistActiveMint } from "../wallet/storage";
 
@@ -19,7 +20,7 @@ type CashuContextType = {
   createMintInvoice: (amount: number, description?: string) => Promise<{ request: string; quote: string; expiry: number }>;
   checkMintQuote: (quoteId: string) => Promise<"UNPAID" | "PAID" | "ISSUED">;
   claimMint: (quoteId: string, amount: number) => Promise<Proof[]>;
-  receiveToken: (encoded: string) => Promise<Proof[]>;
+  receiveToken: (encoded: string) => Promise<{ proofs: Proof[]; usedMintUrl: string; activeMintUrl: string; crossMint: boolean }>;
   createSendToken: (amount: number) => Promise<{ token: string }>;
   payInvoice: (invoice: string) => Promise<{ state: string }>;
 };
@@ -94,10 +95,29 @@ export function CashuProvider({ children }: { children: React.ReactNode }) {
 
   const receiveToken = useCallback(async (encoded: string) => {
     if (!manager) throw new Error("Wallet not ready");
+    try {
+      // Try to decode token to detect its mint. Handle both single-entry and multi-entry shapes.
+      const decoded: any = getDecodedToken(encoded);
+      const entry = Array.isArray(decoded?.token) ? decoded.token[0] : decoded;
+      const tokenMint: string | undefined = (entry && typeof entry.mint === 'string') ? entry.mint : undefined;
+      const normalize = (u: string) => u.replace(/\/$/, "");
+
+      if (tokenMint && normalize(tokenMint) !== normalize(manager.mintUrl)) {
+        // Receive using the token's mint without changing active mint state.
+        const other = new CashuManager(tokenMint);
+        await other.init();
+        const proofs = await other.receiveToken(encoded);
+        // Do not touch current manager balance/proofs because active mint differs.
+        return { proofs, usedMintUrl: other.mintUrl, activeMintUrl: manager.mintUrl, crossMint: true };
+      }
+    } catch {
+      // If decoding fails, fall back to active manager.receive (may still work for legacy tokens)
+    }
+
     const proofs = await manager.receiveToken(encoded);
     setBalance(manager.balance);
     setProofs(manager.proofs);
-    return proofs;
+    return { proofs, usedMintUrl: manager.mintUrl, activeMintUrl: manager.mintUrl, crossMint: false };
   }, [manager]);
 
   const createSendToken = useCallback(async (amount: number) => {

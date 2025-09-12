@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19 } from "nostr-tools";
+import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19, nip04 } from "nostr-tools";
 import { CashuWalletModal } from "./components/CashuWalletModal";
 import { useCashu } from "./context/CashuContext";
 import { loadStore as loadProofStore, saveStore as saveProofStore, getActiveMint, setActiveMint } from "./wallet/storage";
@@ -50,13 +50,19 @@ type Task = {
     lock?: "p2pk" | "htlc" | "none" | "unknown";
     owner?: string;               // hex pubkey of task creator (who can unlock)
     sender?: string;              // hex pubkey of funder (who can revoke)
+    receiver?: string;            // hex pubkey of intended recipient (who can decrypt nip04)
     state: "locked" | "unlocked" | "revoked" | "claimed";
     updatedAt: string;            // iso
-    enc?: {                       // optional encrypted form (hidden until funder reveals)
-      alg: "aes-gcm-256";
-      iv: string;                // base64
-      ct: string;                // base64
-    };
+    enc?:
+      | {                         // optional encrypted form (hidden until funder reveals)
+          alg: "aes-gcm-256";
+          iv: string;            // base64
+          ct: string;            // base64
+        }
+      | {
+          alg: "nip04";         // encrypted to receiver's nostr pubkey (nip04 format)
+          data: string;          // ciphertext returned by nip04.encrypt
+        };
   };
 };
 
@@ -311,6 +317,22 @@ export async function decryptEcashTokenForFunder(enc: {alg:"aes-gcm-256";iv:stri
   const ct = b64decode(enc.ct);
   const ptBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
   return new TextDecoder().decode(new Uint8Array(ptBuf));
+}
+
+// NIP-04 encryption for recipient
+async function encryptEcashTokenForRecipient(recipientHex: string, plain: string): Promise<{ alg: "nip04"; data: string }> {
+  const skHex = localStorage.getItem(LS_NOSTR_SK) || "";
+  if (!/^[0-9a-fA-F]{64}$/.test(skHex)) throw new Error("No local Nostr secret key");
+  if (!/^[0-9a-fA-F]{64}$/.test(recipientHex)) throw new Error("Invalid recipient pubkey");
+  const data = await nip04.encrypt(skHex, recipientHex, plain);
+  return { alg: "nip04", data };
+}
+
+async function decryptEcashTokenForRecipient(senderHex: string, enc: { alg: "nip04"; data: string }): Promise<string> {
+  const skHex = localStorage.getItem(LS_NOSTR_SK) || "";
+  if (!/^[0-9a-fA-F]{64}$/.test(skHex)) throw new Error("No local Nostr secret key");
+  if (!/^[0-9a-fA-F]{64}$/.test(senderHex)) throw new Error("Invalid sender pubkey");
+  return await nip04.decrypt(skHex, senderHex, enc.data);
 }
 
 async function fileToDataURL(file: File): Promise<string> {
@@ -621,6 +643,9 @@ export default function App() {
 
   // confetti
   const confettiRef = useRef<HTMLDivElement>(null);
+  // fly-to-completed overlay + target
+  const flyLayerRef = useRef<HTMLDivElement>(null);
+  const completedTabRef = useRef<HTMLButtonElement>(null);
   function burst() {
     const el = confettiRef.current;
     if (!el) return;
@@ -640,6 +665,48 @@ export default function App() {
         setTimeout(() => el.removeChild(s), 1200);
       });
     }
+  }
+
+  function flyToCompleted(from: DOMRect) {
+    const layer = flyLayerRef.current;
+    const targetEl = completedTabRef.current;
+    if (!layer || !targetEl) return;
+    const target = targetEl.getBoundingClientRect();
+
+    const startX = from.left + from.width / 2;
+    const startY = from.top + from.height / 2;
+    const endX = target.left + target.width / 2;
+    const endY = target.top + target.height / 2;
+
+    const dot = document.createElement('div');
+    dot.style.position = 'fixed';
+    dot.style.left = `${startX - 10}px`;
+    dot.style.top = `${startY - 10}px`;
+    dot.style.width = '20px';
+    dot.style.height = '20px';
+    dot.style.borderRadius = '9999px';
+    dot.style.background = '#10b981';
+    dot.style.color = 'white';
+    dot.style.display = 'grid';
+    dot.style.placeItems = 'center';
+    dot.style.fontSize = '14px';
+    dot.style.lineHeight = '20px';
+    dot.style.boxShadow = '0 0 0 2px rgba(16,185,129,0.3), 0 6px 16px rgba(0,0,0,0.35)';
+    dot.style.zIndex = '1000';
+    dot.style.transform = 'translate(0, 0) scale(1)';
+    dot.style.transition = 'transform 600ms cubic-bezier(.2,.7,.3,1), opacity 300ms ease 420ms';
+    dot.textContent = '✓';
+    layer.appendChild(dot);
+
+    requestAnimationFrame(() => {
+      const dx = endX - startX;
+      const dy = endY - startY;
+      dot.style.transform = `translate(${dx}px, ${dy}px) scale(0.5)`;
+      dot.style.opacity = '0.6';
+      setTimeout(() => {
+        try { layer.removeChild(dot); } catch {}
+      }, 750);
+    });
   }
 
   /* ---------- Derived: board-scoped lists ---------- */
@@ -866,12 +933,12 @@ export default function App() {
     }
     const status = tagValue(ev, "status");
     const col = tagValue(ev, "col");
-    const base: Task = {
-      id: taskId,
-      boardId: lb.id,
-      createdBy: payload.createdBy,
-      title: payload.title || "Untitled",
-      note: payload.note || "",
+      const base: Task = {
+        id: taskId,
+        boardId: lb.id,
+        createdBy: payload.createdBy,
+        title: payload.title || "Untitled",
+        note: payload.note || "",
       dueISO: payload.dueISO || isoForWeekday(0),
       completed: status === "done",
       completedAt: payload.completedAt,
@@ -901,7 +968,7 @@ export default function App() {
         // Different ids: pick the newer one
         if (oldB.id !== incoming.id) return incNewer ? incoming : oldB;
 
-        const next = { ...oldB };
+        const next = { ...oldB } as Task["bounty"];
         // accept token/content updates if incoming is newer
         if (incNewer) {
           if (typeof incoming.amount === 'number') next.amount = incoming.amount;
@@ -910,6 +977,7 @@ export default function App() {
           // Only overwrite token if sender/owner published or token becomes visible
           if (incoming.token) next.token = incoming.token;
           next.enc = incoming.enc !== undefined ? incoming.enc : next.enc;
+          if (incoming.receiver) next.receiver = incoming.receiver;
           next.updatedAt = incoming.updatedAt || next.updatedAt;
         }
         // Auth for state transitions (allow owner or sender to unlock; owner or sender to revoke; anyone to mark claimed)
@@ -1111,7 +1179,6 @@ export default function App() {
     const updated: Task = { ...t, completed: false, completedAt: undefined };
     setTasks((prev) => prev.map((x) => (x.id === id ? updated : x)));
     maybePublishTask(updated).catch(() => {});
-    setView("board");
   }
   function clearCompleted() {
     for (const t of tasksForBoard)
@@ -1124,7 +1191,19 @@ export default function App() {
     const t = tasks.find(x => x.id === id);
     if (!t || !t.bounty || t.bounty.state !== 'locked' || !t.bounty.enc) return;
     try {
-      const pt = await decryptEcashTokenForFunder(t.bounty.enc);
+      let pt = "";
+      const enc = t.bounty.enc as any;
+      const me = (window as any).nostrPK as string | undefined;
+      if (enc.alg === 'aes-gcm-256') {
+        if (!me || t.bounty.sender !== me) throw new Error('Only the funder can reveal this token.');
+        pt = await decryptEcashTokenForFunder(enc);
+      } else if (enc.alg === 'nip04') {
+        if (!me || t.bounty.receiver !== me) throw new Error('Only the intended recipient can decrypt this token.');
+        if (!t.bounty.sender) throw new Error('Missing sender pubkey');
+        pt = await decryptEcashTokenForRecipient(t.bounty.sender, enc);
+      } else {
+        throw new Error('Unsupported cipher');
+      }
       const updated: Task = {
         ...t,
         bounty: { ...t.bounty, token: pt, enc: undefined, state: 'unlocked', updatedAt: new Date().toISOString() },
@@ -1140,14 +1219,19 @@ export default function App() {
     const t = tasks.find(x => x.id === id);
     if (!t || !t.bounty || t.bounty.state !== 'unlocked' || !t.bounty.token) return;
     try {
-      await receiveToken(t.bounty.token);
-    } catch {}
-    const updated: Task = {
-      ...t,
-      bounty: { ...t.bounty, token: '', state: 'claimed', updatedAt: new Date().toISOString() },
-    };
-    setTasks(prev => prev.map(x => x.id === id ? updated : x));
-    maybePublishTask(updated).catch(() => {});
+      const res = await receiveToken(t.bounty.token);
+      if (res.crossMint) {
+        alert(`Redeemed to a different mint: ${res.usedMintUrl}. Switch to that mint to view the balance.`);
+      }
+      const updated: Task = {
+        ...t,
+        bounty: { ...t.bounty, token: '', state: 'claimed', updatedAt: new Date().toISOString() },
+      };
+      setTasks(prev => prev.map(x => x.id === id ? updated : x));
+      maybePublishTask(updated).catch(() => {});
+    } catch (e) {
+      alert('Redeem failed: ' + (e as Error).message);
+    }
   }
 
   function saveEdit(updated: Task) {
@@ -1350,10 +1434,13 @@ export default function App() {
             </button>
             <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
               <button className={`px-3 py-2 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
-              <button className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
+              <button ref={completedTabRef} className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
             </div>
           </div>
         </header>
+
+        {/* Animation overlay for fly-to-completed */}
+        <div ref={flyLayerRef} className="pointer-events-none fixed inset-0 z-50" />
 
         {/* Add bar */}
         {view === "board" && currentBoard && (
@@ -1460,6 +1547,7 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
+                          onFlyToCompleted={(rect) => flyToCompleted(rect)}
                           onComplete={() => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
@@ -1484,6 +1572,7 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
+                          onFlyToCompleted={(rect) => flyToCompleted(rect)}
                           onComplete={() => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
@@ -1518,6 +1607,7 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
+                          onFlyToCompleted={(rect) => flyToCompleted(rect)}
                           onComplete={() => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
@@ -1945,6 +2035,7 @@ function Card({
   onDropBefore,
   showStreaks,
   onToggleSubtask,
+  onFlyToCompleted,
 }: {
   task: Task;
   onComplete: () => void;
@@ -1952,6 +2043,7 @@ function Card({
   onDropBefore: (dragId: string) => void;
   showStreaks: boolean;
   onToggleSubtask: (subId: string) => void;
+  onFlyToCompleted: (rect: DOMRect) => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
@@ -2006,7 +2098,10 @@ function Card({
           </button>
         ) : (
           <button
-            onClick={onComplete}
+            onClick={(e) => {
+              try { onFlyToCompleted((e.currentTarget as HTMLButtonElement).getBoundingClientRect()); } catch {}
+              onComplete();
+            }}
             aria-label="Complete task"
             title="Mark complete"
             className="flex items-center justify-center w-9 h-9 rounded-full border border-neutral-600 text-neutral-300 hover:text-emerald-500 hover:border-emerald-500 transition"
@@ -2107,6 +2202,26 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
   const [, setBountyState] = useState<Task["bounty"]["state"]>(task.bounty?.state || "locked");
   const [encryptWhenAttach, setEncryptWhenAttach] = useState(true);
   const { createSendToken, receiveToken, mintUrl } = useCashu();
+  const [lockToRecipient, setLockToRecipient] = useState(false);
+  const [recipientInput, setRecipientInput] = useState("");
+
+  function normalizePubkey(input: string): string | null {
+    const s = (input || "").trim();
+    if (!s) return null;
+    if (/^[0-9a-fA-F]{64}$/.test(s)) return s.toLowerCase();
+    try {
+      const dec = nip19.decode(s);
+      if (dec.type === 'npub') {
+        if (typeof dec.data === 'string') return dec.data;
+        // Fallback if data is bytes-like
+        if (dec.data && (dec.data as any).length) {
+          const arr = dec.data as unknown as ArrayLike<number>;
+          return Array.from(arr).map((x)=>x.toString(16).padStart(2,'0')).join('');
+        }
+      }
+    } catch {}
+    return null;
+  }
 
   async function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
     const items = e.clipboardData?.items;
@@ -2264,6 +2379,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                 <span className={`px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>{task.bounty.state}</span>
                 {task.createdBy && (window as any).nostrPK === task.createdBy && <span className="px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700" title="You created the task">owner: you</span>}
                 {task.bounty.sender && (window as any).nostrPK === task.bounty.sender && <span className="px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700" title="You funded the bounty">funder: you</span>}
+                {task.bounty.receiver && (window as any).nostrPK === task.bounty.receiver && <span className="px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700" title="You are the recipient">recipient: you</span>}
               </div>
             )}
           </div>
@@ -2290,7 +2406,23 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                               updatedAt: new Date().toISOString(),
                               lock: tok.includes("pubkey") ? "p2pk" : tok.includes("hash") ? "htlc" : "unknown",
                             };
-                            if (encryptWhenAttach) {
+                            if (lockToRecipient) {
+                              // Lock to recipient's nostr pubkey via NIP-04
+                              const rxHex = normalizePubkey(recipientInput) || task.createdBy || "";
+                              if (!rxHex || !/^[0-9a-fA-F]{64}$/.test(rxHex)) {
+                                alert("Enter a valid recipient npub/hex or ensure the task has an owner.");
+                                return;
+                              }
+                              try {
+                                const enc = await encryptEcashTokenForRecipient(rxHex, tok);
+                                b.enc = enc;
+                                b.receiver = rxHex;
+                                b.token = "";
+                              } catch (e) {
+                                alert("Recipient encryption failed: " + (e as Error).message);
+                                return;
+                              }
+                            } else if (encryptWhenAttach) {
                               try {
                                 const enc = await encryptEcashTokenForFunder(tok);
                                 b.enc = enc;
@@ -2300,6 +2432,16 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                                 return;
                               }
                             }
+                            try {
+                              const raw = localStorage.getItem("cashuHistory");
+                              const existing = raw ? JSON.parse(raw) : [];
+                              const historyItem = {
+                                id: `bounty-${Date.now()}`,
+                                summary: `Attached bounty • ${bountyAmount} sats`,
+                                detail: tok,
+                              };
+                              localStorage.setItem("cashuHistory", JSON.stringify([historyItem, ...existing]));
+                            } catch {}
                             save({ bounty: b });
                           } catch (e) {
                             alert("Failed to create token: "+ (e as Error).message);
@@ -2307,10 +2449,42 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                         }}
                 >Attach</button>
               </div>
-              <label className="flex items-center gap-2 text-xs text-neutral-300">
-                <input type="checkbox" checked={encryptWhenAttach} onChange={(e)=>setEncryptWhenAttach(e.target.checked)} />
-                Hide/encrypt token until I reveal (uses your local key)
-              </label>
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 text-xs text-neutral-300">
+                  <input
+                    type="checkbox"
+                    checked={encryptWhenAttach && !lockToRecipient}
+                    onChange={(e)=> setEncryptWhenAttach(e.target.checked)}
+                    disabled={lockToRecipient}
+                  />
+                  Hide/encrypt token until I reveal (uses your local key)
+                </label>
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-2 text-xs text-neutral-300">
+                    <input
+                      type="checkbox"
+                      checked={lockToRecipient}
+                      onChange={(e)=>{ setLockToRecipient(e.target.checked); if (e.target.checked) setEncryptWhenAttach(false); }}
+                    />
+                    Lock to recipient (Nostr npub/hex)
+                  </label>
+                  {task.createdBy && (
+                    <button
+                      className="px-2 py-1 rounded-lg bg-neutral-800 text-xs"
+                      onClick={()=>{ setRecipientInput(task.createdBy!); setLockToRecipient(true); setEncryptWhenAttach(false);} }
+                      title="Use task owner"
+                    >Use owner</button>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  placeholder="npub1... or 64-hex pubkey"
+                  value={recipientInput}
+                  onChange={(e)=> setRecipientInput(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-xs"
+                  disabled={!lockToRecipient}
+                />
+              </div>
             </div>
           ) : (
             <div className="mt-2 space-y-2">
@@ -2321,7 +2495,9 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
               <div className="text-xs text-neutral-400">Token</div>
               {task.bounty.enc && !task.bounty.token ? (
                 <div className="rounded-lg border border-neutral-800 p-2 text-xs text-neutral-300 bg-neutral-900/60">
-                  Hidden (encrypted by funder). Only the funder can reveal.
+                  {((task.bounty.enc as any).alg === 'aes-gcm-256')
+                    ? 'Hidden (encrypted by funder). Only the funder can reveal.'
+                    : 'Locked to recipient\'s Nostr key (nip04). Only the recipient can decrypt.'}
                 </div>
               ) : (
                 <textarea readOnly value={task.bounty.token || ""}
@@ -2334,7 +2510,10 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                       className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
                       onClick={async () => {
                         try {
-                          await receiveToken(task.bounty!.token!);
+                          const res = await receiveToken(task.bounty!.token!);
+                          if (res.crossMint) {
+                            alert(`Redeemed to a different mint: ${res.usedMintUrl}. Switch to that mint to view the balance.`);
+                          }
                           setBountyState('claimed');
                           save({ bounty: { ...task.bounty!, token: '', state: 'claimed', updatedAt: new Date().toISOString() } });
                         } catch (e) {
@@ -2353,13 +2532,15 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                     </button>
                   )
                 )}
-                {task.bounty.enc && !task.bounty.token && (window as any).nostrPK && task.bounty.sender === (window as any).nostrPK && (
+                {task.bounty.enc && !task.bounty.token && (window as any).nostrPK && (
+                  ((task.bounty.enc as any).alg === 'aes-gcm-256' && task.bounty.sender === (window as any).nostrPK) ||
+                  ((task.bounty.enc as any).alg === 'nip04' && task.bounty.receiver === (window as any).nostrPK)
+                ) && (
                   <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
                           onClick={async () => {
                             try {
-                                const pt = await decryptEcashTokenForFunder(task.bounty!.enc!);
-                                save({ bounty: { ...task.bounty!, token: pt, enc: undefined, state: 'unlocked', updatedAt: new Date().toISOString() } });
-                            } catch (e) { alert("Decrypt failed: " + (e as Error).message); }
+                              await revealBounty(task.id);
+                            } catch {}
                           }}>Reveal (decrypt)</button>
                 )}
                 <button
@@ -2407,6 +2588,40 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Creator info */}
+        <div className="pt-2">
+          {(() => {
+            const hex = task.createdBy || "";
+            let display = hex;
+            try {
+              if (/^[0-9a-fA-F]{64}$/.test(hex)) {
+                display = nip19.npubEncode(hex);
+              }
+            } catch {}
+            const short = display
+              ? display.length > 16
+                ? display.slice(0, 10) + "…" + display.slice(-6)
+                : display
+              : "(not set)";
+            const canCopy = !!hex;
+            return (
+              <div className="flex items-center justify-between text-[11px] text-neutral-400">
+                <div>
+                  Created by: <span className="font-mono text-neutral-300">{short}</span>
+                </div>
+                <button
+                  className={`px-2 py-1 rounded-lg bg-neutral-800 ${canCopy ? '' : 'opacity-50 cursor-not-allowed'} text-xs`}
+                  title={canCopy ? 'Copy creator key' : 'No key to copy'}
+                  onClick={() => { if (canCopy) { try { navigator.clipboard?.writeText(display); } catch {} } }}
+                  disabled={!canCopy}
+                >
+                  Copy
+                </button>
+              </div>
+            );
+          })()}
         </div>
 
         <div className="pt-2 flex justify-between">
@@ -2667,16 +2882,7 @@ function SettingsModal({
   const [customSk, setCustomSk] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [reloadNeeded, setReloadNeeded] = useState(false);
-  const { mintUrl, setMintUrl } = useCashu();
-  const [mintInput, setMintInput] = useState(mintUrl);
-
-  async function handleMintSave() {
-    try {
-      await setMintUrl(mintInput.trim());
-    } catch (e: any) {
-      alert(e?.message || String(e));
-    }
-  }
+  // Mint selector moved to Wallet modal; no need to read here.
 
   function backupData() {
     const data = {
@@ -3020,20 +3226,7 @@ function SettingsModal({
           )}
         </section>
 
-        {/* Cashu mint */}
-        <section>
-          <div className="text-sm font-medium mb-2">Cashu mint</div>
-          <div className="flex gap-2">
-            <input
-              className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              value={mintInput}
-              onChange={(e)=>setMintInput(e.target.value)}
-              placeholder="https://mint.minibits.cash/Bitcoin"
-            />
-            <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={handleMintSave}>Save</button>
-          </div>
-          <div className="text-xs text-neutral-400 mt-2">Current: {mintUrl}</div>
-        </section>
+        {/* Cashu mint: moved into Wallet → Mint balances */}
 
         {/* Backup & Restore */}
         <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">

@@ -1142,7 +1142,6 @@ export default function App() {
     const updated: Task = { ...t, completed: false, completedAt: undefined };
     setTasks((prev) => prev.map((x) => (x.id === id ? updated : x)));
     maybePublishTask(updated).catch(() => {});
-    setView("board");
   }
   function clearCompleted() {
     for (const t of tasksForBoard)

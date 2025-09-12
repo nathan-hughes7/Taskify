@@ -791,7 +791,8 @@ export default function App() {
     const d = tagValue(ev, "d");
     if (!d) return;
     const last = nostrIdxRef.current.boardMeta.get(d) || 0;
-    if (ev.created_at <= last) return;
+    if (ev.created_at < last) return;
+    // Accept events with the same timestamp to avoid missing updates
     nostrIdxRef.current.boardMeta.set(d, ev.created_at);
     const board = boardsRef.current.find((b) => b.nostr?.boardId && boardTag(b.nostr.boardId) === d);
     if (!board || !board.nostr) return;
@@ -823,7 +824,8 @@ export default function App() {
     if (!nostrIdxRef.current.taskClock.has(bTag)) nostrIdxRef.current.taskClock.set(bTag, new Map());
     const m = nostrIdxRef.current.taskClock.get(bTag)!;
     const last = m.get(taskId) || 0;
-    if (ev.created_at <= last) return;
+    if (ev.created_at < last) return;
+    // Accept equal timestamps so rapid consecutive updates still apply
     m.set(taskId, ev.created_at);
 
     const lb = boardsRef.current.find((b) => b.nostr?.boardId && boardTag(b.nostr.boardId) === bTag);

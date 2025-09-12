@@ -87,27 +87,13 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     }
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    (async () => {
-      try {
-        const t = (await navigator.clipboard.readText()).trim();
-        if (t.startsWith("cashu")) {
-          setReceiveMode("ecash");
-        } else if (/^ln\w+/i.test(t) || /^[^@\s]+@[^@\s]+$/.test(t)) {
-          setSendMode("lightning");
-        }
-      } catch {
-        /* ignore */
-      }
-    })();
-  }, [open]);
+  // Removed auto clipboard detection to avoid unwanted paste popup.
+  // Users can explicitly paste via dedicated buttons in each view.
 
   useEffect(() => {
     if (!open || receiveMode !== "ecash") return;
     const timer = setTimeout(() => {
       recvRef.current?.focus();
-      navigator.clipboard.readText().catch(() => {});
     }, 100);
     return () => clearTimeout(timer);
   }, [open, receiveMode]);
@@ -116,7 +102,6 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     if (!open || sendMode !== "lightning") return;
     const timer = setTimeout(() => {
       lnRef.current?.focus();
-      navigator.clipboard.readText().catch(() => {});
     }, 100);
     return () => clearTimeout(timer);
   }, [open, sendMode]);
@@ -260,6 +245,17 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       <ActionSheet open={receiveMode === "ecash"} onClose={()=>{setReceiveMode(null); setShowReceiveOptions(false); setRecvTokenStr(""); setRecvMsg("");}} title="Receive eCash">
         <textarea ref={recvRef} className="w-full h-24 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Paste Cashu token (cashuA...)" value={recvTokenStr} onChange={(e)=>setRecvTokenStr(e.target.value)} />
         <div className="mt-2 flex gap-2 items-center">
+          <button
+            className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700"
+            onClick={async ()=>{
+              try {
+                const t = (await navigator.clipboard.readText())?.trim();
+                if (t) setRecvTokenStr(t);
+              } catch (e) {
+                alert('Unable to read clipboard. Please paste manually.');
+              }
+            }}
+          >Paste</button>
           <button className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700" onClick={handleReceive} disabled={!mintUrl || !recvTokenStr}>Redeem</button>
           {recvMsg && <div className="text-xs">{recvMsg}</div>}
         </div>
@@ -313,6 +309,17 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
           <input className="mt-2 w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Amount (sats)" value={lnAddrAmt} onChange={(e)=>setLnAddrAmt(e.target.value)} />
         )}
         <div className="mt-2 flex gap-2">
+          <button
+            className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700"
+            onClick={async ()=>{
+              try {
+                const t = (await navigator.clipboard.readText())?.trim();
+                if (t) setLnInput(t);
+              } catch (e) {
+                alert('Unable to read clipboard. Please paste manually.');
+              }
+            }}
+          >Paste</button>
           <button className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700" onClick={handlePayInvoice} disabled={!mintUrl || !lnInput || (isLnAddress && !lnAddrAmt)}>Pay</button>
           {lnState === "sending" && <div className="text-xs">Paying…</div>}
           {lnState === "done" && <div className="text-xs text-emerald-400">Paid</div>}

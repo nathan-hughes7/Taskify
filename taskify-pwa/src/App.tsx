@@ -649,8 +649,6 @@ export default function App() {
   const completedTabRef = useRef<HTMLButtonElement>(null);
   // board selector target for coin animation
   const boardSelectorRef = useRef<HTMLSelectElement>(null);
-  // wallet button target for coin animation
-  const walletButtonRef = useRef<HTMLButtonElement>(null);
   function burst() {
     const el = confettiRef.current;
     if (!el) return;
@@ -716,7 +714,7 @@ export default function App() {
 
   function flyCoinsToWallet(from: DOMRect) {
     const layer = flyLayerRef.current;
-    const targetEl = walletButtonRef.current;
+    const targetEl = boardSelectorRef.current;
     if (!layer || !targetEl) return;
     const target = targetEl.getBoundingClientRect();
 
@@ -1455,8 +1453,6 @@ export default function App() {
           <h1 className="text-2xl font-semibold tracking-tight">Taskify</h1>
           <div ref={confettiRef} className="relative h-0 w-full" />
           <div className="ml-auto flex items-center gap-2">
-            {/* Quick Wallet button */}
-            <IconButton label="Wallet" onClick={() => setShowWallet(true)} buttonRef={walletButtonRef}>💰</IconButton>
             {/* Board switcher */}
             <select
               ref={boardSelectorRef}

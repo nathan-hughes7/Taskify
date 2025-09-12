@@ -33,6 +33,7 @@ type Task = {
   dueISO: string;                 // for week board day grouping
   completed?: boolean;
   completedAt?: string;
+  updatedAt?: string;             // last local mutation timestamp (ISO)
   recurrence?: Recurrence;
   // Week board columns:
   column?: "day" | "bounties";
@@ -558,7 +559,9 @@ export default function App() {
     const ev = finalizeEvent({ ...template, created_at: createdAt }, nostrSK);
     pool.publishEvent(relays, ev as unknown as NostrEvent);
   }
-  type TaskClockEntry = { ts: number; id: string };
+  // Track latest known update per task using an application-level clock (updatedAt),
+  // and fall back to event time/id otherwise.
+  type TaskClockEntry = { lastUpdatedMs: number; evTs: number; evId: string };
   type NostrIndex = {
     boardMeta: Map<string, number>; // nostrBoardId -> created_at
     taskClock: Map<string, Map<string, TaskClockEntry>>; // nostrBoardId -> (taskId -> last event meta)
@@ -738,7 +741,7 @@ export default function App() {
     const bTag = boardTag(boardId);
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
     const tags: string[][] = [["d", t.id],["b", bTag],["col", String(colTag)],["status","deleted"]];
-    const raw = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, streak: t.streak, subtasks: t.subtasks });
+    const raw = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, updatedAt: new Date().toISOString(), recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, streak: t.streak, subtasks: t.subtasks });
     const content = await encryptToBoard(boardId, raw);
     nostrPublish(relays, { kind: 30301, tags, content, created_at: Math.floor(Date.now()/1000) });
   }
@@ -752,7 +755,7 @@ export default function App() {
     const status = t.completed ? "done" : "open";
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
     const tags: string[][] = [["d", t.id],["b", bTag],["col", String(colTag)],["status", status]];
-    const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, order: t.order, streak: t.streak };
+    const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, updatedAt: t.updatedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, order: t.order, streak: t.streak };
     // Include explicit nulls to signal removals when undefined
     body.images = (typeof t.images === 'undefined') ? null : t.images;
     body.bounty = (typeof t.bounty === 'undefined') ? null : t.bounty;
@@ -815,10 +818,6 @@ export default function App() {
     if (!nostrIdxRef.current.taskClock.has(bTag)) nostrIdxRef.current.taskClock.set(bTag, new Map());
     const m = nostrIdxRef.current.taskClock.get(bTag)!;
     const lastEntry = m.get(taskId);
-    const lastTs = lastEntry?.ts || 0;
-    const lastId = lastEntry?.id || "";
-    if (ev.created_at < lastTs || (ev.created_at === lastTs && ev.id <= lastId)) return;
-    m.set(taskId, { ts: ev.created_at, id: ev.id });
 
     const lb = boardsRef.current.find((b) => b.nostr?.boardId && boardTag(b.nostr.boardId) === bTag);
     if (!lb || !lb.nostr) return;
@@ -831,6 +830,21 @@ export default function App() {
       try { payload = ev.content ? JSON.parse(ev.content) : {}; } catch {}
     }
     const status = tagValue(ev, "status");
+    // Application-level clock: prefer payload.updatedAt if present
+    const incomingUpdatedMs = (() => {
+      try { return Date.parse(payload.updatedAt || ""); } catch { return 0; }
+    })() || 0;
+    const lastUpdatedMs = lastEntry?.lastUpdatedMs || 0;
+    const shouldApply =
+      incomingUpdatedMs > lastUpdatedMs ||
+      (
+        incomingUpdatedMs === lastUpdatedMs && (
+          ev.created_at > (lastEntry?.evTs || 0) ||
+          (ev.created_at === (lastEntry?.evTs || 0) && ev.id > (lastEntry?.evId || ""))
+        )
+      );
+    if (!shouldApply) return;
+    m.set(taskId, { lastUpdatedMs: incomingUpdatedMs, evTs: ev.created_at, evId: ev.id });
     const col = tagValue(ev, "col");
     const base: Task = {
       id: taskId,
@@ -841,6 +855,7 @@ export default function App() {
       dueISO: payload.dueISO || isoForWeekday(0),
       completed: status === "done",
       completedAt: payload.completedAt,
+      updatedAt: payload.updatedAt,
       recurrence: payload.recurrence,
       hiddenUntilISO: payload.hiddenUntilISO,
       order: typeof payload.order === 'number' ? payload.order : undefined,
@@ -973,6 +988,7 @@ export default function App() {
       title,
       dueISO,
       completed: false,
+      updatedAt: new Date().toISOString(),
       recurrence,
       order: nextOrder,
       streak: recurrence && (recurrence.type === "daily" || recurrence.type === "weekly") ? 0 : undefined,
@@ -1001,6 +1017,7 @@ export default function App() {
 
   async function completeTask(id: string) {
     const publish: Task[] = [];
+    const nowISO = new Date().toISOString();
     setTasks(prev => {
       const cur = prev.find(t => t.id === id);
       if (!cur) return prev;
@@ -1018,7 +1035,7 @@ export default function App() {
         // regardless of the current timestamp.
         newStreak = newStreak + 1;
       }
-      const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now, streak:newStreak}) : t);
+      const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now, updatedAt: now, streak:newStreak}) : t);
       const doneOne = updated.find(x => x.id === id);
       if (doneOne) publish.push(doneOne);
       const nextISO = cur.recurrence ? nextOccurrence(cur.dueISO, cur.recurrence) : null;
@@ -1029,6 +1046,7 @@ export default function App() {
           id: crypto.randomUUID(),
           completed: false,
           completedAt: undefined,
+          updatedAt: now,
           dueISO: nextISO,
           hiddenUntilISO: hiddenUntilForNext(nextISO, cur.recurrence, settings.weekStart),
           order: nextOrder,
@@ -1054,7 +1072,7 @@ export default function App() {
         const subs = (t.subtasks || []).map((s) =>
           s.id === subId ? { ...s, completed: !s.completed } : s
         );
-        const updated: Task = { ...t, subtasks: subs };
+        const updated: Task = { ...t, subtasks: subs, updatedAt: new Date().toISOString() };
         publish = updated;
         return updated;
       })
@@ -1084,7 +1102,7 @@ export default function App() {
   async function restoreTask(id: string) {
     const t = tasks.find((x) => x.id === id);
     if (!t) return;
-    const updated: Task = { ...t, completed: false, completedAt: undefined };
+    const updated: Task = { ...t, completed: false, completedAt: undefined, updatedAt: new Date().toISOString() };
     setTasks((prev) => prev.map((x) => (x.id === id ? updated : x)));
     try { await maybePublishTask(updated); } catch {}
     setView("board");
@@ -1106,6 +1124,7 @@ export default function App() {
       const updated: Task = {
         ...t,
         bounty: { ...t.bounty, token: pt, enc: undefined, state: 'unlocked', updatedAt: new Date().toISOString() },
+        updatedAt: new Date().toISOString(),
       };
       setTasks(prev => prev.map(x => x.id === id ? updated : x));
       maybePublishTask(updated).catch(() => {});
@@ -1123,6 +1142,7 @@ export default function App() {
     const updated: Task = {
       ...t,
       bounty: { ...t.bounty, token: '', state: 'claimed', updatedAt: new Date().toISOString() },
+      updatedAt: new Date().toISOString(),
     };
     setTasks(prev => prev.map(x => x.id === id ? updated : x));
     maybePublishTask(updated).catch(() => {});
@@ -1132,7 +1152,7 @@ export default function App() {
     setTasks(prev =>
       prev.map(t => {
         if (t.id !== updated.id) return t;
-        let next = updated;
+        let next = { ...updated, updatedAt: new Date().toISOString() } as Task;
         if (
           settings.streaksEnabled &&
           t.recurrence &&
@@ -1142,7 +1162,7 @@ export default function App() {
           const prevDue = startOfDay(new Date(t.dueISO));
           const newDue = startOfDay(new Date(updated.dueISO));
           if (newDue.getTime() > prevDue.getTime()) {
-            next = { ...updated, streak: 0 };
+            next = { ...next, streak: 0 };
           }
         }
         maybePublishTask(next).catch(() => {});
@@ -1195,6 +1215,7 @@ export default function App() {
       }
       // reveal if user manually places it
       updated.hiddenUntilISO = undefined;
+      updated.updatedAt = nowISO;
 
       // un-complete only if it doesn't have a pending bounty
       if (updated.completed && (!updated.bounty || updated.bounty.state === "claimed")) {
@@ -1228,7 +1249,7 @@ export default function App() {
             if (t === updated) {
               updated.order = order;
             } else {
-              arr[i] = { ...t, order };
+              arr[i] = { ...t, order, updatedAt: nowISO };
             }
             publish.push(arr[i]);
             order++;

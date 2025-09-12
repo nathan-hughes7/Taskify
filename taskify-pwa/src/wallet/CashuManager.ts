@@ -65,13 +65,15 @@ export class CashuManager {
     return newProofs;
   }
 
-  async createSendToken(amount: number) {
+  async createSendToken(amount: number, pubkey?: string) {
     const all = this.proofs;
     const bal = all.reduce((a, p) => a + (p?.amount || 0), 0);
     if (bal < amount) {
       throw new Error("Insufficient balance");
     }
-    const { keep, send } = await this.wallet.send(amount, all, { proofsWeHave: all });
+    const opts: any = { proofsWeHave: all };
+    if (pubkey) opts.pubkey = pubkey;
+    const { keep, send } = await this.wallet.send(amount, all, opts);
     this.setProofs(keep);
     const token = getEncodedToken({ mint: this.mintUrl, proofs: send, unit: this.unit });
     return { token, send, keep };

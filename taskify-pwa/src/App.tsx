@@ -583,6 +583,7 @@ export default function App() {
   const [showWallet, setShowWallet] = useState(false);
   const { receiveToken } = useCashu();
   const walletRef = useRef<HTMLSelectElement>(null);
+  const completedTabRef = useRef<HTMLButtonElement>(null);
 
   // add bar
   const newTitleRef = useRef<HTMLInputElement>(null);
@@ -675,6 +676,32 @@ export default function App() {
       }, 700);
     };
     [0, 200, 400].forEach(d => setTimeout(launch, d));
+  }
+
+  function flyCheckmark(fromEl: HTMLElement) {
+    const tabEl = completedTabRef.current;
+    if (!tabEl) return;
+    const start = fromEl.getBoundingClientRect();
+    const end = tabEl.getBoundingClientRect();
+    const mark = document.createElement("div");
+    mark.innerHTML =
+      '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#10b981" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>';
+    mark.style.position = "fixed";
+    mark.style.left = start.left + start.width / 2 - 12 + "px";
+    mark.style.top = start.top + start.height / 2 - 12 + "px";
+    mark.style.transition = "transform 0.6s ease-in, opacity 0.6s ease-in";
+    mark.style.pointerEvents = "none";
+    mark.style.zIndex = "1000";
+    document.body.appendChild(mark);
+    requestAnimationFrame(() => {
+      const dx = end.left + end.width / 2 - (start.left + start.width / 2);
+      const dy = end.top + end.height / 2 - (start.top + start.height / 2);
+      mark.style.transform = `translate(${dx}px, ${dy}px) scale(0.5)`;
+      mark.style.opacity = "0";
+    });
+    setTimeout(() => {
+      mark.remove();
+    }, 700);
   }
 
   /* ---------- Derived: board-scoped lists ---------- */
@@ -1179,7 +1206,7 @@ export default function App() {
     } catch {}
     const updated: Task = {
       ...t,
-      bounty: { ...t.bounty, token: '', state: 'claimed', updatedAt: new Date().toISOString() },
+      bounty: { ...t.bounty, state: 'claimed', updatedAt: new Date().toISOString() },
     };
     setTasks(prev => prev.map(x => x.id === id ? updated : x));
     maybePublishTask(updated).catch(() => {});
@@ -1387,7 +1414,11 @@ export default function App() {
             </button>
             <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
               <button className={`px-3 py-2 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
-              <button className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
+              <button
+                ref={completedTabRef}
+                className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800":""}`}
+                onClick={()=>setView("completed")}
+              >Completed</button>
             </div>
           </div>
         </header>
@@ -1498,10 +1529,16 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onComplete={(el) => {
-                            if (!t.completed) completeTask(t.id);
-                            else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, el);
-                            else restoreTask(t.id);
+                            if (!t.completed) {
+                              completeTask(t.id);
+                              flyCheckmark(el);
+                            } else if (t.bounty && t.bounty.state === 'locked') {
+                              revealBounty(t.id);
+                            } else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) {
+                              claimBounty(t.id, el);
+                            } else {
+                              restoreTask(t.id);
+                            }
                           }}
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "day", day }, t.id)}
@@ -1522,10 +1559,16 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onComplete={(el) => {
-                            if (!t.completed) completeTask(t.id);
-                            else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, el);
-                            else restoreTask(t.id);
+                            if (!t.completed) {
+                              completeTask(t.id);
+                              flyCheckmark(el);
+                            } else if (t.bounty && t.bounty.state === 'locked') {
+                              revealBounty(t.id);
+                            } else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) {
+                              claimBounty(t.id, el);
+                            } else {
+                              restoreTask(t.id);
+                            }
                           }}
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
@@ -1556,10 +1599,16 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onComplete={(el) => {
-                            if (!t.completed) completeTask(t.id);
-                            else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, el);
-                            else restoreTask(t.id);
+                            if (!t.completed) {
+                              completeTask(t.id);
+                              flyCheckmark(el);
+                            } else if (t.bounty && t.bounty.state === 'locked') {
+                              revealBounty(t.id);
+                            } else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) {
+                              claimBounty(t.id, el);
+                            } else {
+                              restoreTask(t.id);
+                            }
                           }}
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
@@ -2038,7 +2087,15 @@ function Card({
           >
             <svg width="22" height="22" viewBox="0 0 24 24" className="pointer-events-none">
               <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
-              <path d="M8 12l2.5 2.5L16 9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path
+                d="M8 12l2.5 2.5L16 9"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="checkmark-path"
+              />
             </svg>
           </button>
         ) : (
@@ -2143,6 +2200,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
   const [bountyAmount, setBountyAmount] = useState<number | "">(task.bounty?.amount ?? "");
   const [, setBountyState] = useState<Task["bounty"]["state"]>(task.bounty?.state || "locked");
   const [encryptWhenAttach, setEncryptWhenAttach] = useState(true);
+  const [lockRecipient, setLockRecipient] = useState("");
   const { createSendToken, receiveToken, mintUrl } = useCashu();
 
   async function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
@@ -2315,14 +2373,31 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                         onClick={async () => {
                           if (typeof bountyAmount !== 'number' || bountyAmount <= 0) return;
                           try {
-                            const { token: tok } = await createSendToken(bountyAmount);
+                            let recipientHex = "";
+                            const lr = lockRecipient.trim();
+                            if (lr) {
+                              try {
+                                if (lr.toLowerCase().startsWith("npub")) {
+                                  const dec = nip19.decode(lr);
+                                  recipientHex = typeof dec.data === 'string' ? dec.data : '';
+                                } else if (/^[0-9a-fA-F]{64}$/.test(lr)) {
+                                  recipientHex = lr.toLowerCase();
+                                } else {
+                                  throw new Error('invalid');
+                                }
+                              } catch {
+                                alert('Invalid recipient pubkey');
+                                return;
+                              }
+                            }
+                            const { token: tok } = await createSendToken(bountyAmount, recipientHex || undefined);
                             const b: Task["bounty"] = {
                               id: crypto.randomUUID(),
                               token: tok,
                               amount: bountyAmount,
                               mint: mintUrl,
                               state: "locked",
-                              owner: task.createdBy || (window as any).nostrPK || "",
+                              owner: recipientHex || task.createdBy || (window as any).nostrPK || "",
                               sender: (window as any).nostrPK || "",
                               updatedAt: new Date().toISOString(),
                               lock: tok.includes("pubkey") ? "p2pk" : tok.includes("hash") ? "htlc" : "unknown",
@@ -2348,6 +2423,25 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                 <input type="checkbox" checked={encryptWhenAttach} onChange={(e)=>setEncryptWhenAttach(e.target.checked)} />
                 Hide/encrypt token until I reveal (uses your local key)
               </label>
+              <div className="space-y-1 text-xs text-neutral-300">
+                <div className="flex items-center gap-2">
+                  <span className="flex-1">Lock to recipient (Nostr npub/hex)</span>
+                  <button
+                    type="button"
+                    className="px-2 py-1 rounded bg-neutral-800"
+                    onClick={() => setLockRecipient(task.createdBy ? nip19.npubEncode(task.createdBy) : "")}
+                  >
+                    Use owner
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={lockRecipient}
+                  onChange={(e) => setLockRecipient(e.target.value)}
+                  placeholder="npub1... or 64-hex pubkey"
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                />
+              </div>
             </div>
           ) : (
             <div className="mt-2 space-y-2">
@@ -2373,7 +2467,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                         try {
                           await receiveToken(task.bounty!.token!);
                           setBountyState('claimed');
-                          save({ bounty: { ...task.bounty!, token: '', state: 'claimed', updatedAt: new Date().toISOString() } });
+                          save({ bounty: { ...task.bounty!, state: 'claimed', updatedAt: new Date().toISOString() } });
                         } catch (e) {
                           alert('Redeem failed: ' + (e as Error).message);
                         }
@@ -2445,6 +2539,20 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
             </div>
           )}
         </div>
+
+        {task.createdBy && (
+          <div className="mt-2 text-xs text-neutral-400 flex items-center gap-2">
+            <span>Created by:</span>
+            <code className="truncate">{nip19.npubEncode(task.createdBy)}</code>
+            <button
+              type="button"
+              className="px-2 py-1 rounded bg-neutral-800"
+              onClick={() => navigator.clipboard?.writeText(nip19.npubEncode(task.createdBy))}
+            >
+              Copy
+            </button>
+          </div>
+        )}
 
         <div className="pt-2 flex justify-between">
           <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>

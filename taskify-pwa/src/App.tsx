@@ -1182,14 +1182,19 @@ export default function App() {
     const t = tasks.find(x => x.id === id);
     if (!t || !t.bounty || t.bounty.state !== 'unlocked' || !t.bounty.token) return;
     try {
-      await receiveToken(t.bounty.token);
-    } catch {}
-    const updated: Task = {
-      ...t,
-      bounty: { ...t.bounty, token: '', state: 'claimed', updatedAt: new Date().toISOString() },
-    };
-    setTasks(prev => prev.map(x => x.id === id ? updated : x));
-    maybePublishTask(updated).catch(() => {});
+      const res = await receiveToken(t.bounty.token);
+      if (res.crossMint) {
+        alert(`Redeemed to a different mint: ${res.usedMintUrl}. Switch to that mint to view the balance.`);
+      }
+      const updated: Task = {
+        ...t,
+        bounty: { ...t.bounty, token: '', state: 'claimed', updatedAt: new Date().toISOString() },
+      };
+      setTasks(prev => prev.map(x => x.id === id ? updated : x));
+      maybePublishTask(updated).catch(() => {});
+    } catch (e) {
+      alert('Redeem failed: ' + (e as Error).message);
+    }
   }
 
   function saveEdit(updated: Task) {
@@ -2458,7 +2463,10 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                       className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
                       onClick={async () => {
                         try {
-                          await receiveToken(task.bounty!.token!);
+                          const res = await receiveToken(task.bounty!.token!);
+                          if (res.crossMint) {
+                            alert(`Redeemed to a different mint: ${res.usedMintUrl}. Switch to that mint to view the balance.`);
+                          }
                           setBountyState('claimed');
                           save({ bounty: { ...task.bounty!, token: '', state: 'claimed', updatedAt: new Date().toISOString() } });
                         } catch (e) {
@@ -2827,16 +2835,7 @@ function SettingsModal({
   const [customSk, setCustomSk] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [reloadNeeded, setReloadNeeded] = useState(false);
-  const { mintUrl, setMintUrl } = useCashu();
-  const [mintInput, setMintInput] = useState(mintUrl);
-
-  async function handleMintSave() {
-    try {
-      await setMintUrl(mintInput.trim());
-    } catch (e: any) {
-      alert(e?.message || String(e));
-    }
-  }
+  // Mint selector moved to Wallet modal; no need to read here.
 
   function backupData() {
     const data = {
@@ -3180,20 +3179,7 @@ function SettingsModal({
           )}
         </section>
 
-        {/* Cashu mint */}
-        <section>
-          <div className="text-sm font-medium mb-2">Cashu mint</div>
-          <div className="flex gap-2">
-            <input
-              className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              value={mintInput}
-              onChange={(e)=>setMintInput(e.target.value)}
-              placeholder="https://mint.minibits.cash/Bitcoin"
-            />
-            <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={handleMintSave}>Save</button>
-          </div>
-          <div className="text-xs text-neutral-400 mt-2">Current: {mintUrl}</div>
-        </section>
+        {/* Cashu mint: moved into Wallet → Mint balances */}
 
         {/* Backup & Restore */}
         <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">

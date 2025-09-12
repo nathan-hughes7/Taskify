@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useCashu } from "../context/CashuContext";
+import { loadStore } from "../wallet/storage";
 import { ActionSheet } from "./ActionSheet";
 
 export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { mintUrl, balance, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice } = useCashu();
+  const { mintUrl, setMintUrl, balance, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice } = useCashu();
 
   interface HistoryItem {
     id: string;
@@ -44,6 +45,27 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
   const recvRef = useRef<HTMLTextAreaElement | null>(null);
   const lnRef = useRef<HTMLTextAreaElement | null>(null);
   const isLnAddress = useMemo(() => /^[^@\s]+@[^@\s]+$/.test(lnInput), [lnInput]);
+
+  // Mint balances sheet
+  const [showMintBalances, setShowMintBalances] = useState(false);
+  const [mintInputSheet, setMintInputSheet] = useState("");
+  const [mintEntries, setMintEntries] = useState<{ url: string; balance: number; count: number }[]>([]);
+
+  function refreshMintEntries() {
+    try {
+      const store = loadStore();
+      const entries = Object.entries(store).map(([url, proofs]) => ({
+        url,
+        balance: (Array.isArray(proofs) ? proofs : []).reduce((a: number, p: any) => a + (p?.amount || 0), 0),
+        count: (Array.isArray(proofs) ? proofs : []).length,
+      }))
+      .filter(e => e.count > 0)
+      .sort((a, b) => b.balance - a.balance || a.url.localeCompare(b.url));
+      setMintEntries(entries);
+    } catch {
+      setMintEntries([]);
+    }
+  }
 
   useEffect(() => {
     localStorage.setItem("cashuHistory", JSON.stringify(history));
@@ -98,6 +120,12 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     }, 100);
     return () => clearTimeout(timer);
   }, [open, sendMode]);
+
+  useEffect(() => {
+    if (!showMintBalances) return;
+    setMintInputSheet(mintUrl || "");
+    refreshMintEntries();
+  }, [showMintBalances, mintUrl]);
 
   const headerInfo = useMemo(() => {
     if (!mintUrl) return "No mint set";
@@ -160,11 +188,12 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     try {
       const t = recvTokenStr.trim();
       if (!t) throw new Error("Paste a Cashu token");
-      const recvd = await receiveToken(t);
-      const amt = recvd.reduce((a,p)=>a+(p?.amount||0),0);
-      setRecvMsg(`Received ${amt} sats`);
+      const res = await receiveToken(t);
+      const amt = res.proofs.reduce((a,p)=>a+(p?.amount||0),0);
+      const crossNote = res.crossMint ? ` • Stored at ${res.usedMintUrl}` : '';
+      setRecvMsg(`Received ${amt} sats${crossNote}`);
       setRecvTokenStr("");
-      setHistory((h) => [{ id: `recv-${Date.now()}`, summary: `Received ${amt} sats` }, ...h]);
+      setHistory((h) => [{ id: `recv-${Date.now()}`, summary: `Received ${amt} sats${res.crossMint ? ` at ${res.usedMintUrl}` : ''}` }, ...h]);
     } catch (e: any) {
       setRecvMsg(e?.message || String(e));
     }
@@ -207,6 +236,9 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         <button className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" onClick={onClose}>Close</button>
         <div className="text-sm font-medium">{info?.unit?.toUpperCase() || "SAT"}</div>
         <button className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" onClick={()=>setShowHistory(true)}>History</button>
+      </div>
+      <div className="px-4 -mt-2 mb-2 flex justify-end">
+        <button className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" onClick={()=>setShowMintBalances(true)}>Mint balances</button>
       </div>
       <div className="flex-1 flex flex-col items-center justify-center">
         <div className="text-5xl font-semibold mb-1">{balance} sat</div>
@@ -307,7 +339,54 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
           <div className="text-sm">No history yet</div>
         )}
       </ActionSheet>
+
+      {/* Mint balances */}
+      <ActionSheet open={showMintBalances} onClose={()=>setShowMintBalances(false)} title="Mint balances">
+        <div className="space-y-4 text-sm">
+          <div>
+            <div className="text-xs text-neutral-400 mb-1">Active mint</div>
+            <div className="flex gap-2 items-center">
+              <input
+                className="flex-1 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800"
+                value={mintInputSheet}
+                onChange={(e)=>setMintInputSheet(e.target.value)}
+                placeholder="https://mint.minibits.cash/Bitcoin"
+              />
+              <button
+                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                onClick={async ()=>{ try { await setMintUrl(mintInputSheet.trim()); refreshMintEntries(); } catch (e: any) { alert(e?.message || String(e)); } }}
+              >Save</button>
+            </div>
+            <div className="text-xs text-neutral-400 mt-2">Current: {mintUrl}</div>
+          </div>
+
+          <div>
+            <div className="text-xs text-neutral-400 mb-1">Mints with stored ecash</div>
+            {mintEntries.length === 0 ? (
+              <div className="text-neutral-400">No ecash stored yet.</div>
+            ) : (
+              <div className="space-y-2">
+                {mintEntries.map(m => (
+                  <div key={m.url} className="flex items-center gap-2 border border-neutral-800 rounded-xl p-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-neutral-400">{m.url === mintUrl ? 'Active' : 'Mint'}</div>
+                      <div className="truncate" title={m.url} onClick={()=>navigator.clipboard?.writeText(m.url)}>{m.url}</div>
+                    </div>
+                    <div className="text-right mr-2">
+                      <div className="text-xs text-neutral-400">Balance</div>
+                      <div className="font-semibold">{m.balance} sat</div>
+                    </div>
+                    <button className="px-2 py-1 rounded bg-neutral-800 text-xs" onClick={()=>navigator.clipboard?.writeText(m.url)}>Copy</button>
+                    {m.url !== mintUrl && (
+                      <button className="px-2 py-1 rounded bg-emerald-700/70 hover:bg-emerald-600 text-xs" onClick={async ()=>{ try { await setMintUrl(m.url); refreshMintEntries(); } catch (e: any) { alert(e?.message || String(e)); } }}>Set active</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </ActionSheet>
     </div>
   );
 }
-

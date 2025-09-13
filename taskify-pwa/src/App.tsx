@@ -540,7 +540,7 @@ export default function App() {
           showToast();
         }
         return p;
-      } catch (e) {
+      } catch {
         // swallow, behave like original
         try { return original(text); } catch {}
       }
@@ -1630,7 +1630,6 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onFlyToCompleted={(rect) => flyToCompleted(rect)}
-                          onFlyToWallet={(rect) => flyCoinsToWallet(rect)}
                           onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
@@ -1656,7 +1655,6 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onFlyToCompleted={(rect) => flyToCompleted(rect)}
-                          onFlyToWallet={(rect) => flyCoinsToWallet(rect)}
                           onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
@@ -1692,7 +1690,6 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onFlyToCompleted={(rect) => flyToCompleted(rect)}
-                          onFlyToWallet={(rect) => flyCoinsToWallet(rect)}
                           onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
@@ -2122,7 +2119,6 @@ function Card({
   showStreaks,
   onToggleSubtask,
   onFlyToCompleted,
-  onFlyToWallet,
 }: {
   task: Task;
   onComplete: (from?: DOMRect) => void;
@@ -2131,7 +2127,6 @@ function Card({
   showStreaks: boolean;
   onToggleSubtask: (subId: string) => void;
   onFlyToCompleted: (rect: DOMRect) => void;
-  onFlyToWallet: (rect: DOMRect) => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
@@ -2607,6 +2602,16 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                           if (res.crossMint) {
                             alert(`Redeemed to a different mint: ${res.usedMintUrl}. Switch to that mint to view the balance.`);
                           }
+                          try {
+                            const amt = res.proofs.reduce((a, p) => a + (p?.amount || 0), 0);
+                            const raw = localStorage.getItem("cashuHistory");
+                            const existing = raw ? JSON.parse(raw) : [];
+                            const historyItem = {
+                              id: `redeem-bounty-${Date.now()}`,
+                              summary: `Redeemed bounty • ${amt} sats${res.crossMint ? ` at ${res.usedMintUrl}` : ''}`,
+                            };
+                            localStorage.setItem("cashuHistory", JSON.stringify([historyItem, ...existing]));
+                          } catch {}
                           // Coins fly from the button to the selector target
                           try { onRedeemCoins?.(fromRect); } catch {}
                           setBountyState('claimed');
@@ -3361,7 +3366,7 @@ function SettingsModal({
                   let nsec = "";
                   try {
                     // Prefer nip19.nsecEncode when available
-                    // @ts-ignore - guard at runtime below
+                    // @ts-expect-error - guard at runtime below
                     nsec = typeof (nip19 as any)?.nsecEncode === 'function' ? (nip19 as any).nsecEncode(sk) : sk;
                   } catch {
                     nsec = sk;
@@ -3406,7 +3411,7 @@ function SettingsModal({
                         let nsec = "";
                         try {
                           // Prefer nip19.nsecEncode when available
-                          // @ts-ignore - guard at runtime below
+                          // @ts-expect-error - guard at runtime below
                           nsec = typeof (nip19 as any)?.nsecEncode === 'function' ? (nip19 as any).nsecEncode(sk) : sk;
                         } catch {
                           nsec = sk;

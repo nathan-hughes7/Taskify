@@ -4,6 +4,7 @@ import { CashuWalletModal } from "./components/CashuWalletModal";
 import { useCashu } from "./context/CashuContext";
 import { loadStore as loadProofStore, saveStore as saveProofStore, getActiveMint, setActiveMint } from "./wallet/storage";
 import { encryptToBoard, decryptFromBoard, boardTag } from "./boardCrypto";
+import { useToast } from "./context/ToastContext";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sun
@@ -33,6 +34,7 @@ type Task = {
   dueISO: string;                 // for week board day grouping
   completed?: boolean;
   completedAt?: string;
+  completedBy?: string;           // nostr pubkey of user who marked complete
   recurrence?: Recurrence;
   // Week board columns:
   column?: "day" | "bounties";
@@ -120,6 +122,7 @@ const DEFAULT_RELAYS = [
   "wss://relay.damus.io",
   "wss://nos.lol",
   "wss://relay.snort.social",
+  "wss://solife.me/nostrrelay/1",
 ];
 
 function loadDefaultRelays(): string[] {
@@ -522,6 +525,29 @@ function useTasks() {
 
 /* ================= App ================= */
 export default function App() {
+  const { show: showToast } = useToast();
+  // Show toast on any successful clipboard write across the app
+  useEffect(() => {
+    const clip: any = (navigator as any).clipboard;
+    if (!clip || typeof clip.writeText !== 'function') return;
+    const original = clip.writeText.bind(clip);
+    const patched = (text: string) => {
+      try {
+        const p = original(text);
+        if (p && typeof p.then === 'function') {
+          p.then(() => showToast()).catch(() => {});
+        } else {
+          showToast();
+        }
+        return p;
+      } catch (e) {
+        // swallow, behave like original
+        try { return original(text); } catch {}
+      }
+    };
+    try { clip.writeText = patched; } catch {}
+    return () => { try { clip.writeText = original; } catch {} };
+  }, [showToast]);
   const [boards, setBoards] = useBoards();
   const [currentBoardId, setCurrentBoardId] = useState(boards[0]?.id || "");
   const currentBoard = boards.find(b => b.id === currentBoardId);
@@ -646,6 +672,8 @@ export default function App() {
   // fly-to-completed overlay + target
   const flyLayerRef = useRef<HTMLDivElement>(null);
   const completedTabRef = useRef<HTMLButtonElement>(null);
+  // board selector target for coin animation
+  const boardSelectorRef = useRef<HTMLSelectElement>(null);
   function burst() {
     const el = confettiRef.current;
     if (!el) return;
@@ -707,6 +735,55 @@ export default function App() {
         try { layer.removeChild(dot); } catch {}
       }, 750);
     });
+  }
+
+  function flyCoinsToWallet(from: DOMRect) {
+    const layer = flyLayerRef.current;
+    const targetEl = boardSelectorRef.current;
+    if (!layer || !targetEl) return;
+    const target = targetEl.getBoundingClientRect();
+
+    const startX = from.left + from.width / 2;
+    const startY = from.top + from.height / 2;
+    const endX = target.left + target.width / 2;
+    const endY = target.top + target.height / 2;
+
+    const makeCoin = () => {
+      const coin = document.createElement('div');
+      coin.style.position = 'fixed';
+      coin.style.left = `${startX - 10}px`;
+      coin.style.top = `${startY - 10}px`;
+      coin.style.width = '20px';
+      coin.style.height = '20px';
+      coin.style.borderRadius = '9999px';
+      coin.style.display = 'grid';
+      coin.style.placeItems = 'center';
+      coin.style.fontSize = '14px';
+      coin.style.lineHeight = '20px';
+      coin.style.background = 'radial-gradient(circle at 30% 30%, #fde68a, #f59e0b)';
+      coin.style.boxShadow = '0 0 0 1px rgba(245,158,11,0.5), 0 6px 16px rgba(0,0,0,0.35)';
+      coin.style.zIndex = '1000';
+      coin.style.transform = 'translate(0, 0) scale(1)';
+      coin.style.transition = 'transform 700ms cubic-bezier(.2,.7,.3,1), opacity 450ms ease 450ms';
+      coin.textContent = '🪙';
+      return coin;
+    };
+
+    for (let i = 0; i < 3; i++) {
+      const coin = makeCoin();
+      layer.appendChild(coin);
+      const dx = endX - startX;
+      const dy = endY - startY;
+      // slight horizontal variance per coin
+      const wobble = (i - 1) * 8; // -8, 0, +8
+      setTimeout(() => {
+        coin.style.transform = `translate(${dx + wobble}px, ${dy}px) scale(0.6)`;
+        coin.style.opacity = '0.35';
+        setTimeout(() => {
+          try { layer.removeChild(coin); } catch {}
+        }, 800);
+      }, i * 140);
+    }
   }
 
   /* ---------- Derived: board-scoped lists ---------- */
@@ -843,7 +920,7 @@ export default function App() {
     const status = t.completed ? "done" : "open";
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
     const tags: string[][] = [["d", t.id],["b", bTag],["col", String(colTag)],["status", status]];
-    const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, order: t.order, streak: t.streak };
+    const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, completedBy: t.completedBy, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, order: t.order, streak: t.streak };
     // Include explicit nulls to signal removals when undefined
     body.images = (typeof t.images === 'undefined') ? null : t.images;
     body.bounty = (typeof t.bounty === 'undefined') ? null : t.bounty;
@@ -942,6 +1019,7 @@ export default function App() {
       dueISO: payload.dueISO || isoForWeekday(0),
       completed: status === "done",
       completedAt: payload.completedAt,
+      completedBy: payload.completedBy,
       recurrence: payload.recurrence,
       hiddenUntilISO: payload.hiddenUntilISO,
       order: typeof payload.order === 'number' ? payload.order : undefined,
@@ -1117,7 +1195,7 @@ export default function App() {
         // regardless of the current timestamp.
         newStreak = newStreak + 1;
       }
-      const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now, streak:newStreak}) : t);
+      const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now, completedBy: (window as any).nostrPK || undefined, streak:newStreak}) : t);
       const doneOne = updated.find(x => x.id === id);
       if (doneOne) { maybePublishTask(doneOne).catch(() => {}); }
       const nextISO = cur.recurrence ? nextOccurrence(cur.dueISO, cur.recurrence) : null;
@@ -1128,6 +1206,7 @@ export default function App() {
           id: crypto.randomUUID(),
           completed: false,
           completedAt: undefined,
+          completedBy: undefined,
           dueISO: nextISO,
           hiddenUntilISO: hiddenUntilForNext(nextISO, cur.recurrence, settings.weekStart),
           order: nextOrder,
@@ -1176,7 +1255,7 @@ export default function App() {
   function restoreTask(id: string) {
     const t = tasks.find((x) => x.id === id);
     if (!t) return;
-    const updated: Task = { ...t, completed: false, completedAt: undefined };
+    const updated: Task = { ...t, completed: false, completedAt: undefined, completedBy: undefined };
     setTasks((prev) => prev.map((x) => (x.id === id ? updated : x)));
     maybePublishTask(updated).catch(() => {});
   }
@@ -1215,7 +1294,7 @@ export default function App() {
     }
   }
 
-  async function claimBounty(id: string) {
+  async function claimBounty(id: string, from?: DOMRect) {
     const t = tasks.find(x => x.id === id);
     if (!t || !t.bounty || t.bounty.state !== 'unlocked' || !t.bounty.token) return;
     try {
@@ -1223,6 +1302,7 @@ export default function App() {
       if (res.crossMint) {
         alert(`Redeemed to a different mint: ${res.usedMintUrl}. Switch to that mint to view the balance.`);
       }
+      try { if (from) flyCoinsToWallet(from); } catch {}
       const updated: Task = {
         ...t,
         bounty: { ...t.bounty, token: '', state: 'claimed', updatedAt: new Date().toISOString() },
@@ -1305,6 +1385,7 @@ export default function App() {
       if (updated.completed && (!updated.bounty || updated.bounty.state === "claimed")) {
         updated.completed = false;
         updated.completedAt = undefined;
+        updated.completedBy = undefined;
       }
 
       // remove original
@@ -1402,6 +1483,7 @@ export default function App() {
           <div className="ml-auto flex items-center gap-2">
             {/* Board switcher */}
             <select
+              ref={boardSelectorRef}
               value={currentBoardId}
               onChange={handleBoardSelect}
               className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
@@ -1439,8 +1521,8 @@ export default function App() {
           </div>
         </header>
 
-        {/* Animation overlay for fly-to-completed */}
-        <div ref={flyLayerRef} className="pointer-events-none fixed inset-0 z-50" />
+        {/* Animation overlay for fly effects (coins, etc.) */}
+        <div ref={flyLayerRef} className="pointer-events-none fixed inset-0 z-[9999]" />
 
         {/* Add bar */}
         {view === "board" && currentBoard && (
@@ -1548,10 +1630,11 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onFlyToCompleted={(rect) => flyToCompleted(rect)}
-                          onComplete={() => {
+                          onFlyToWallet={(rect) => flyCoinsToWallet(rect)}
+                          onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, from);
                             else restoreTask(t.id);
                           }}
                           onEdit={() => setEditing(t)}
@@ -1573,10 +1656,11 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onFlyToCompleted={(rect) => flyToCompleted(rect)}
-                          onComplete={() => {
+                          onFlyToWallet={(rect) => flyCoinsToWallet(rect)}
+                          onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, from);
                             else restoreTask(t.id);
                           }}
                           onEdit={() => setEditing(t)}
@@ -1608,10 +1692,11 @@ export default function App() {
                           key={t.id}
                           task={t}
                           onFlyToCompleted={(rect) => flyToCompleted(rect)}
-                          onComplete={() => {
+                          onFlyToWallet={(rect) => flyCoinsToWallet(rect)}
+                          onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, from);
                             else restoreTask(t.id);
                           }}
                           onEdit={() => setEditing(t)}
@@ -1783,6 +1868,7 @@ export default function App() {
           onDelete={() => { deleteTask(editing.id); setEditing(null); }}
           onSave={saveEdit}
           weekStart={settings.weekStart}
+          onRedeemCoins={(rect)=>flyCoinsToWallet(rect)}
         />
       )}
 
@@ -2036,14 +2122,16 @@ function Card({
   showStreaks,
   onToggleSubtask,
   onFlyToCompleted,
+  onFlyToWallet,
 }: {
   task: Task;
-  onComplete: () => void;
+  onComplete: (from?: DOMRect) => void;
   onEdit: () => void;
   onDropBefore: (dragId: string) => void;
   showStreaks: boolean;
   onToggleSubtask: (subId: string) => void;
   onFlyToCompleted: (rect: DOMRect) => void;
+  onFlyToWallet: (rect: DOMRect) => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
@@ -2086,7 +2174,10 @@ function Card({
       <div className="flex items-center gap-2">
         {task.completed ? (
           <button
-            onClick={onComplete}
+            onClick={(e) => {
+              const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+              onComplete(rect);
+            }}
             aria-label="Mark incomplete"
             title="Mark incomplete"
             className="flex items-center justify-center w-9 h-9 rounded-full border border-emerald-500 text-emerald-500"
@@ -2099,8 +2190,9 @@ function Card({
         ) : (
           <button
             onClick={(e) => {
-              try { onFlyToCompleted((e.currentTarget as HTMLButtonElement).getBoundingClientRect()); } catch {}
-              onComplete();
+              const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+              try { onFlyToCompleted(rect); } catch {}
+              onComplete(rect);
             }}
             aria-label="Complete task"
             title="Mark complete"
@@ -2165,13 +2257,13 @@ function Card({
 
 /* Small circular icon button */
 function IconButton({
-  children, onClick, label, intent
-}: React.PropsWithChildren<{ onClick: ()=>void; label: string; intent?: "danger"|"success" }>) {
+  children, onClick, label, intent, buttonRef
+}: React.PropsWithChildren<{ onClick: ()=>void; label: string; intent?: "danger"|"success"; buttonRef?: React.Ref<HTMLButtonElement> }>) {
   const base = "w-9 h-9 rounded-full inline-flex items-center justify-center text-sm border border-transparent bg-neutral-700/40 hover:bg-neutral-700/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500";
   const danger = " border-rose-700";
   const success = " bg-emerald-700/30 hover:bg-emerald-700/50";
   const cls = base + (intent==="danger" ? danger : intent==="success" ? success : "");
-  return <button aria-label={label} title={label} className={cls} onClick={onClick}>{children}</button>;
+  return <button ref={buttonRef} aria-label={label} title={label} className={cls} onClick={onClick}>{children}</button>;
 }
 
 /* ---------- Recurrence helpers & UI ---------- */
@@ -2186,8 +2278,8 @@ function labelOf(r: Recurrence): string {
 }
 
 /* Edit modal with Advanced recurrence */
-function EditModal({ task, onCancel, onDelete, onSave, weekStart }: { 
-  task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void; weekStart: Weekday;
+function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins }: { 
+  task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void; weekStart: Weekday; onRedeemCoins?: (from: DOMRect)=>void;
 }) {
   const [title, setTitle] = useState(task.title);
   const [note, setNote] = useState(task.note || "");
@@ -2508,12 +2600,15 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                   task.bounty.state === 'unlocked' ? (
                     <button
                       className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
-                      onClick={async () => {
+                      onClick={async (e) => {
+                        const fromRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                         try {
                           const res = await receiveToken(task.bounty!.token!);
                           if (res.crossMint) {
                             alert(`Redeemed to a different mint: ${res.usedMintUrl}. Switch to that mint to view the balance.`);
                           }
+                          // Coins fly from the button to the selector target
+                          try { onRedeemCoins?.(fromRect); } catch {}
                           setBountyState('claimed');
                           save({ bounty: { ...task.bounty!, token: '', state: 'claimed', updatedAt: new Date().toISOString() } });
                         } catch (e) {
@@ -2526,7 +2621,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                   ) : (
                     <button
                       className="pressable px-3 py-2 rounded-xl bg-neutral-800"
-                      onClick={() => navigator.clipboard?.writeText(task.bounty!.token!)}
+                      onClick={async () => { try { await navigator.clipboard?.writeText(task.bounty!.token!); } catch {} }}
                     >
                       Copy token
                     </button>
@@ -2593,11 +2688,16 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
         {/* Creator info */}
         <div className="pt-2">
           {(() => {
-            const hex = task.createdBy || "";
-            let display = hex;
+            const raw = task.createdBy || "";
+            let display = raw;
             try {
-              if (/^[0-9a-fA-F]{64}$/.test(hex)) {
-                display = nip19.npubEncode(hex);
+              if (raw.startsWith("npub")) {
+                const dec = nip19.decode(raw);
+                if (typeof dec.data === 'string') display = dec.data;
+                else if (dec.data && (dec.data as any).length) {
+                  const arr = dec.data as unknown as ArrayLike<number>;
+                  display = Array.from(arr).map((x)=>x.toString(16).padStart(2,'0')).join('');
+                }
               }
             } catch {}
             const short = display
@@ -2605,7 +2705,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                 ? display.slice(0, 10) + "…" + display.slice(-6)
                 : display
               : "(not set)";
-            const canCopy = !!hex;
+            const canCopy = !!display;
             return (
               <div className="flex items-center justify-between text-[11px] text-neutral-400">
                 <div>
@@ -2613,8 +2713,8 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                 </div>
                 <button
                   className={`px-2 py-1 rounded-lg bg-neutral-800 ${canCopy ? '' : 'opacity-50 cursor-not-allowed'} text-xs`}
-                  title={canCopy ? 'Copy creator key' : 'No key to copy'}
-                  onClick={() => { if (canCopy) { try { navigator.clipboard?.writeText(display); } catch {} } }}
+                  title={canCopy ? 'Copy creator key (hex)' : 'No key to copy'}
+                  onClick={async () => { if (canCopy) { try { await navigator.clipboard?.writeText(display); } catch {} } }}
                   disabled={!canCopy}
                 >
                   Copy
@@ -2623,6 +2723,47 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
             );
           })()}
         </div>
+
+        {/* Completed by info (only when completed) */}
+        {task.completed && (
+          <div className="pt-1">
+            {(() => {
+              const raw = task.completedBy || "";
+              let display = raw;
+              try {
+                if (raw.startsWith("npub")) {
+                  const dec = nip19.decode(raw);
+                  if (typeof dec.data === 'string') display = dec.data;
+                  else if (dec.data && (dec.data as any).length) {
+                    const arr = dec.data as unknown as ArrayLike<number>;
+                    display = Array.from(arr).map((x)=>x.toString(16).padStart(2,'0')).join('');
+                  }
+                }
+              } catch {}
+              const short = display
+                ? display.length > 16
+                  ? display.slice(0, 10) + "…" + display.slice(-6)
+                  : display
+                : "(not set)";
+              const canCopy = !!display;
+              return (
+                <div className="flex items-center justify-between text-[11px] text-neutral-400">
+                  <div>
+                    Completed by: <span className="font-mono text-neutral-300">{short}</span>
+                  </div>
+                  <button
+                    className={`px-2 py-1 rounded-lg bg-neutral-800 ${canCopy ? '' : 'opacity-50 cursor-not-allowed'} text-xs`}
+                    title={canCopy ? 'Copy completer key (hex)' : 'No key to copy'}
+                    onClick={async () => { if (canCopy) { try { await navigator.clipboard?.writeText(display); } catch {} } }}
+                    disabled={!canCopy}
+                  >
+                    Copy
+                  </button>
+                </div>
+              );
+            })()}
+          </div>
+        )}
 
         <div className="pt-2 flex justify-between">
           <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
@@ -3197,7 +3338,7 @@ function SettingsModal({
                 <div className="flex gap-2 items-center">
                   <input readOnly value={pubkeyHex || "(generating…)"}
                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{if(pubkeyHex) navigator.clipboard?.writeText(pubkeyHex);}}>Copy</button>
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ if(pubkeyHex) { try { await navigator.clipboard?.writeText(pubkeyHex); } catch {} } }}>Copy</button>
                 </div>
               </div>
 
@@ -3209,7 +3350,27 @@ function SettingsModal({
                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="nsec or hex"/>
                   <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{onSetKey(customSk); setCustomSk('');}}>Use</button>
                 </div>
-                <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onGenerateKey}>Generate new key</button>
+                <div className="flex gap-2">
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onGenerateKey}>Generate new key</button>
+                  <button
+                    className="px-3 py-2 rounded-xl bg-neutral-800"
+                    onClick={async ()=>{
+                      try {
+                        const sk = localStorage.getItem(LS_NOSTR_SK) || "";
+                        if (!sk) return;
+                        let nsec = "";
+                        try {
+                          // Prefer nip19.nsecEncode when available
+                          // @ts-ignore - guard at runtime below
+                          nsec = typeof (nip19 as any)?.nsecEncode === 'function' ? (nip19 as any).nsecEncode(sk) : sk;
+                        } catch {
+                          nsec = sk;
+                        }
+                        await navigator.clipboard?.writeText(nsec);
+                      } catch {}
+                    }}
+                  >Copy private key (nsec)</button>
+                </div>
               </div>
 
               {/* Default relays */}
@@ -3284,7 +3445,7 @@ function SettingsModal({
                 <div className="flex gap-2 items-center">
                   <input readOnly value={manageBoard.nostr.boardId}
                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{navigator.clipboard?.writeText(manageBoard.nostr!.boardId);}}>Copy</button>
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ try { await navigator.clipboard?.writeText(manageBoard.nostr!.boardId); } catch {} }}>Copy</button>
                 </div>
                   {showAdvanced && (
                     <>

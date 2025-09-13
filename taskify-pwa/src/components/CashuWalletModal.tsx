@@ -251,7 +251,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
               try {
                 const t = (await navigator.clipboard.readText())?.trim();
                 if (t) setRecvTokenStr(t);
-              } catch (e) {
+              } catch {
                 alert('Unable to read clipboard. Please paste manually.');
               }
             }}
@@ -321,7 +321,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
               try {
                 const t = (await navigator.clipboard.readText())?.trim();
                 if (t) setLnInput(t);
-              } catch (e) {
+              } catch {
                 alert('Unable to read clipboard. Please paste manually.');
               }
             }}

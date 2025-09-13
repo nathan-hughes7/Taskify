@@ -3350,7 +3350,27 @@ function SettingsModal({
                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="nsec or hex"/>
                   <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{onSetKey(customSk); setCustomSk('');}}>Use</button>
                 </div>
-                <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onGenerateKey}>Generate new key</button>
+                <div className="flex gap-2">
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onGenerateKey}>Generate new key</button>
+                  <button
+                    className="px-3 py-2 rounded-xl bg-neutral-800"
+                    onClick={async ()=>{
+                      try {
+                        const sk = localStorage.getItem(LS_NOSTR_SK) || "";
+                        if (!sk) return;
+                        let nsec = "";
+                        try {
+                          // Prefer nip19.nsecEncode when available
+                          // @ts-ignore - guard at runtime below
+                          nsec = typeof (nip19 as any)?.nsecEncode === 'function' ? (nip19 as any).nsecEncode(sk) : sk;
+                        } catch {
+                          nsec = sk;
+                        }
+                        await navigator.clipboard?.writeText(nsec);
+                      } catch {}
+                    }}
+                  >Copy private key (nsec)</button>
+                </div>
               </div>
 
               {/* Default relays */}

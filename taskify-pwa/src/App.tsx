@@ -1779,6 +1779,7 @@ export default function App() {
                       key={day}
                       title={WD_SHORT[day]}
                       onDropCard={(payload) => moveTask(payload.id, { type: "day", day })}
+                      onDropEnd={handleDragEnd}
                       data-day={day}
                     >
                         {(byDay.get(day) || []).map((t) => (
@@ -1807,6 +1808,7 @@ export default function App() {
                   <DroppableColumn
                     title="Bounties"
                     onDropCard={(payload) => moveTask(payload.id, { type: "bounties" })}
+                    onDropEnd={handleDragEnd}
                   >
                       {bounties.map((t) => (
                         <Card
@@ -1844,6 +1846,7 @@ export default function App() {
                     key={col.id}
                     title={col.name}
                     onDropCard={(payload) => moveTask(payload.id, { type: "list", columnId: col.id })}
+                    onDropEnd={handleDragEnd}
                   >
                       {(itemsByColumn.get(col.id) || []).map((t) => (
                         <Card
@@ -2276,11 +2279,13 @@ function TaskMedia({ task }: { task: Task }) {
 function DroppableColumn({
   title,
   onDropCard,
+  onDropEnd,
   children,
   ...props
 }: {
   title: string;
   onDropCard: (payload: { id: string }) => void;
+  onDropEnd?: () => void;
   children: React.ReactNode;
 } & React.HTMLAttributes<HTMLDivElement>) {
   const ref = useRef<HTMLDivElement>(null);
@@ -2292,6 +2297,7 @@ function DroppableColumn({
       e.preventDefault();
       const id = e.dataTransfer?.getData("text/task-id");
       if (id) onDropCard({ id });
+      if (onDropEnd) onDropEnd();
     };
     el.addEventListener("dragover", onDragOver);
     el.addEventListener("drop", onDrop);
@@ -2299,7 +2305,7 @@ function DroppableColumn({
       el.removeEventListener("dragover", onDragOver);
       el.removeEventListener("drop", onDrop);
     };
-  }, [onDropCard]);
+  }, [onDropCard, onDropEnd]);
 
   return (
     <div
@@ -2355,6 +2361,7 @@ function Card({
     const dragId = e.dataTransfer.getData("text/task-id");
     if (dragId) onDropBefore(dragId);
     setOverBefore(false);
+    onDragEnd();
   }
   function handleDragLeave() { setOverBefore(false); }
   function handleDragEnd() { onDragEnd(); }

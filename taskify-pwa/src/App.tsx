@@ -3350,6 +3350,31 @@ function SettingsModal({
               onClick={()=>setShowAdvanced(a=>!a)}
             >{showAdvanced ? "Hide advanced" : "Advanced"}</button>
           </div>
+          {/* Quick actions available outside Advanced */}
+          <div className="mb-3 flex gap-2">
+            <button
+              className="px-3 py-2 rounded-xl bg-neutral-800"
+              onClick={async ()=>{
+                try {
+                  const sk = localStorage.getItem(LS_NOSTR_SK) || "";
+                  if (!sk) return;
+                  let nsec = "";
+                  try {
+                    // Prefer nip19.nsecEncode when available
+                    // @ts-ignore - guard at runtime below
+                    nsec = typeof (nip19 as any)?.nsecEncode === 'function' ? (nip19 as any).nsecEncode(sk) : sk;
+                  } catch {
+                    nsec = sk;
+                  }
+                  await navigator.clipboard?.writeText(nsec);
+                } catch {}
+              }}
+            >Copy nsec</button>
+            <button
+              className="px-3 py-2 rounded-xl bg-neutral-800"
+              onClick={()=>setDefaultRelays(DEFAULT_RELAYS.slice())}
+            >Reload default relays</button>
+          </div>
           {showAdvanced && (
             <>
               {/* Public key */}

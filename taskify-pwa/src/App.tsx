@@ -1131,8 +1131,37 @@ export default function App() {
   }
 
   function addTask(keepKeyboard = false) {
-    const title = newTitle.trim() || (newImages.length ? "Image" : "");
-    if ((!title && !newImages.length) || !currentBoard) return;
+    if (!currentBoard) return;
+
+    const raw = newTitle.trim();
+    if (raw) {
+      try {
+        const parsed: any = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && parsed.title && parsed.dueISO) {
+          const nextOrder = nextOrderForBoard(currentBoard.id, tasks);
+          const imported: Task = {
+            ...parsed,
+            id: crypto.randomUUID(),
+            boardId: currentBoard.id,
+            order: typeof parsed.order === "number" ? parsed.order : nextOrder,
+          };
+          applyHiddenForFuture(imported);
+          setTasks(prev => [...prev, imported]);
+          maybePublishTask(imported).catch(() => {});
+          setNewTitle("");
+          setNewImages([]);
+          setQuickRule("none");
+          setAddCustomRule(R_NONE);
+          setScheduleDate("");
+          if (keepKeyboard) newTitleRef.current?.focus();
+          else newTitleRef.current?.blur();
+          return;
+        }
+      } catch {}
+    }
+
+    const title = raw || (newImages.length ? "Image" : "");
+    if ((!title && !newImages.length)) return;
 
     const candidate = resolveQuickRule();
     const recurrence = candidate.type === "none" ? undefined : candidate;
@@ -2334,13 +2363,13 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
     else newSubtaskRef.current?.blur();
   }
 
-  function save(overrides: Partial<Task> = {}) {
+  function buildTask(overrides: Partial<Task> = {}): Task {
     const dueISO = new Date(scheduledDate + "T00:00").toISOString();
     const due = startOfDay(new Date(dueISO));
     const nowSow = startOfWeek(new Date(), weekStart);
     const dueSow = startOfWeek(due, weekStart);
     const hiddenUntilISO = dueSow.getTime() > nowSow.getTime() ? dueSow.toISOString() : undefined;
-    const base: Task = {
+    return {
       ...task,
       title,
       note: note || undefined,
@@ -2351,7 +2380,15 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
       hiddenUntilISO,
       ...overrides,
     };
-    onSave(base);
+  }
+
+  function save(overrides: Partial<Task> = {}) {
+    onSave(buildTask(overrides));
+  }
+
+  async function copyCurrent() {
+    const base = buildTask();
+    try { await navigator.clipboard?.writeText(JSON.stringify(base)); } catch {}
   }
 
   return (
@@ -2772,7 +2809,10 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
 
         <div className="pt-2 flex justify-between">
           <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
-          <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
+          <div className="flex gap-2">
+            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={copyCurrent}>Copy</button>
+            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
+          </div>
         </div>
       </div>
 

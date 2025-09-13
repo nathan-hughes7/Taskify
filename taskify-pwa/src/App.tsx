@@ -664,6 +664,21 @@ export default function App() {
   // undo snackbar
   const [undoTask, setUndoTask] = useState<Task | null>(null);
 
+  // drag-to-delete
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const [trashHover, setTrashHover] = useState(false);
+  const [upcomingHover, setUpcomingHover] = useState(false);
+  const [boardDropOpen, setBoardDropOpen] = useState(false);
+  const boardDropTimer = useRef<number>();
+
+  function handleDragEnd() {
+    setDraggingTaskId(null);
+    setTrashHover(false);
+    setUpcomingHover(false);
+    setBoardDropOpen(false);
+    if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
+  }
+
   // upcoming drawer (out-of-the-way FAB)
   const [showUpcoming, setShowUpcoming] = useState(false);
 
@@ -1295,6 +1310,25 @@ export default function App() {
     setTasks(prev => prev.filter(t => !(t.completed && (!t.bounty || t.bounty.state === 'claimed'))));
   }
 
+  function postponeTaskOneWeek(id: string) {
+    let updated: Task | undefined;
+    setTasks(prev => prev.map(t => {
+      if (t.id !== id) return t;
+      const nextDue = startOfDay(new Date(t.dueISO));
+      nextDue.setDate(nextDue.getDate() + 7);
+      updated = {
+        ...t,
+        dueISO: nextDue.toISOString(),
+        hiddenUntilISO: startOfWeek(nextDue, settings.weekStart).toISOString(),
+      };
+      return updated!;
+    }));
+    if (updated) {
+      maybePublishTask(updated).catch(() => {});
+      showToast('Task moved to next week');
+    }
+  }
+
   async function revealBounty(id: string) {
     const t = tasks.find(x => x.id === id);
     if (!t || !t.bounty || t.bounty.state !== 'locked' || !t.bounty.enc) return;
@@ -1447,6 +1481,65 @@ export default function App() {
     });
   }
 
+  function moveTaskToBoard(id: string, boardId: string) {
+    setTasks(prev => {
+      const arr = [...prev];
+      const fromIdx = arr.findIndex(t => t.id === id);
+      if (fromIdx < 0) return prev;
+      const task = arr[fromIdx];
+      const targetBoard = boards.find(b => b.id === boardId);
+      if (!targetBoard) return prev;
+
+      // remove from source
+      arr.splice(fromIdx, 1);
+
+      // recompute order for source board
+      const sourceTasks: Task[] = [];
+      let order = 0;
+      for (let i = 0; i < arr.length; i++) {
+        const t = arr[i];
+        if (t.boardId === task.boardId) {
+          arr[i] = { ...t, order };
+          sourceTasks.push(arr[i]);
+          order++;
+        }
+      }
+
+      const updated: Task = { ...task, boardId };
+      if (targetBoard.kind === "week") {
+        updated.column = "day";
+        updated.columnId = undefined;
+      } else {
+        updated.column = undefined;
+        updated.columnId = targetBoard.columns[0]?.id;
+        updated.dueISO = isoForWeekday(0);
+      }
+
+      arr.push(updated);
+
+      const targetTasks: Task[] = [];
+      order = 0;
+      for (let i = 0; i < arr.length; i++) {
+        const t = arr[i];
+        if (t.boardId === boardId) {
+          if (t === updated) {
+            updated.order = order;
+          } else {
+            arr[i] = { ...t, order };
+          }
+          targetTasks.push(arr[i]);
+          order++;
+        }
+      }
+
+      try {
+        for (const t of [...sourceTasks, ...targetTasks]) maybePublishTask(t).catch(() => {});
+      } catch {}
+
+      return arr;
+    });
+  }
+
   // Subscribe to Nostr for all shared boards
   const nostrBoardsKey = useMemo(() => {
     const items = boards
@@ -1511,20 +1604,56 @@ export default function App() {
           <div ref={confettiRef} className="relative h-0 w-full" />
           <div className="ml-auto flex items-center gap-2">
             {/* Board switcher */}
-            <select
-              ref={boardSelectorRef}
-              value={currentBoardId}
-              onChange={handleBoardSelect}
-              className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              title="Boards"
+            <div
+              className="relative"
+              onDragEnter={e => {
+                if (!draggingTaskId) return;
+                e.preventDefault();
+                if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
+                boardDropTimer.current = window.setTimeout(() => setBoardDropOpen(true), 500);
+              }}
+              onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
+              onDragLeave={e => {
+                if (!draggingTaskId) return;
+                if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
+                setBoardDropOpen(false);
+              }}
             >
-              <option value="__wallet">💰 Wallet</option>
-              {boards.length === 0 ? (
-                <option value="">No boards</option>
-              ) : (
-                boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
+              <select
+                ref={boardSelectorRef}
+                value={currentBoardId}
+                onChange={handleBoardSelect}
+                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                title="Boards"
+              >
+                <option value="__wallet">💰 Wallet</option>
+                {boards.length === 0 ? (
+                  <option value="">No boards</option>
+                ) : (
+                  boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
+                )}
+              </select>
+              {boardDropOpen && (
+                <div className="absolute right-0 mt-1 w-48 rounded-xl border border-neutral-800 bg-neutral-900 z-50">
+                  {boards.map(b => (
+                    <div
+                      key={b.id}
+                      className="px-3 py-2 hover:bg-neutral-800"
+                      onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
+                      onDrop={e => {
+                        if (!draggingTaskId) return;
+                        e.preventDefault();
+                        moveTaskToBoard(draggingTaskId, b.id);
+                        handleDragEnd();
+                      }}
+                    >
+                      {b.name}
+                    </div>
+                  ))}
+                </div>
               )}
-            </select>
+            </div>
             {currentBoard?.nostr?.boardId && (
               <button
                 className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
@@ -1669,6 +1798,8 @@ export default function App() {
                           onDropBefore={(dragId) => moveTask(dragId, { type: "day", day }, t.id)}
                           showStreaks={settings.streaksEnabled}
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
+                          onDragStart={(id) => setDraggingTaskId(id)}
+                          onDragEnd={handleDragEnd}
                         />
                       ))}
                     </DroppableColumn>
@@ -1694,6 +1825,8 @@ export default function App() {
                           onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
                           showStreaks={settings.streaksEnabled}
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
+                          onDragStart={(id) => setDraggingTaskId(id)}
+                          onDragEnd={handleDragEnd}
                         />
                     ))}
                   </DroppableColumn>
@@ -1729,6 +1862,8 @@ export default function App() {
                           onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
                           showStreaks={settings.streaksEnabled}
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
+                          onDragStart={(id) => setDraggingTaskId(id)}
+                          onDragEnd={handleDragEnd}
                         />
                     ))}
                   </DroppableColumn>
@@ -1807,9 +1942,17 @@ export default function App() {
 
       {/* Floating Upcoming Drawer Button */}
       <button
-        className="fixed bottom-4 right-4 px-3 py-2 rounded-full bg-neutral-800 border border-neutral-700 shadow-lg text-sm"
+        className={`fixed bottom-4 right-4 px-3 py-2 rounded-full bg-neutral-800 border border-neutral-700 shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
         onClick={() => setShowUpcoming(true)}
         title="Upcoming (hidden) tasks"
+        onDragOver={(e) => { e.preventDefault(); setUpcomingHover(true); }}
+        onDragLeave={() => setUpcomingHover(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          const id = e.dataTransfer.getData("text/task-id");
+          if (id) postponeTaskOneWeek(id);
+          handleDragEnd();
+        }}
       >
         Upcoming {upcoming.length ? `(${upcoming.length})` : ""}
       </button>
@@ -1876,6 +2019,44 @@ export default function App() {
             </ul>
           )}
         </SideDrawer>
+      )}
+
+      {/* Drag trash can */}
+      {draggingTaskId && (
+        <div
+          className="fixed bottom-4 left-4 z-50"
+          onDragOver={(e) => {
+            e.preventDefault();
+            setTrashHover(true);
+          }}
+          onDragLeave={() => setTrashHover(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            const id = e.dataTransfer.getData("text/task-id");
+            if (id) deleteTask(id);
+            handleDragEnd();
+          }}
+        >
+          <div
+            className={`w-14 h-14 rounded-full bg-neutral-900 border border-neutral-700 flex items-center justify-center text-neutral-400 transition-transform ${trashHover ? 'scale-110' : ''}`}
+          >
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              className="pointer-events-none"
+            >
+              <path d="M3 6h18" />
+              <path d="M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6" />
+              <path d="M5 6l1-3h12l1 3" />
+              <path d="M10 11v6" />
+              <path d="M14 11v6" />
+            </svg>
+          </div>
+        </div>
       )}
 
       {/* Undo Snackbar */}
@@ -2148,6 +2329,8 @@ function Card({
   showStreaks,
   onToggleSubtask,
   onFlyToCompleted,
+  onDragStart,
+  onDragEnd,
 }: {
   task: Task;
   onComplete: (from?: DOMRect) => void;
@@ -2156,6 +2339,8 @@ function Card({
   showStreaks: boolean;
   onToggleSubtask: (subId: string) => void;
   onFlyToCompleted: (rect: DOMRect) => void;
+  onDragStart: (id: string) => void;
+  onDragEnd: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
@@ -2164,6 +2349,7 @@ function Card({
     e.dataTransfer.setData("text/task-id", task.id);
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setDragImage(e.currentTarget as HTMLElement, 0, 0);
+    onDragStart(task.id);
   }
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault();
@@ -2178,6 +2364,7 @@ function Card({
     setOverBefore(false);
   }
   function handleDragLeave() { setOverBefore(false); }
+  function handleDragEnd() { onDragEnd(); }
 
   return (
     <div
@@ -2186,6 +2373,7 @@ function Card({
       style={{ touchAction: "pan-y" }}
       draggable
       onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       onDragLeave={handleDragLeave}

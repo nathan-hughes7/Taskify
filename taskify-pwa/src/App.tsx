@@ -130,9 +130,22 @@ function loadDefaultRelays(): string[] {
     const raw = localStorage.getItem(LS_NOSTR_RELAYS);
     if (raw) {
       const arr = JSON.parse(raw);
-      if (Array.isArray(arr) && arr.every((x) => typeof x === "string")) return arr;
+      if (Array.isArray(arr)) {
+        const sanitized = Array.from(new Set(
+          arr
+            .filter((x) => typeof x === "string")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        ));
+        // Merge in any newly added defaults while preserving user order
+        const merged = [...sanitized];
+        for (const r of DEFAULT_RELAYS) if (!merged.includes(r)) merged.push(r);
+        try { localStorage.setItem(LS_NOSTR_RELAYS, JSON.stringify(merged)); } catch {}
+        return merged;
+      }
     }
   } catch {}
+  try { localStorage.setItem(LS_NOSTR_RELAYS, JSON.stringify(DEFAULT_RELAYS)); } catch {}
   return DEFAULT_RELAYS;
 }
 

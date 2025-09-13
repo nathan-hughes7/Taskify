@@ -664,10 +664,6 @@ export default function App() {
   // undo snackbar
   const [undoTask, setUndoTask] = useState<Task | null>(null);
 
-  // drag-to-delete
-  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
-  const [trashHover, setTrashHover] = useState(false);
-
   // upcoming drawer (out-of-the-way FAB)
   const [showUpcoming, setShowUpcoming] = useState(false);
 
@@ -1673,8 +1669,6 @@ export default function App() {
                           onDropBefore={(dragId) => moveTask(dragId, { type: "day", day }, t.id)}
                           showStreaks={settings.streaksEnabled}
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
-                          onDragStart={(id) => setDraggingTaskId(id)}
-                          onDragEnd={() => { setDraggingTaskId(null); setTrashHover(false); }}
                         />
                       ))}
                     </DroppableColumn>
@@ -1700,8 +1694,6 @@ export default function App() {
                           onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
                           showStreaks={settings.streaksEnabled}
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
-                          onDragStart={(id) => setDraggingTaskId(id)}
-                          onDragEnd={() => { setDraggingTaskId(null); setTrashHover(false); }}
                         />
                     ))}
                   </DroppableColumn>
@@ -1737,8 +1729,6 @@ export default function App() {
                           onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
                           showStreaks={settings.streaksEnabled}
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
-                          onDragStart={(id) => setDraggingTaskId(id)}
-                          onDragEnd={() => { setDraggingTaskId(null); setTrashHover(false); }}
                         />
                     ))}
                   </DroppableColumn>
@@ -1886,45 +1876,6 @@ export default function App() {
             </ul>
           )}
         </SideDrawer>
-      )}
-
-      {/* Drag trash can */}
-      {draggingTaskId && (
-        <div
-          className="fixed bottom-4 left-4 z-50"
-          onDragOver={(e) => {
-            e.preventDefault();
-            setTrashHover(true);
-          }}
-          onDragLeave={() => setTrashHover(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            const id = e.dataTransfer.getData("text/task-id");
-            if (id) deleteTask(id);
-            setTrashHover(false);
-            setDraggingTaskId(null);
-          }}
-        >
-          <div
-            className={`w-14 h-14 rounded-full bg-neutral-900 border border-neutral-700 flex items-center justify-center text-neutral-400 transition-transform ${trashHover ? 'scale-110' : ''}`}
-          >
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              className="pointer-events-none"
-            >
-              <path d="M3 6h18" />
-              <path d="M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6" />
-              <path d="M5 6l1-3h12l1 3" />
-              <path d="M10 11v6" />
-              <path d="M14 11v6" />
-            </svg>
-          </div>
-        </div>
       )}
 
       {/* Undo Snackbar */}
@@ -2197,8 +2148,6 @@ function Card({
   showStreaks,
   onToggleSubtask,
   onFlyToCompleted,
-  onDragStart,
-  onDragEnd,
 }: {
   task: Task;
   onComplete: (from?: DOMRect) => void;
@@ -2207,8 +2156,6 @@ function Card({
   showStreaks: boolean;
   onToggleSubtask: (subId: string) => void;
   onFlyToCompleted: (rect: DOMRect) => void;
-  onDragStart: (id: string) => void;
-  onDragEnd: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
@@ -2217,7 +2164,6 @@ function Card({
     e.dataTransfer.setData("text/task-id", task.id);
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setDragImage(e.currentTarget as HTMLElement, 0, 0);
-    onDragStart(task.id);
   }
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault();
@@ -2232,7 +2178,6 @@ function Card({
     setOverBefore(false);
   }
   function handleDragLeave() { setOverBefore(false); }
-  function handleDragEnd() { onDragEnd(); }
 
   return (
     <div
@@ -2241,7 +2186,6 @@ function Card({
       style={{ touchAction: "pan-y" }}
       draggable
       onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       onDragLeave={handleDragLeave}

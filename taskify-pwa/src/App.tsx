@@ -3023,7 +3023,27 @@ function SettingsModal({
   const [customSk, setCustomSk] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [reloadNeeded, setReloadNeeded] = useState(false);
+  const [newDefaultRelay, setNewDefaultRelay] = useState("");
+  const [newBoardRelay, setNewBoardRelay] = useState("");
+  const [newOverrideRelay, setNewOverrideRelay] = useState("");
   // Mint selector moved to Wallet modal; no need to read here.
+
+  function parseCsv(csv: string): string[] {
+    return csv.split(",").map(s => s.trim()).filter(Boolean);
+  }
+
+  function addRelayToCsv(csv: string, relay: string): string {
+    const list = parseCsv(csv);
+    const val = relay.trim();
+    if (!val) return csv;
+    if (list.includes(val)) return csv;
+    return [...list, val].join(",");
+  }
+
+  function removeRelayFromCsv(csv: string, relay: string): string {
+    const list = parseCsv(csv);
+    return list.filter(r => r !== relay).join(",");
+  }
 
   function backupData() {
     const data = {
@@ -3375,13 +3395,34 @@ function SettingsModal({
 
               {/* Default relays */}
               <div className="mb-3">
-                <div className="text-xs text-neutral-400 mb-1">Default relays (CSV)</div>
-                <input
-                  value={defaultRelays.join(",")}
-                  onChange={(e)=>setDefaultRelays(e.target.value.split(",").map(s=>s.trim()).filter(Boolean))}
-                  className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                  placeholder="wss://relay1, wss://relay2"
-                />
+                <div className="text-xs text-neutral-400 mb-1">Default relays</div>
+                <div className="flex gap-2 mb-2">
+                  <input
+                    value={newDefaultRelay}
+                    onChange={(e)=>setNewDefaultRelay(e.target.value)}
+                    onKeyDown={(e)=>{ if (e.key === 'Enter') { const v = newDefaultRelay.trim(); if (v && !defaultRelays.includes(v)) { setDefaultRelays([...defaultRelays, v]); setNewDefaultRelay(""); } } }}
+                    className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                    placeholder="wss://relay.example"
+                  />
+                  <button
+                    className="px-3 py-2 rounded-xl bg-neutral-800"
+                    onClick={()=>{ const v = newDefaultRelay.trim(); if (v && !defaultRelays.includes(v)) { setDefaultRelays([...defaultRelays, v]); setNewDefaultRelay(""); } }}
+                  >Add</button>
+                </div>
+                <ul className="space-y-2">
+                  {defaultRelays.map((r) => (
+                    <li key={r} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
+                      <div className="flex-1 truncate">{r}</div>
+                      <button className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>setDefaultRelays(defaultRelays.filter(x => x !== r))}>Delete</button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    className="px-3 py-2 rounded-xl bg-neutral-800"
+                    onClick={()=>setDefaultRelays(DEFAULT_RELAYS.slice())}
+                  >Reload defaults</button>
+                </div>
               </div>
             </>
           )}
@@ -3449,11 +3490,35 @@ function SettingsModal({
                 </div>
                   {showAdvanced && (
                     <>
-                      <div className="text-xs text-neutral-400">Relays (CSV)</div>
-                      <input value={(manageBoard.nostr.relays || []).join(",")} onChange={(e)=>{
-                        const relays = e.target.value.split(",").map(s=>s.trim()).filter(Boolean);
-                        setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays } }) : b));
-                      }} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                      <div className="text-xs text-neutral-400">Relays</div>
+                      <div className="flex gap-2 mb-2">
+                        <input
+                          value={newBoardRelay}
+                          onChange={(e)=>setNewBoardRelay(e.target.value)}
+                          onKeyDown={(e)=>{ if (e.key === 'Enter' && manageBoard?.nostr) { const v = newBoardRelay.trim(); if (v && !(manageBoard.nostr.relays || []).includes(v)) { setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays: [...(manageBoard.nostr!.relays || []), v] } }) : b)); setNewBoardRelay(""); } } }}
+                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                          placeholder="wss://relay.example"
+                        />
+                        <button
+                          className="px-3 py-2 rounded-xl bg-neutral-800"
+                          onClick={()=>{ if (!manageBoard?.nostr) return; const v = newBoardRelay.trim(); if (v && !(manageBoard.nostr.relays || []).includes(v)) { setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays: [...(manageBoard.nostr!.relays || []), v] } }) : b)); setNewBoardRelay(""); } }}
+                        >Add</button>
+                      </div>
+                      <ul className="space-y-2 mb-2">
+                        {(manageBoard.nostr.relays || []).map((r) => (
+                          <li key={r} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
+                            <div className="flex-1 truncate">{r}</div>
+                            <button
+                              className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600"
+                              onClick={()=>{
+                                if (!manageBoard?.nostr) return;
+                                const relays = (manageBoard.nostr.relays || []).filter(x => x !== r);
+                                setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays } }) : b));
+                              }}
+                            >Delete</button>
+                          </li>
+                        ))}
+                      </ul>
                       <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onRegenerateBoardId(manageBoard.id)}>Generate new board ID</button>
                     </>
                   )}
@@ -3468,8 +3533,25 @@ function SettingsModal({
               <>
                 {showAdvanced && (
                   <>
-                    <div className="text-xs text-neutral-400">Relays override (optional, CSV)</div>
-                    <input value={relaysCsv} onChange={(e)=>setRelaysCsv(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="wss://relay1, wss://relay2"/>
+                    <div className="text-xs text-neutral-400">Relays override (optional)</div>
+                    <div className="flex gap-2 mb-2">
+                      <input
+                        value={newOverrideRelay}
+                        onChange={(e)=>setNewOverrideRelay(e.target.value)}
+                        onKeyDown={(e)=>{ if (e.key === 'Enter') { const v = newOverrideRelay.trim(); if (v) { setRelaysCsv(addRelayToCsv(relaysCsv, v)); setNewOverrideRelay(""); } } }}
+                        className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                        placeholder="wss://relay.example"
+                      />
+                      <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{ const v = newOverrideRelay.trim(); if (v) { setRelaysCsv(addRelayToCsv(relaysCsv, v)); setNewOverrideRelay(""); } }}>Add</button>
+                    </div>
+                    <ul className="space-y-2 mb-2">
+                      {parseCsv(relaysCsv).map((r) => (
+                        <li key={r} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
+                          <div className="flex-1 truncate">{r}</div>
+                          <button className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>setRelaysCsv(removeRelayFromCsv(relaysCsv, r))}>Delete</button>
+                        </li>
+                      ))}
+                    </ul>
                   </>
                 )}
                 <button className="block w-full px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={()=>{onShareBoard(manageBoard.id, showAdvanced ? relaysCsv : ""); setRelaysCsv('');}}>Share this board</button>

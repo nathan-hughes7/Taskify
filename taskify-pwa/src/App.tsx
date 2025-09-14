@@ -2392,7 +2392,7 @@ function Card({
   return (
     <div
       ref={cardRef}
-      className="group relative p-3 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
+      className="group relative p-2 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
       style={{ touchAction: "pan-y" }}
       draggable
       onDragStart={handleDragStart}
@@ -2415,9 +2415,9 @@ function Card({
             }}
             aria-label="Mark incomplete"
             title="Mark incomplete"
-            className="flex items-center justify-center w-9 h-9 rounded-full border border-emerald-500 text-emerald-500"
+            className="flex items-center justify-center w-8 h-8 rounded-full text-emerald-500"
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" className="pointer-events-none">
+            <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none">
               <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
               <path d="M8 12l2.5 2.5L16 9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -2431,9 +2431,9 @@ function Card({
             }}
             aria-label="Complete task"
             title="Mark complete"
-            className="flex items-center justify-center w-9 h-9 rounded-full border border-neutral-600 text-neutral-300 hover:text-emerald-500 hover:border-emerald-500 transition"
+            className="flex items-center justify-center w-8 h-8 rounded-full text-neutral-300 hover:text-emerald-500 transition"
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" className="pointer-events-none">
+            <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none">
               <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
             </svg>
           </button>

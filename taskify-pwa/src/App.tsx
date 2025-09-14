@@ -2119,6 +2119,7 @@ export default function App() {
                     <DroppableColumn
                       key={day}
                       title={WD_SHORT[day]}
+                      onTitleClick={() => { setDayChoice(day); setScheduleDate(""); }}
                       onDropCard={(payload) => moveTask(payload.id, { type: "day", day })}
                       onDropEnd={handleDragEnd}
                       data-day={day}
@@ -2148,6 +2149,7 @@ export default function App() {
                   {/* Bounties */}
                   <DroppableColumn
                     title="Bounties"
+                    onTitleClick={() => { setDayChoice("bounties"); setScheduleDate(""); }}
                     onDropCard={(payload) => moveTask(payload.id, { type: "bounties" })}
                     onDropEnd={handleDragEnd}
                   >
@@ -2186,6 +2188,7 @@ export default function App() {
                   <DroppableColumn
                     key={col.id}
                     title={col.name}
+                    onTitleClick={() => setDayChoice(col.id)}
                     onDropCard={(payload) => moveTask(payload.id, { type: "list", columnId: col.id })}
                     onDropEnd={handleDragEnd}
                   >
@@ -2621,12 +2624,14 @@ function DroppableColumn({
   title,
   onDropCard,
   onDropEnd,
+  onTitleClick,
   children,
   ...props
 }: {
   title: string;
   onDropCard: (payload: { id: string }) => void;
   onDropEnd?: () => void;
+  onTitleClick?: () => void;
   children: React.ReactNode;
 } & React.HTMLAttributes<HTMLDivElement>) {
   const ref = useRef<HTMLDivElement>(null);
@@ -2655,7 +2660,22 @@ function DroppableColumn({
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
     >
-      <div className="font-semibold mb-2">{title}</div>
+      <div
+        className={`font-semibold mb-2 ${onTitleClick ? 'cursor-pointer hover:underline' : ''}`}
+        onClick={onTitleClick}
+        role={onTitleClick ? 'button' : undefined}
+        tabIndex={onTitleClick ? 0 : undefined}
+        onKeyDown={(e) => {
+          if (!onTitleClick) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onTitleClick();
+          }
+        }}
+        title={onTitleClick ? 'Set as add target' : undefined}
+      >
+        {title}
+      </div>
       <div className="space-y-2">{children}</div>
     </div>
   );

@@ -44,6 +44,7 @@ type Task = {
   hiddenUntilISO?: string;        // controls visibility (appear at/after this date)
   order?: number;                 // order within the board for manual reordering
   streak?: number;                // consecutive completion count
+  seriesId?: string;              // identifier for a recurring series
   subtasks?: Subtask[];           // optional list of subtasks
   bounty?: {
     id: string;                   // bounty id (uuid)
@@ -584,7 +585,7 @@ export default function App() {
     if (!settings.showFullWeekRecurring) return;
     setTasks(prev => ensureWeekRecurrences(prev));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tasks, settings.showFullWeekRecurring, settings.weekStart, setTasks]);
+  }, [settings.showFullWeekRecurring, settings.weekStart]);
 
   // Apply font size setting to root; fall back to OS preferred size
   useEffect(() => {
@@ -1000,7 +1001,7 @@ export default function App() {
     const bTag = boardTag(boardId);
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
     const tags: string[][] = [["d", t.id],["b", bTag],["col", String(colTag)],["status","deleted"]];
-    const raw = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, streak: t.streak, subtasks: t.subtasks });
+    const raw = JSON.stringify({ title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, streak: t.streak, subtasks: t.subtasks, seriesId: t.seriesId });
     const content = await encryptToBoard(boardId, raw);
     const createdAt = await nostrPublish(relays, {
       kind: 30301,
@@ -1023,7 +1024,7 @@ export default function App() {
     const status = t.completed ? "done" : "open";
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
     const tags: string[][] = [["d", t.id],["b", bTag],["col", String(colTag)],["status", status]];
-    const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, completedBy: t.completedBy, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, order: t.order, streak: t.streak };
+    const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, completedBy: t.completedBy, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, order: t.order, streak: t.streak, seriesId: t.seriesId };
     // Include explicit nulls to signal removals when undefined
     body.images = (typeof t.images === 'undefined') ? null : t.images;
     body.bounty = (typeof t.bounty === 'undefined') ? null : t.bounty;
@@ -1127,6 +1128,7 @@ export default function App() {
       hiddenUntilISO: payload.hiddenUntilISO,
       order: typeof payload.order === 'number' ? payload.order : undefined,
       streak: typeof payload.streak === 'number' ? payload.streak : undefined,
+      seriesId: payload.seriesId,
       subtasks: Array.isArray(payload.subtasks) ? payload.subtasks : undefined,
     };
     if (lb.kind === "week") base.column = col === "bounties" ? "bounties" : "day";
@@ -1233,12 +1235,32 @@ export default function App() {
     return boardTasks.reduce((max, t) => Math.max(max, t.order ?? -1), -1) + 1;
   }
 
-  function ensureWeekRecurrences(arr: Task[]): Task[] {
+  function sameSeries(a: Task, b: Task): boolean {
+    if (a.seriesId && b.seriesId) return a.seriesId === b.seriesId;
+    return (
+      a.boardId === b.boardId &&
+      a.title === b.title &&
+      a.note === b.note &&
+      a.recurrence && b.recurrence &&
+      JSON.stringify(a.recurrence) === JSON.stringify(b.recurrence)
+    );
+  }
+
+  function ensureWeekRecurrences(arr: Task[], sources?: Task[]): Task[] {
     const sow = startOfWeek(new Date(), settings.weekStart).getTime();
     const out = [...arr];
     let changed = false;
-    for (const t of arr) {
+    const src = sources ?? arr;
+    for (const t of src) {
       if (!t.recurrence) continue;
+      const seriesId = t.seriesId || t.id;
+      if (!t.seriesId) {
+        const idx = out.findIndex(x => x.id === t.id);
+        if (idx >= 0 && out[idx].seriesId !== seriesId) {
+          out[idx] = { ...out[idx], seriesId };
+          changed = true;
+        }
+      }
       let nextISO = nextOccurrence(t.dueISO, t.recurrence);
       while (nextISO) {
         const nextDate = new Date(nextISO);
@@ -1246,16 +1268,14 @@ export default function App() {
         if (nsow > sow) break;
         if (nsow === sow) {
           const exists = out.some(x =>
-            x.boardId === t.boardId &&
-            x.title === t.title &&
-            x.note === t.note &&
-            x.recurrence && JSON.stringify(x.recurrence) === JSON.stringify(t.recurrence) &&
+            sameSeries(x, { ...t, seriesId }) &&
             startOfDay(new Date(x.dueISO)).getTime() === startOfDay(nextDate).getTime()
           );
           if (!exists) {
             const clone: Task = {
               ...t,
               id: crypto.randomUUID(),
+              seriesId,
               completed: false,
               completedAt: undefined,
               completedBy: undefined,
@@ -1284,14 +1304,19 @@ export default function App() {
         const parsed: any = JSON.parse(raw);
         if (parsed && typeof parsed === "object" && parsed.title && parsed.dueISO) {
           const nextOrder = nextOrderForBoard(currentBoard.id, tasks);
+          const id = crypto.randomUUID();
           const imported: Task = {
             ...parsed,
-            id: crypto.randomUUID(),
+            id,
+            seriesId: parsed.recurrence ? (parsed.seriesId || id) : undefined,
             boardId: currentBoard.id,
             order: typeof parsed.order === "number" ? parsed.order : nextOrder,
           };
           applyHiddenForFuture(imported);
-          setTasks(prev => [...prev, imported]);
+          setTasks(prev => {
+            const out = [...prev, imported];
+            return settings.showFullWeekRecurring && imported.recurrence ? ensureWeekRecurrences(out, [imported]) : out;
+          });
           maybePublishTask(imported).catch(() => {});
           setNewTitle("");
           setNewImages([]);
@@ -1318,8 +1343,10 @@ export default function App() {
     }
 
     const nextOrder = nextOrderForBoard(currentBoard.id, tasks);
+    const id = crypto.randomUUID();
     const t: Task = {
-      id: crypto.randomUUID(),
+      id,
+      seriesId: recurrence ? id : undefined,
       boardId: currentBoard.id,
       createdBy: nostrPK || undefined,
       title,
@@ -1339,7 +1366,10 @@ export default function App() {
       t.columnId = selectedColId || firstCol?.id;
     }
     applyHiddenForFuture(t);
-    setTasks(prev => [...prev, t]);
+    setTasks(prev => {
+      const out = [...prev, t];
+      return settings.showFullWeekRecurring && recurrence ? ensureWeekRecurrences(out, [t]) : out;
+    });
     // Publish to Nostr if board is shared
     maybePublishTask(t).catch(() => {});
     setNewTitle("");
@@ -1369,9 +1399,52 @@ export default function App() {
         // regardless of the current timestamp.
         newStreak = newStreak + 1;
       }
-      const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now, completedBy: (window as any).nostrPK || undefined, streak:newStreak}) : t);
-      const doneOne = updated.find(x => x.id === id);
-      if (doneOne) { maybePublishTask(doneOne).catch(() => {}); }
+      const toPublish: Task[] = [];
+      let nextId: string | null = null;
+      if (
+        settings.showFullWeekRecurring &&
+        settings.streaksEnabled &&
+        cur.recurrence &&
+        (cur.recurrence.type === "daily" || cur.recurrence.type === "weekly")
+      ) {
+        nextId =
+          prev
+            .filter(
+              t =>
+                t.id !== id &&
+                !t.completed &&
+                t.recurrence &&
+                sameSeries(t, cur) &&
+                new Date(t.dueISO) > new Date(cur.dueISO)
+            )
+            .sort(
+              (a, b) =>
+                new Date(a.dueISO).getTime() - new Date(b.dueISO).getTime()
+            )[0]?.id || null;
+      }
+      const updated = prev.map(t => {
+        if (t.id === id) {
+          const done = {
+            ...t,
+            seriesId: t.seriesId || t.id,
+            completed: true,
+            completedAt: now,
+            completedBy: (window as any).nostrPK || undefined,
+            streak: newStreak,
+          };
+          toPublish.push(done);
+          return done;
+        }
+        if (t.id === nextId) {
+          const upd = { ...t, seriesId: t.seriesId || t.id, streak: newStreak };
+          toPublish.push(upd);
+          return upd;
+        }
+        return t;
+      });
+      toPublish.forEach(t => {
+        maybePublishTask(t).catch(() => {});
+      });
       const nextISO = cur.recurrence ? nextOccurrence(cur.dueISO, cur.recurrence) : null;
       if (nextISO && cur.recurrence) {
         let shouldClone = true;
@@ -1381,10 +1454,7 @@ export default function App() {
           const csow = startOfWeek(new Date(), settings.weekStart).getTime();
           if (nsow === csow) {
             const exists = updated.some(x =>
-              x.boardId === cur.boardId &&
-              x.title === cur.title &&
-              x.note === cur.note &&
-              x.recurrence && JSON.stringify(x.recurrence) === JSON.stringify(cur.recurrence) &&
+              sameSeries(x, cur) &&
               startOfDay(new Date(x.dueISO)).getTime() === startOfDay(nextDate).getTime()
             );
             if (exists) shouldClone = false;
@@ -1395,6 +1465,7 @@ export default function App() {
           const clone: Task = {
             ...cur,
             id: crypto.randomUUID(),
+            seriesId: cur.seriesId || cur.id,
             completed: false,
             completedAt: undefined,
             completedBy: undefined,
@@ -1436,7 +1507,27 @@ export default function App() {
       if (!ok) return;
     }
     setUndoTask(t);
-    setTasks(prev => prev.filter(x => x.id !== id));
+    setTasks(prev => {
+      const arr = prev.filter(x => x.id !== id);
+      const toPublish: Task[] = [];
+      if (
+        settings.showFullWeekRecurring &&
+        settings.streaksEnabled &&
+        t.recurrence &&
+        (t.recurrence.type === "daily" || t.recurrence.type === "weekly")
+      ) {
+        const next = arr
+          .filter(x => !x.completed && x.recurrence && sameSeries(x, t) && new Date(x.dueISO) > new Date(t.dueISO))
+          .sort((a, b) => new Date(a.dueISO).getTime() - new Date(b.dueISO).getTime())[0];
+        if (next) {
+          const idx = arr.findIndex(x => x.id === next.id);
+          arr[idx] = { ...next, seriesId: next.seriesId || next.id, streak: 0 };
+          toPublish.push(arr[idx]);
+        }
+      }
+      toPublish.forEach(x => maybePublishTask(x).catch(() => {}));
+      return arr;
+    });
     publishTaskDeleted(t).catch(() => {});
     setTimeout(() => setUndoTask(null), 5000); // undo duration
   }
@@ -1526,8 +1617,9 @@ export default function App() {
   }
 
   function saveEdit(updated: Task) {
-    setTasks(prev =>
-      prev.map(t => {
+    setTasks(prev => {
+      let edited: Task | null = null;
+      const arr = prev.map(t => {
         if (t.id !== updated.id) return t;
         let next = updated;
         if (
@@ -1542,10 +1634,16 @@ export default function App() {
             next = { ...updated, streak: 0 };
           }
         }
+        if (next.recurrence) next = { ...next, seriesId: next.seriesId || next.id };
+        else next = { ...next, seriesId: undefined };
         maybePublishTask(next).catch(() => {});
+        edited = next;
         return next;
-      })
-    );
+      });
+      return settings.showFullWeekRecurring && edited?.recurrence
+        ? ensureWeekRecurrences(arr, [edited])
+        : arr;
+    });
     setEditing(null);
   }
 

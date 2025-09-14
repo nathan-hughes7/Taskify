@@ -85,6 +85,7 @@ type Settings = {
   weekStart: Weekday; // 0=Sun, 1=Mon, 6=Sat
   newTaskPosition: "top" | "bottom";
   streaksEnabled: boolean;
+  completedTab: boolean;
 };
 
 const R_NONE: Recurrence = { type: "none" };
@@ -448,9 +449,9 @@ function useSettings() {
   const [settings, setSettingsRaw] = useState<Settings>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}");
-      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, ...parsed };
+      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true, ...parsed };
     } catch {
-      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true };
+      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true };
     }
   });
   const setSettings = (s: Partial<Settings>) => {
@@ -630,6 +631,10 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showWallet, setShowWallet] = useState(false);
   const { receiveToken } = useCashu();
+
+  useEffect(() => {
+    if (!settings.completedTab) setView("board");
+  }, [settings.completedTab]);
 
   // add bar
   const newTitleRef = useRef<HTMLInputElement>(null);
@@ -813,25 +818,30 @@ export default function App() {
     if (!currentBoard || currentBoard.kind !== "week") return new Map<Weekday, Task[]>();
     const visible = tasksForBoard.filter(t => {
       const pendingBounty = t.completed && t.bounty && t.bounty.state !== "claimed";
-      return (!t.completed || pendingBounty) && t.column !== "bounties" && isVisibleNow(t);
+      return ((!t.completed || pendingBounty || !settings.completedTab) && t.column !== "bounties" && isVisibleNow(t));
     });
     const m = new Map<Weekday, Task[]>();
     for (const t of visible) {
       const wd = new Date(t.dueISO).getDay() as Weekday;
       if (!m.has(wd)) m.set(wd, []);
-      m.get(wd)!.push(t); // preserve insertion order for manual reordering
+      m.get(wd)!.push(t);
+    }
+    for (const arr of m.values()) {
+      arr.sort((a, b) => (a.completed === b.completed ? (a.order ?? 0) - (b.order ?? 0) : a.completed ? 1 : -1));
     }
     return m;
-  }, [tasksForBoard, currentBoard]);
+  }, [tasksForBoard, currentBoard, settings.completedTab]);
 
   const bounties = useMemo(
     () => currentBoard?.kind === "week"
-      ? tasksForBoard.filter(t => {
-          const pendingBounty = t.completed && t.bounty && t.bounty.state !== "claimed";
-          return (!t.completed || pendingBounty) && t.column === "bounties" && isVisibleNow(t);
-        })
+      ? tasksForBoard
+          .filter(t => {
+            const pendingBounty = t.completed && t.bounty && t.bounty.state !== "claimed";
+            return ((!t.completed || pendingBounty || !settings.completedTab) && t.column === "bounties" && isVisibleNow(t));
+          })
+          .sort((a, b) => (a.completed === b.completed ? (a.order ?? 0) - (b.order ?? 0) : a.completed ? 1 : -1))
       : [],
-    [tasksForBoard, currentBoard.kind]
+    [tasksForBoard, currentBoard.kind, settings.completedTab]
   );
 
   // Custom list boards
@@ -841,15 +851,18 @@ export default function App() {
     const m = new Map<string, Task[]>();
     const visible = tasksForBoard.filter(t => {
       const pendingBounty = t.completed && t.bounty && t.bounty.state !== "claimed";
-      return (!t.completed || pendingBounty) && t.columnId && isVisibleNow(t);
+      return ((!t.completed || pendingBounty || !settings.completedTab) && t.columnId && isVisibleNow(t));
     });
     for (const col of currentBoard.columns) m.set(col.id, []);
     for (const t of visible) {
       const arr = m.get(t.columnId!);
       if (arr) arr.push(t);
     }
+    for (const arr of m.values()) {
+      arr.sort((a, b) => (a.completed === b.completed ? (a.order ?? 0) - (b.order ?? 0) : a.completed ? 1 : -1));
+    }
     return m;
-  }, [tasksForBoard, currentBoard]);
+  }, [tasksForBoard, currentBoard, settings.completedTab]);
 
   const completed = useMemo(
     () =>
@@ -1670,10 +1683,20 @@ export default function App() {
             >
               ⚙️
             </button>
-            <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
-              <button className={`px-3 py-2 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
-              <button ref={completedTabRef} className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
-            </div>
+            {settings.completedTab ? (
+              <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
+                <button className={`px-3 py-2 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
+                <button ref={completedTabRef} className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
+              </div>
+            ) : (
+              <button
+                className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600 disabled:opacity-50"
+                onClick={clearCompleted}
+                disabled={completed.length === 0}
+              >
+                Clear completed
+              </button>
+            )}
           </div>
         </header>
 
@@ -1681,7 +1704,7 @@ export default function App() {
         <div ref={flyLayerRef} className="pointer-events-none fixed inset-0 z-[9999]" />
 
         {/* Add bar */}
-        {view === "board" && currentBoard && (
+        {(view === "board" || !settings.completedTab) && currentBoard && (
           <div className="flex flex-wrap gap-2 items-center mb-4">
             <input
               ref={newTitleRef}
@@ -1762,7 +1785,7 @@ export default function App() {
         )}
 
         {/* Board/Completed */}
-        {view === "board" ? (
+        {view === "board" || !settings.completedTab ? (
           !currentBoard ? (
             <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-6 text-center text-sm text-neutral-400">No boards. Open Settings to create one.</div>
           ) : currentBoard.kind === "week" ? (
@@ -1786,7 +1809,7 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
-                          onFlyToCompleted={(rect) => flyToCompleted(rect)}
+                          onFlyToCompleted={(rect) => { if (settings.completedTab) flyToCompleted(rect); }}
                           onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
@@ -1814,7 +1837,7 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
-                          onFlyToCompleted={(rect) => flyToCompleted(rect)}
+                          onFlyToCompleted={(rect) => { if (settings.completedTab) flyToCompleted(rect); }}
                           onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
@@ -1852,7 +1875,7 @@ export default function App() {
                         <Card
                           key={t.id}
                           task={t}
-                          onFlyToCompleted={(rect) => flyToCompleted(rect)}
+                          onFlyToCompleted={(rect) => { if (settings.completedTab) flyToCompleted(rect); }}
                           onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
@@ -3540,6 +3563,20 @@ function SettingsModal({
             </button>
           </div>
           <div className="text-xs text-neutral-400 mt-2">Track consecutive completions on recurring tasks.</div>
+        </section>
+
+        {/* Completed tab */}
+        <section>
+          <div className="text-sm font-medium mb-2">Completed tab</div>
+          <div className="flex gap-2">
+            <button
+              className={`px-3 py-2 rounded-xl ${settings.completedTab ? "bg-emerald-600" : "bg-neutral-800"}`}
+              onClick={() => setSettings({ completedTab: !settings.completedTab })}
+            >
+              {settings.completedTab ? "On" : "Off"}
+            </button>
+          </div>
+          <div className="text-xs text-neutral-400 mt-2">Hide the completed tab and show a Clear completed button instead.</div>
         </section>
 
         {/* Boards & Columns */}

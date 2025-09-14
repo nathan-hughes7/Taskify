@@ -1771,59 +1771,61 @@ export default function App() {
               </div>
             )}
 
-            {/* Column picker (adapts to board) */}
-            {currentBoard.kind === "week" ? (
+            {/* Column picker, recurrence and add button */}
+            <div className="w-full flex gap-2 items-center">
+              {currentBoard.kind === "week" ? (
+                <select
+                  value={dayChoice === "bounties" ? "bounties" : String(dayChoice)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setDayChoice(v === "bounties" ? "bounties" : (Number(v) as Weekday));
+                    setScheduleDate("");
+                  }}
+                  className="shrink-0 w-28 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
+                >
+                  {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
+                  <option value="bounties">Bounties</option>
+                </select>
+              ) : (
+                <select
+                  value={String(dayChoice)}
+                  onChange={(e)=>setDayChoice(e.target.value)}
+                  className="shrink-0 w-28 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
+                >
+                  {listColumns.map(c => (<option key={c.id} value={c.id}>{c.name}</option>))}
+                </select>
+              )}
+
+              {/* Recurrence select with Custom… */}
               <select
-                value={dayChoice === "bounties" ? "bounties" : String(dayChoice)}
+                value={quickRule}
                 onChange={(e) => {
-                  const v = e.target.value;
-                  setDayChoice(v === "bounties" ? "bounties" : (Number(v) as Weekday));
-                  setScheduleDate("");
+                  const v = e.target.value as typeof quickRule;
+                  setQuickRule(v);
+                  if (v === "custom") setShowAddAdvanced(true);
                 }}
-                className="min-w-0 w-32 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
+                className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                title="Recurrence"
               >
-                {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
-                <option value="bounties">Bounties</option>
+                <option value="none">No recurrence</option>
+                <option value="daily">Daily</option>
+                <option value="weeklyMonFri">Mon–Fri</option>
+                <option value="weeklyWeekends">Weekends</option>
+                <option value="every2d">Every 2 days</option>
+                <option value="custom">Custom…</option>
               </select>
-            ) : (
-              <select
-                value={String(dayChoice)}
-                onChange={(e)=>setDayChoice(e.target.value)}
-                className="min-w-0 w-32 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
+
+              {quickRule === "custom" && addCustomRule.type !== "none" && (
+                <span className="flex-shrink-0 text-xs text-neutral-400">({labelOf(addCustomRule)})</span>
+              )}
+
+              <button
+                onClick={() => addTask()}
+                className="shrink-0 px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium"
               >
-                {listColumns.map(c => (<option key={c.id} value={c.id}>{c.name}</option>))}
-              </select>
-            )}
-
-            {/* Recurrence select with Custom… */}
-            <select
-              value={quickRule}
-              onChange={(e) => {
-                const v = e.target.value as typeof quickRule;
-                setQuickRule(v);
-                if (v === "custom") setShowAddAdvanced(true);
-              }}
-              className="min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              title="Recurrence"
-            >
-              <option value="none">No recurrence</option>
-              <option value="daily">Daily</option>
-              <option value="weeklyMonFri">Mon–Fri</option>
-              <option value="weeklyWeekends">Weekends</option>
-              <option value="every2d">Every 2 days</option>
-              <option value="custom">Custom…</option>
-            </select>
-
-            {quickRule === "custom" && addCustomRule.type !== "none" && (
-              <span className="text-xs text-neutral-400">({labelOf(addCustomRule)})</span>
-            )}
-
-            <button
-              onClick={() => addTask()}
-              className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium"
-            >
-              Add
-            </button>
+                Add
+              </button>
+            </div>
           </div>
         )}
 

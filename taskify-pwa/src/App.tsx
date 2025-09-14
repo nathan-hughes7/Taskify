@@ -1658,7 +1658,7 @@ export default function App() {
         <header className="flex flex-wrap gap-3 items-center mb-4">
           <h1 className="text-2xl font-semibold tracking-tight">Taskify</h1>
           <div ref={confettiRef} className="relative h-0 w-full" />
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-start gap-2">
             {/* Board switcher */}
             <div
               className="relative"
@@ -1708,28 +1708,28 @@ export default function App() {
                 </div>
               )}
             </div>
-            {currentBoard?.nostr?.boardId && (
+            <div className="flex flex-col gap-2">
+              {currentBoard?.nostr?.boardId && (
+                <button
+                  className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                  onClick={() => setNostrRefresh(n => n + 1)}
+                  title="Refresh shared board"
+                >
+                  🔄
+                </button>
+              )}
               <button
                 className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                onClick={() => setNostrRefresh(n => n + 1)}
-                title="Refresh shared board"
+                onClick={() => setShowSettings(true)}
+                title="Settings"
               >
-                🔄
+                ⚙️
               </button>
-            )}
-
-            {/* Settings + View */}
-            <button
-              className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              onClick={() => setShowSettings(true)}
-              title="Settings"
-            >
-              ⚙️
-            </button>
+            </div>
             {settings.completedTab ? (
-              <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
-                <button className={`px-3 py-2 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
-                <button ref={completedTabRef} className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
+              <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden flex">
+                <button className={`px-3 py-2 flex-1 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
+                <button ref={completedTabRef} className={`px-3 py-2 flex-1 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
               </div>
             ) : (
               <button
@@ -3852,7 +3852,7 @@ function SettingsModal({
                 <div className="text-xs text-neutral-400">Board ID</div>
                 <div className="flex gap-2 items-center">
                   <input readOnly value={manageBoard.nostr.boardId}
-                         className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                         className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
                   <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ try { await navigator.clipboard?.writeText(manageBoard.nostr!.boardId); } catch {} }}>Copy</button>
                 </div>
                   {showAdvanced && (

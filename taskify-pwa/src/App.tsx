@@ -1780,7 +1780,7 @@ export default function App() {
                   setDayChoice(v === "bounties" ? "bounties" : (Number(v) as Weekday));
                   setScheduleDate("");
                 }}
-                className="min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                className="min-w-0 w-32 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
               >
                 {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
                 <option value="bounties">Bounties</option>
@@ -1789,7 +1789,7 @@ export default function App() {
               <select
                 value={String(dayChoice)}
                 onChange={(e)=>setDayChoice(e.target.value)}
-                className="min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                className="min-w-0 w-32 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
               >
                 {listColumns.map(c => (<option key={c.id} value={c.id}>{c.name}</option>))}
               </select>
@@ -1836,7 +1836,7 @@ export default function App() {
               {/* HORIZONTAL board: single row, side-scroll */}
               <div
                 ref={scrollerRef}
-                className="overflow-x-auto pb-4"
+                className="overflow-x-auto pb-4 w-full"
                 style={{ WebkitOverflowScrolling: "touch" }} // fluid momentum scroll on iOS
               >
                 <div className="flex gap-4 min-w-max">
@@ -1903,7 +1903,7 @@ export default function App() {
             // LISTS board (multiple custom columns) — still a horizontal row
             <div
               ref={scrollerRef}
-              className="overflow-x-auto pb-4"
+              className="overflow-x-auto pb-4 w-full"
               style={{ WebkitOverflowScrolling: "touch" }}
             >
               <div className="flex gap-4 min-w-max">

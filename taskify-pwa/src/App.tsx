@@ -1881,23 +1881,7 @@ export default function App() {
           <div className="flex items-center mb-4">
             <h1 className="text-2xl font-semibold tracking-tight">Taskify</h1>
             <div className="ml-auto flex items-center gap-2">
-              {/* Settings */}
-              <button
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                onClick={() => setShowSettings(true)}
-                title="Settings"
-              >
-                ⚙️
-              </button>
-              {/* Wallet (fixed next to Settings) */}
-              <button
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                onClick={() => setShowWallet(true)}
-                title="Wallet"
-              >
-                💰
-              </button>
-              {/* Refresh (appears beside Wallet if shared) */}
+              {/* Refresh (if shared) */}
               {currentBoard?.nostr?.boardId && (
                 <button
                   className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
@@ -1921,6 +1905,22 @@ export default function App() {
                   </svg>
                 </button>
               )}
+              {/* Wallet */}
+              <button
+                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                onClick={() => setShowWallet(true)}
+                title="Wallet"
+              >
+                💰
+              </button>
+              {/* Settings */}
+              <button
+                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                onClick={() => setShowSettings(true)}
+                title="Settings"
+              >
+                ⚙️
+              </button>
             </div>
           </div>
           <div ref={confettiRef} className="relative h-0 w-full" />

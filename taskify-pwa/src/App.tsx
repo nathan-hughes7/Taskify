@@ -87,6 +87,7 @@ type Settings = {
   newTaskPosition: "top" | "bottom";
   streaksEnabled: boolean;
   completedTab: boolean;
+  showFullWeekRecurring: boolean;
   // Base UI font size in pixels; null uses the OS preferred size
   baseFontSize: number | null;
 };
@@ -460,6 +461,7 @@ function useSettings() {
         newTaskPosition: "bottom",
         streaksEnabled: true,
         completedTab: true,
+        showFullWeekRecurring: false,
         ...parsed,
         baseFontSize,
       };
@@ -469,6 +471,7 @@ function useSettings() {
         newTaskPosition: "bottom",
         streaksEnabled: true,
         completedTab: true,
+        showFullWeekRecurring: false,
         baseFontSize: null,
       };
     }
@@ -576,6 +579,12 @@ export default function App() {
   const [settings, setSettings] = useSettings();
   const [defaultRelays, setDefaultRelays] = useState<string[]>(() => loadDefaultRelays());
   useEffect(() => { saveDefaultRelays(defaultRelays); }, [defaultRelays]);
+
+  useEffect(() => {
+    if (!settings.showFullWeekRecurring) return;
+    setTasks(prev => ensureWeekRecurrences(prev));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, settings.showFullWeekRecurring, settings.weekStart, setTasks]);
 
   // Apply font size setting to root; fall back to OS preferred size
   useEffect(() => {
@@ -1224,6 +1233,48 @@ export default function App() {
     return boardTasks.reduce((max, t) => Math.max(max, t.order ?? -1), -1) + 1;
   }
 
+  function ensureWeekRecurrences(arr: Task[]): Task[] {
+    const sow = startOfWeek(new Date(), settings.weekStart).getTime();
+    const out = [...arr];
+    let changed = false;
+    for (const t of arr) {
+      if (!t.recurrence) continue;
+      let nextISO = nextOccurrence(t.dueISO, t.recurrence);
+      while (nextISO) {
+        const nextDate = new Date(nextISO);
+        const nsow = startOfWeek(nextDate, settings.weekStart).getTime();
+        if (nsow > sow) break;
+        if (nsow === sow) {
+          const exists = out.some(x =>
+            x.boardId === t.boardId &&
+            x.title === t.title &&
+            x.note === t.note &&
+            x.recurrence && JSON.stringify(x.recurrence) === JSON.stringify(t.recurrence) &&
+            startOfDay(new Date(x.dueISO)).getTime() === startOfDay(nextDate).getTime()
+          );
+          if (!exists) {
+            const clone: Task = {
+              ...t,
+              id: crypto.randomUUID(),
+              completed: false,
+              completedAt: undefined,
+              completedBy: undefined,
+              dueISO: nextISO,
+              hiddenUntilISO: undefined,
+              order: nextOrderForBoard(t.boardId, out),
+              subtasks: t.subtasks?.map(s => ({ ...s, completed: false })),
+            };
+            maybePublishTask(clone).catch(() => {});
+            out.push(clone);
+            changed = true;
+          }
+        }
+        nextISO = nextOccurrence(nextISO, t.recurrence);
+      }
+    }
+    return changed ? out : arr;
+  }
+
   function addTask(keepKeyboard = false) {
     if (!currentBoard) return;
 
@@ -1323,21 +1374,39 @@ export default function App() {
       if (doneOne) { maybePublishTask(doneOne).catch(() => {}); }
       const nextISO = cur.recurrence ? nextOccurrence(cur.dueISO, cur.recurrence) : null;
       if (nextISO && cur.recurrence) {
-        const nextOrder = nextOrderForBoard(cur.boardId, updated);
-        const clone: Task = {
-          ...cur,
-          id: crypto.randomUUID(),
-          completed: false,
-          completedAt: undefined,
-          completedBy: undefined,
-          dueISO: nextISO,
-          hiddenUntilISO: hiddenUntilForNext(nextISO, cur.recurrence, settings.weekStart),
-          order: nextOrder,
-          streak: newStreak,
-          subtasks: cur.subtasks?.map(s => ({ ...s, completed: false })),
-        };
-        maybePublishTask(clone).catch(() => {});
-        return [...updated, clone];
+        let shouldClone = true;
+        if (settings.showFullWeekRecurring) {
+          const nextDate = new Date(nextISO);
+          const nsow = startOfWeek(nextDate, settings.weekStart).getTime();
+          const csow = startOfWeek(new Date(), settings.weekStart).getTime();
+          if (nsow === csow) {
+            const exists = updated.some(x =>
+              x.boardId === cur.boardId &&
+              x.title === cur.title &&
+              x.note === cur.note &&
+              x.recurrence && JSON.stringify(x.recurrence) === JSON.stringify(cur.recurrence) &&
+              startOfDay(new Date(x.dueISO)).getTime() === startOfDay(nextDate).getTime()
+            );
+            if (exists) shouldClone = false;
+          }
+        }
+        if (shouldClone) {
+          const nextOrder = nextOrderForBoard(cur.boardId, updated);
+          const clone: Task = {
+            ...cur,
+            id: crypto.randomUUID(),
+            completed: false,
+            completedAt: undefined,
+            completedBy: undefined,
+            dueISO: nextISO,
+            hiddenUntilISO: hiddenUntilForNext(nextISO, cur.recurrence, settings.weekStart),
+            order: nextOrder,
+            streak: newStreak,
+            subtasks: cur.subtasks?.map(s => ({ ...s, completed: false })),
+          };
+          maybePublishTask(clone).catch(() => {});
+          return [...updated, clone];
+        }
       }
       return updated;
     });
@@ -3738,6 +3807,20 @@ function SettingsModal({
             </button>
           </div>
           <div className="text-xs text-neutral-400 mt-2">Track consecutive completions on recurring tasks.</div>
+        </section>
+
+        {/* Full week recurring */}
+        <section>
+          <div className="text-sm font-medium mb-2">Show full week for recurring tasks</div>
+          <div className="flex gap-2">
+            <button
+              className={`px-3 py-2 rounded-xl ${settings.showFullWeekRecurring ? "bg-emerald-600" : "bg-neutral-800"}`}
+              onClick={() => setSettings({ showFullWeekRecurring: !settings.showFullWeekRecurring })}
+            >
+              {settings.showFullWeekRecurring ? "On" : "Off"}
+            </button>
+          </div>
+          <div className="text-xs text-neutral-400 mt-2">Display all occurrences for the current week at once.</div>
         </section>
 
         {/* Completed tab */}

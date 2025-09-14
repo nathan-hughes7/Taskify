@@ -1655,10 +1655,19 @@ export default function App() {
     <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <header className="flex flex-wrap gap-3 items-center mb-4">
-          <h1 className="text-2xl font-semibold tracking-tight">Taskify</h1>
+        <header className="mb-4">
+          <div className="flex items-center mb-4">
+            <h1 className="text-2xl font-semibold tracking-tight">Taskify</h1>
+            <button
+              className="ml-auto px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              onClick={() => setShowSettings(true)}
+              title="Settings"
+            >
+              ⚙️
+            </button>
+          </div>
           <div ref={confettiRef} className="relative h-0 w-full" />
-          <div className="ml-auto flex items-start gap-2">
+          <div className="flex flex-wrap gap-3 items-center">
             {/* Board switcher */}
             <div
               className="relative"
@@ -1718,13 +1727,6 @@ export default function App() {
                   🔄
                 </button>
               )}
-              <button
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                onClick={() => setShowSettings(true)}
-                title="Settings"
-              >
-                ⚙️
-              </button>
             </div>
             {settings.completedTab ? (
               <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden flex">

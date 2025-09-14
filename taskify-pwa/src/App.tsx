@@ -2468,16 +2468,18 @@ function Card({
   onFlyToCompleted,
   onDragStart,
   onDragEnd,
+  onSelect,
 }: {
   task: Task;
   onComplete: (from?: DOMRect) => void;
-  onEdit: () => void;
+  onEdit?: () => void;
   onDropBefore: (dragId: string) => void;
   showStreaks: boolean;
   onToggleSubtask: (subId: string) => void;
   onFlyToCompleted: (rect: DOMRect) => void;
   onDragStart: (id: string) => void;
   onDragEnd: () => void;
+  onSelect?: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
@@ -2516,6 +2518,7 @@ function Card({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       onDragLeave={handleDragLeave}
+      onClick={onSelect}
     >
       {/* insert-before indicator */}
       {overBefore && (
@@ -2556,7 +2559,7 @@ function Card({
         )}
 
         {/* Title (hyperlinked if note contains a URL) */}
-        <div className="flex-1 min-w-0 cursor-pointer" onClick={onEdit}>
+        <div className="flex-1 min-w-0 cursor-pointer" onClick={onEdit || onSelect}>
           <div className={`text-sm font-medium leading-[1.15] break-words ${task.completed ? 'line-through text-neutral-400' : ''}`}>
             {renderTitleWithLink(task.title, task.note)}
           </div>

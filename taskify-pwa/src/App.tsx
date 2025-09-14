@@ -1667,57 +1667,57 @@ export default function App() {
             </button>
           </div>
           <div ref={confettiRef} className="relative h-0 w-full" />
-          <div className="flex flex-wrap gap-3 items-center">
-            {/* Board switcher */}
-            <div
-              className="relative"
-              onDragEnter={e => {
-                if (!draggingTaskId) return;
-                e.preventDefault();
-                if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
-                boardDropTimer.current = window.setTimeout(() => setBoardDropOpen(true), 500);
-              }}
-              onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
-              onDragLeave={() => {
-                if (!draggingTaskId) return;
-                if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
-              }}
-            >
-              <select
-                ref={boardSelectorRef}
-                value={currentBoardId}
-                onChange={handleBoardSelect}
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                title="Boards"
+          <div className="flex items-center gap-3 w-full overflow-x-auto">
+            {/* Board switcher and refresh */}
+            <div className="flex items-center gap-2">
+              <div
+                className="relative"
+                onDragEnter={e => {
+                  if (!draggingTaskId) return;
+                  e.preventDefault();
+                  if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
+                  boardDropTimer.current = window.setTimeout(() => setBoardDropOpen(true), 500);
+                }}
+                onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
+                onDragLeave={() => {
+                  if (!draggingTaskId) return;
+                  if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
+                }}
               >
-                <option value="__wallet">💰 Wallet</option>
-                {boards.length === 0 ? (
-                  <option value="">No boards</option>
-                ) : (
-                  boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
+                <select
+                  ref={boardSelectorRef}
+                  value={currentBoardId}
+                  onChange={handleBoardSelect}
+                  className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                  title="Boards"
+                >
+                  <option value="__wallet">💰 Wallet</option>
+                  {boards.length === 0 ? (
+                    <option value="">No boards</option>
+                  ) : (
+                    boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
+                  )}
+                </select>
+                {boardDropOpen && (
+                  <div className="absolute left-full ml-2 top-0 w-48 rounded-xl border border-neutral-800 bg-neutral-900 z-50">
+                    {boards.map(b => (
+                      <div
+                        key={b.id}
+                        className="px-3 py-2 hover:bg-neutral-800"
+                        onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
+                        onDrop={e => {
+                          if (!draggingTaskId) return;
+                          e.preventDefault();
+                          moveTaskToBoard(draggingTaskId, b.id);
+                          handleDragEnd();
+                        }}
+                      >
+                        {b.name}
+                      </div>
+                    ))}
+                  </div>
                 )}
-              </select>
-              {boardDropOpen && (
-                <div className="absolute left-full ml-2 top-0 w-48 rounded-xl border border-neutral-800 bg-neutral-900 z-50">
-                  {boards.map(b => (
-                    <div
-                      key={b.id}
-                      className="px-3 py-2 hover:bg-neutral-800"
-                      onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
-                      onDrop={e => {
-                        if (!draggingTaskId) return;
-                        e.preventDefault();
-                        moveTaskToBoard(draggingTaskId, b.id);
-                        handleDragEnd();
-                      }}
-                    >
-                      {b.name}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="flex gap-2">
+              </div>
               {currentBoard?.nostr?.boardId && (
                 <button
                   className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
@@ -1728,20 +1728,22 @@ export default function App() {
                 </button>
               )}
             </div>
-            {settings.completedTab ? (
-              <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden flex">
-                <button className={`px-3 py-2 flex-1 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
-                <button ref={completedTabRef} className={`px-3 py-2 flex-1 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
-              </div>
-            ) : (
-              <button
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 disabled:opacity-50"
-                onClick={clearCompleted}
-                disabled={completed.length === 0}
-              >
-                Clear completed
-              </button>
-            )}
+            <div className="ml-auto flex-shrink-0">
+              {settings.completedTab ? (
+                <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden flex">
+                  <button className={`px-3 py-2 flex-1 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
+                  <button ref={completedTabRef} className={`px-3 py-2 flex-1 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
+                </div>
+              ) : (
+                <button
+                  className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 disabled:opacity-50"
+                  onClick={clearCompleted}
+                  disabled={completed.length === 0}
+                >
+                  Clear completed
+                </button>
+              )}
+            </div>
           </div>
         </header>
 

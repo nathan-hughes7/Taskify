@@ -2376,7 +2376,7 @@ function DroppableColumn({
   return (
     <div
       ref={ref}
-      className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 min-h-[18rem] w-[18rem] shrink-0"
+      className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 min-h-[288px] w-[288px] shrink-0"
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
     >

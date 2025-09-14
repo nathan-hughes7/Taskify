@@ -86,6 +86,8 @@ type Settings = {
   newTaskPosition: "top" | "bottom";
   streaksEnabled: boolean;
   completedTab: boolean;
+  // Base UI font size in pixels (applied to :root; rem-based UI scales)
+  baseFontSize: number;
 };
 
 const R_NONE: Recurrence = { type: "none" };
@@ -449,9 +451,9 @@ function useSettings() {
   const [settings, setSettingsRaw] = useState<Settings>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}");
-      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true, ...parsed };
+      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true, baseFontSize: 18, ...parsed };
     } catch {
-      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true };
+      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true, baseFontSize: 18 };
     }
   });
   const setSettings = (s: Partial<Settings>) => {
@@ -557,6 +559,14 @@ export default function App() {
   const [settings, setSettings] = useSettings();
   const [defaultRelays, setDefaultRelays] = useState<string[]>(() => loadDefaultRelays());
   useEffect(() => { saveDefaultRelays(defaultRelays); }, [defaultRelays]);
+
+  // Apply font size setting to root for rem-based scaling
+  useEffect(() => {
+    const px = Math.max(12, Math.min(22, Number(settings.baseFontSize) || 18));
+    try {
+      document.documentElement.style.setProperty('--app-font-size', `${px}px`);
+    } catch {}
+  }, [settings.baseFontSize]);
 
   // Nostr pool + merge indexes
   const pool = useMemo(() => createNostrPool(), []);
@@ -726,19 +736,25 @@ export default function App() {
     const endX = target.left + target.width / 2;
     const endY = target.top + target.height / 2;
 
+    const rem = (() => {
+      try { return parseFloat(getComputedStyle(document.documentElement).fontSize) || 16; } catch { return 16; }
+    })();
+    const dotSize = 1.25 * rem; // 20px @ 16px base
+    const dotFont = 0.875 * rem; // 14px @ 16px base
+
     const dot = document.createElement('div');
     dot.style.position = 'fixed';
-    dot.style.left = `${startX - 10}px`;
-    dot.style.top = `${startY - 10}px`;
-    dot.style.width = '20px';
-    dot.style.height = '20px';
+    dot.style.left = `${startX - dotSize / 2}px`;
+    dot.style.top = `${startY - dotSize / 2}px`;
+    dot.style.width = `${dotSize}px`;
+    dot.style.height = `${dotSize}px`;
     dot.style.borderRadius = '9999px';
     dot.style.background = '#10b981';
     dot.style.color = 'white';
     dot.style.display = 'grid';
     dot.style.placeItems = 'center';
-    dot.style.fontSize = '14px';
-    dot.style.lineHeight = '20px';
+    dot.style.fontSize = `${dotFont}px`;
+    dot.style.lineHeight = `${dotSize}px`;
     dot.style.boxShadow = '0 0 0 2px rgba(16,185,129,0.3), 0 6px 16px rgba(0,0,0,0.35)';
     dot.style.zIndex = '1000';
     dot.style.transform = 'translate(0, 0) scale(1)';
@@ -768,18 +784,24 @@ export default function App() {
     const endX = target.left + target.width / 2;
     const endY = target.top + target.height / 2;
 
+    const rem = (() => {
+      try { return parseFloat(getComputedStyle(document.documentElement).fontSize) || 16; } catch { return 16; }
+    })();
+    const coinSize = 1.25 * rem; // 20px @ 16px base
+    const coinFont = 0.875 * rem; // 14px @ 16px base
+
     const makeCoin = () => {
       const coin = document.createElement('div');
       coin.style.position = 'fixed';
-      coin.style.left = `${startX - 10}px`;
-      coin.style.top = `${startY - 10}px`;
-      coin.style.width = '20px';
-      coin.style.height = '20px';
+      coin.style.left = `${startX - coinSize / 2}px`;
+      coin.style.top = `${startY - coinSize / 2}px`;
+      coin.style.width = `${coinSize}px`;
+      coin.style.height = `${coinSize}px`;
       coin.style.borderRadius = '9999px';
       coin.style.display = 'grid';
       coin.style.placeItems = 'center';
-      coin.style.fontSize = '14px';
-      coin.style.lineHeight = '20px';
+      coin.style.fontSize = `${coinFont}px`;
+      coin.style.lineHeight = `${coinSize}px`;
       coin.style.background = 'radial-gradient(circle at 30% 30%, #fde68a, #f59e0b)';
       coin.style.boxShadow = '0 0 0 1px rgba(245,158,11,0.5), 0 6px 16px rgba(0,0,0,0.35)';
       coin.style.zIndex = '1000';
@@ -795,7 +817,7 @@ export default function App() {
       const dx = endX - startX;
       const dy = endY - startY;
       // slight horizontal variance per coin
-      const wobble = (i - 1) * 8; // -8, 0, +8
+      const wobble = (i - 1) * (0.5 * rem); // -0.5rem, 0, +0.5rem
       setTimeout(() => {
         coin.style.transform = `translate(${dx + wobble}px, ${dy}px) scale(0.6)`;
         coin.style.opacity = '0.35';
@@ -1690,7 +1712,7 @@ export default function App() {
               </div>
             ) : (
               <button
-                className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600 disabled:opacity-50"
+                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 disabled:opacity-50"
                 onClick={clearCompleted}
                 disabled={completed.length === 0}
               >
@@ -1718,7 +1740,7 @@ export default function App() {
                 }
               }}
               placeholder="New task…"
-              className="flex-1 min-w-[220px] px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
+              className="flex-1 min-w-[13.75rem] px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
             />
             {newImages.length > 0 && (
               <div className="w-full flex gap-2 mt-2">
@@ -1914,10 +1936,10 @@ export default function App() {
             ) : (
               <ul className="space-y-2">
                 {completed.map((t) => (
-                  <li key={t.id} className="p-3 rounded-xl bg-neutral-800 border border-neutral-700">
+                  <li key={t.id} className="px-3 py-0.5 rounded-xl bg-neutral-800 border border-neutral-700">
                     <div className="flex items-start gap-2">
                       <div className="flex-1">
-                      <div className="text-sm font-medium">
+                      <div className="text-sm font-medium leading-[1.15]">
                           {renderTitleWithLink(t.title, t.note)}
                         </div>
                         <div className="text-xs text-neutral-400">
@@ -1934,7 +1956,7 @@ export default function App() {
                         </div>
                         <TaskMedia task={t} />
                         {t.subtasks?.length ? (
-                          <ul className="mt-2 space-y-1">
+                          <ul className="mt-1 space-y-1">
                             {t.subtasks.map(st => (
                               <li key={st.id} className="flex items-center gap-2 text-xs">
                                 <input type="checkbox" checked={!!st.completed} disabled className="accent-emerald-600"/>
@@ -1944,8 +1966,8 @@ export default function App() {
                           </ul>
                         ) : null}
                         {t.bounty && (
-                          <div className="mt-2">
-                            <span className={`text-[11px] px-2 py-0.5 rounded-full border ${t.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : t.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : t.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
+                          <div className="mt-1">
+                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border ${t.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : t.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : t.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
                               Bounty {typeof t.bounty.amount==='number' ? `• ${t.bounty.amount} sats` : ''} • {t.bounty.state}
                             </span>
                           </div>
@@ -1989,10 +2011,10 @@ export default function App() {
           ) : (
             <ul className="space-y-2">
               {upcoming.map((t) => (
-                <li key={t.id} className="p-3 rounded-xl bg-neutral-900 border border-neutral-800">
+                <li key={t.id} className="px-3 py-0.5 rounded-xl bg-neutral-900 border border-neutral-800">
                   <div className="flex items-start gap-2">
                     <div className="flex-1">
-                      <div className="text-sm font-medium">{renderTitleWithLink(t.title, t.note)}</div>
+                      <div className="text-sm font-medium leading-[1.15]">{renderTitleWithLink(t.title, t.note)}</div>
                       <div className="text-xs text-neutral-400">
                         {currentBoard?.kind === "week"
                           ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
@@ -2001,7 +2023,7 @@ export default function App() {
                       </div>
                       <TaskMedia task={t} />
                       {t.subtasks?.length ? (
-                        <ul className="mt-2 space-y-1">
+                        <ul className="mt-1 space-y-1">
                           {t.subtasks.map(st => (
                             <li key={st.id} className="flex items-center gap-2 text-xs">
                               <input type="checkbox" checked={!!st.completed} disabled className="accent-emerald-600"/>
@@ -2259,7 +2281,7 @@ function UrlPreview({ text }: { text: string }) {
       href={data.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="block w-full border border-neutral-700 rounded-lg overflow-hidden mt-2"
+      className="block w-full border border-neutral-700 rounded-lg overflow-hidden mt-1"
     >
       {data.image && <img src={data.image} className="w-full h-40 object-cover" />}
       <div className="p-2 text-xs">
@@ -2280,14 +2302,14 @@ function TaskMedia({ task }: { task: Task }) {
     <>
       {noteText && (
         <div
-          className="text-xs text-neutral-400 mt-1 break-words"
+          className="text-xs text-neutral-400 mt-0.5 break-words"
           style={{ display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}
         >
           {autolink(noteText)}
         </div>
       )}
       {task.images?.length ? (
-        <div className="mt-2 space-y-2">
+        <div className="mt-1.5 space-y-2">
           {task.images.map((img, i) => (
             <img key={i} src={img} className="max-h-40 w-full object-contain rounded-lg" />
           ))}
@@ -2392,8 +2414,9 @@ function Card({
   return (
     <div
       ref={cardRef}
-      className="group relative p-3 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
-      style={{ touchAction: "pan-y" }}
+      className="group relative px-2 py-0.5 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
+      // Allow horizontal swiping across columns on mobile
+      style={{ touchAction: "auto" }}
       draggable
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
@@ -2403,7 +2426,7 @@ function Card({
     >
       {/* insert-before indicator */}
       {overBefore && (
-        <div className="absolute -top-[2px] left-0 right-0 h-[3px] bg-emerald-500 rounded-full" />
+        <div className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] bg-emerald-500 rounded-full" />
       )}
 
       <div className="flex items-center gap-2">
@@ -2415,10 +2438,10 @@ function Card({
             }}
             aria-label="Mark incomplete"
             title="Mark incomplete"
-            className="flex items-center justify-center w-9 h-9 rounded-full border border-emerald-500 text-emerald-500"
+            className="flex items-center justify-center w-8 h-8 rounded-full text-emerald-500"
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" className="pointer-events-none">
-              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
+            <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none">
+              <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
               <path d="M8 12l2.5 2.5L16 9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
@@ -2431,24 +2454,24 @@ function Card({
             }}
             aria-label="Complete task"
             title="Mark complete"
-            className="flex items-center justify-center w-9 h-9 rounded-full border border-neutral-600 text-neutral-300 hover:text-emerald-500 hover:border-emerald-500 transition"
+            className="flex items-center justify-center w-8 h-8 rounded-full text-neutral-300 hover:text-emerald-500 transition"
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" className="pointer-events-none">
-              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
+            <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none">
+              <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
             </svg>
           </button>
         )}
 
         {/* Title (hyperlinked if note contains a URL) */}
         <div className="flex-1 min-w-0 cursor-pointer" onClick={onEdit}>
-          <div className={`text-sm font-medium leading-5 break-words ${task.completed ? 'line-through text-neutral-400' : ''}`}>
+          <div className={`text-sm font-medium leading-[1.15] break-words ${task.completed ? 'line-through text-neutral-400' : ''}`}>
             {renderTitleWithLink(task.title, task.note)}
           </div>
           {showStreaks &&
             task.recurrence &&
             (task.recurrence.type === "daily" || task.recurrence.type === "weekly") &&
             typeof task.streak === "number" && task.streak > 0 && (
-              <div className="text-xs text-amber-400 mt-1 flex items-center gap-1">
+              <div className="text-xs text-amber-400 mt-0.5 flex items-center gap-1">
                 <span>🔥</span>
                 <span>{task.streak}</span>
               </div>
@@ -2459,7 +2482,7 @@ function Card({
 
       <TaskMedia task={task} />
       {task.subtasks?.length ? (
-        <ul className="mt-2 space-y-1">
+        <ul className="mt-1 space-y-1">
           {task.subtasks.map((st) => (
             <li key={st.id} className="flex items-center gap-2 text-xs">
               <input
@@ -2474,14 +2497,14 @@ function Card({
         </ul>
       ) : null}
       {task.completed && task.bounty && task.bounty.state !== 'claimed' && (
-        <div className="mt-2 text-xs text-emerald-400">
+        <div className="mt-1 text-xs text-emerald-400">
           {task.bounty.state === 'unlocked' ? 'Bounty unlocked!' : 'Complete! - Unlock bounty'}
         </div>
       )}
       {/* Bounty badge */}
       {task.bounty && (
-        <div className="mt-2">
-          <span className={`text-[11px] px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
+        <div className="mt-1">
+          <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
             Bounty {typeof task.bounty.amount==='number' ? `• ${task.bounty.amount} sats` : ''} • {task.bounty.state}
           </span>
         </div>
@@ -2710,7 +2733,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
           <div className="flex items-center gap-2">
             <div className="text-sm font-medium">Bounty (ecash)</div>
             {task.bounty && (
-              <div className="ml-auto flex items-center gap-2 text-[11px]">
+              <div className="ml-auto flex items-center gap-2 text-[0.6875rem]">
                 <span className={`px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>{task.bounty.state}</span>
                 {task.createdBy && (window as any).nostrPK === task.createdBy && <span className="px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700" title="You created the task">owner: you</span>}
                 {task.bounty.sender && (window as any).nostrPK === task.bounty.sender && <span className="px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700" title="You funded the bounty">funder: you</span>}
@@ -2960,7 +2983,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
               : "(not set)";
             const canCopy = !!display;
             return (
-              <div className="flex items-center justify-between text-[11px] text-neutral-400">
+              <div className="flex items-center justify-between text-[0.6875rem] text-neutral-400">
                 <div>
                   Created by: <span className="font-mono text-neutral-300">{short}</span>
                 </div>
@@ -3000,7 +3023,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                 : "(not set)";
               const canCopy = !!display;
               return (
-                <div className="flex items-center justify-between text-[11px] text-neutral-400">
+                <div className="flex items-center justify-between text-[0.6875rem] text-neutral-400">
                   <div>
                     Completed by: <span className="font-mono text-neutral-300">{short}</span>
                   </div>
@@ -3202,7 +3225,7 @@ function RecurrencePicker({ value, onChange }: { value: Recurrence; onChange: (r
 function Modal({ children, onClose, title, actions, showClose = true }: React.PropsWithChildren<{ onClose: ()=>void; title?: React.ReactNode; actions?: React.ReactNode; showClose?: boolean }>) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-[min(720px,92vw)] max-h-[80vh] overflow-y-auto overflow-x-hidden bg-neutral-900 border border-neutral-700 rounded-2xl p-4">
+      <div className="w-[min(45rem,92vw)] max-h-[80vh] overflow-y-auto overflow-x-hidden bg-neutral-900 border border-neutral-700 rounded-2xl p-4">
         <div className="flex items-center gap-2 mb-3">
           <div className="text-lg font-semibold">{title}</div>
           <div className="ml-auto flex items-center gap-2">
@@ -3225,7 +3248,7 @@ function SideDrawer({ title, onClose, children }: React.PropsWithChildren<{ titl
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="absolute right-0 top-0 bottom-0 w-[min(380px,92vw)] bg-neutral-900 border-l border-neutral-800 p-4 shadow-2xl">
+      <div className="absolute right-0 top-0 bottom-0 w-[min(23.75rem,92vw)] bg-neutral-900 border-l border-neutral-800 p-4 shadow-2xl">
         <div className="flex items-center gap-2 mb-3">
           <div className="text-lg font-semibold">{title}</div>
           <button className="pressable ml-auto px-3 py-1 rounded bg-neutral-800" onClick={onClose}>Close</button>
@@ -3474,7 +3497,7 @@ function SettingsModal({
         onDragLeave={handleDragLeave}
       >
         {overBefore && (
-          <div className="absolute -top-[2px] left-0 right-0 h-[3px] bg-emerald-500 rounded-full" />
+          <div className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] bg-emerald-500 rounded-full" />
         )}
         <button className="flex-1 text-left" onClick={onOpen}>{board.name}</button>
       </li>
@@ -3510,7 +3533,7 @@ function SettingsModal({
         onDragLeave={handleDragLeave}
       >
         {overBefore && (
-          <div className="absolute -top-[2px] left-0 right-0 h-[3px] bg-emerald-500 rounded-full" />
+          <div className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] bg-emerald-500 rounded-full" />
         )}
         <div className="flex-1">{column.name}</div>
         <div className="flex gap-1">
@@ -3530,54 +3553,6 @@ function SettingsModal({
     <>
     <Modal onClose={handleClose} title="Settings">
       <div className="space-y-6">
-
-        {/* Week start */}
-        <section>
-          <div className="text-sm font-medium mb-2">Week starts on</div>
-          <div className="flex gap-2">
-            <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 6 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 6 })}>Saturday</button>
-            <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 0 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 0 })}>Sunday</button>
-            <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 1 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 1 })}>Monday</button>
-          </div>
-          <div className="text-xs text-neutral-400 mt-2">Affects when weekly recurring tasks re-appear.</div>
-        </section>
-
-        {/* New task position */}
-        <section>
-          <div className="text-sm font-medium mb-2">Add new tasks to</div>
-          <div className="flex gap-2">
-            <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'top' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'top' })}>Top</button>
-            <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'bottom' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'bottom' })}>Bottom</button>
-          </div>
-        </section>
-
-        {/* Streaks */}
-        <section>
-          <div className="text-sm font-medium mb-2">Streaks</div>
-          <div className="flex gap-2">
-            <button
-              className={`px-3 py-2 rounded-xl ${settings.streaksEnabled ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ streaksEnabled: !settings.streaksEnabled })}
-            >
-              {settings.streaksEnabled ? "On" : "Off"}
-            </button>
-          </div>
-          <div className="text-xs text-neutral-400 mt-2">Track consecutive completions on recurring tasks.</div>
-        </section>
-
-        {/* Completed tab */}
-        <section>
-          <div className="text-sm font-medium mb-2">Completed tab</div>
-          <div className="flex gap-2">
-            <button
-              className={`px-3 py-2 rounded-xl ${settings.completedTab ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ completedTab: !settings.completedTab })}
-            >
-              {settings.completedTab ? "On" : "Off"}
-            </button>
-          </div>
-          <div className="text-xs text-neutral-400 mt-2">Hide the completed tab and show a Clear completed button instead.</div>
-        </section>
 
         {/* Boards & Columns */}
         <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
@@ -3608,6 +3583,78 @@ function SettingsModal({
               Create/Join
             </button>
           </div>
+        </section>
+
+        {/* Week start */}
+        <section>
+          <div className="text-sm font-medium mb-2">Week starts on</div>
+          <div className="flex gap-2">
+            <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 6 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 6 })}>Saturday</button>
+            <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 0 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 0 })}>Sunday</button>
+            <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 1 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 1 })}>Monday</button>
+          </div>
+          <div className="text-xs text-neutral-400 mt-2">Affects when weekly recurring tasks re-appear.</div>
+        </section>
+
+        {/* New task position */}
+        <section>
+          <div className="text-sm font-medium mb-2">Add new tasks to</div>
+          <div className="flex gap-2">
+            <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'top' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'top' })}>Top</button>
+            <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'bottom' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'bottom' })}>Bottom</button>
+          </div>
+        </section>
+
+        {/* Font size */}
+        <section>
+          <div className="text-sm font-medium mb-2">Font size</div>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 14 ? "bg-emerald-600" : "bg-neutral-800"}`}
+              onClick={() => setSettings({ baseFontSize: 14 })}
+            >Small</button>
+            <button
+              className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 16 ? "bg-emerald-600" : "bg-neutral-800"}`}
+              onClick={() => setSettings({ baseFontSize: 16 })}
+            >Default</button>
+            <button
+              className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 18 ? "bg-emerald-600" : "bg-neutral-800"}`}
+              onClick={() => setSettings({ baseFontSize: 18 })}
+            >Large</button>
+            <button
+              className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 20 ? "bg-emerald-600" : "bg-neutral-800"}`}
+              onClick={() => setSettings({ baseFontSize: 20 })}
+            >X-Large</button>
+          </div>
+          <div className="text-xs text-neutral-400 mt-2">Scales the entire UI. You can fine-tune later.</div>
+        </section>
+
+        {/* Streaks */}
+        <section>
+          <div className="text-sm font-medium mb-2">Streaks</div>
+          <div className="flex gap-2">
+            <button
+              className={`px-3 py-2 rounded-xl ${settings.streaksEnabled ? "bg-emerald-600" : "bg-neutral-800"}`}
+              onClick={() => setSettings({ streaksEnabled: !settings.streaksEnabled })}
+            >
+              {settings.streaksEnabled ? "On" : "Off"}
+            </button>
+          </div>
+          <div className="text-xs text-neutral-400 mt-2">Track consecutive completions on recurring tasks.</div>
+        </section>
+
+        {/* Completed tab */}
+        <section>
+          <div className="text-sm font-medium mb-2">Completed tab</div>
+          <div className="flex gap-2">
+            <button
+              className={`px-3 py-2 rounded-xl ${settings.completedTab ? "bg-emerald-600" : "bg-neutral-800"}`}
+              onClick={() => setSettings({ completedTab: !settings.completedTab })}
+            >
+              {settings.completedTab ? "On" : "Off"}
+            </button>
+          </div>
+          <div className="text-xs text-neutral-400 mt-2">Hide the completed tab and show a Clear completed button instead.</div>
         </section>
 
         {/* Nostr */}

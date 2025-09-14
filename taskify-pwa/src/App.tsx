@@ -750,8 +750,9 @@ export default function App() {
   // fly-to-completed overlay + target
   const flyLayerRef = useRef<HTMLDivElement>(null);
   const completedTabRef = useRef<HTMLButtonElement>(null);
-  // board selector target for coin animation
+  // wallet button target for coin animation
   const boardSelectorRef = useRef<HTMLSelectElement>(null);
+  const walletButtonRef = useRef<HTMLButtonElement>(null);
   const boardDropContainerRef = useRef<HTMLDivElement>(null);
   const boardDropListRef = useRef<HTMLDivElement>(null);
   function burst() {
@@ -825,7 +826,7 @@ export default function App() {
 
   function flyCoinsToWallet(from: DOMRect) {
     const layer = flyLayerRef.current;
-    const targetEl = boardSelectorRef.current;
+    const targetEl = walletButtonRef.current;
     if (!layer || !targetEl) return;
     const target = targetEl.getBoundingClientRect();
 
@@ -1907,6 +1908,7 @@ export default function App() {
               )}
               {/* Wallet */}
               <button
+                ref={walletButtonRef}
                 className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
                 onClick={() => setShowWallet(true)}
                 title="Wallet"

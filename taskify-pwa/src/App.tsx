@@ -1765,8 +1765,14 @@ export default function App() {
                 }
               }}
               placeholder="New task…"
-              className="w-full basis-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
+              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
             />
+            <button
+              onClick={() => addTask()}
+              className="shrink-0 px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium"
+            >
+              Add
+            </button>
             {newImages.length > 0 && (
               <div className="w-full flex gap-2 mt-2">
                 {newImages.map((img, i) => (
@@ -1775,7 +1781,7 @@ export default function App() {
               </div>
             )}
 
-            {/* Column picker, recurrence and add button */}
+            {/* Column picker and recurrence */}
             <div className="w-full flex gap-2 items-center">
               {currentBoard.kind === "week" ? (
                 <select
@@ -1822,13 +1828,6 @@ export default function App() {
               {quickRule === "custom" && addCustomRule.type !== "none" && (
                 <span className="flex-shrink-0 text-xs text-neutral-400">({labelOf(addCustomRule)})</span>
               )}
-
-              <button
-                onClick={() => addTask()}
-                className="shrink-0 px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium"
-              >
-                Add
-              </button>
             </div>
           </div>
         )}

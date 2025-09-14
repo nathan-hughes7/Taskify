@@ -1498,6 +1498,23 @@ export default function App() {
     );
   }
 
+  // Tap on a card title selects its column/day for the Add bar
+  function selectCardForNewAdd(t: Task) {
+    if (!currentBoard) return;
+    if (currentBoard.kind === "week") {
+      if (t.column === "bounties") setDayChoice("bounties");
+      else {
+        try { setDayChoice(new Date(t.dueISO).getDay() as Weekday); } catch {}
+      }
+    } else {
+      if (t.columnId) setDayChoice(t.columnId);
+    }
+    // Ensure free-form schedule isn't overriding the choice
+    setScheduleDate("");
+    // Put cursor in the Add input for quick entry
+    try { newTitleRef.current?.focus(); } catch {}
+  }
+
   function deleteTask(id: string) {
     const t = tasks.find(x => x.id === id);
     if (!t) return;
@@ -2140,6 +2157,7 @@ export default function App() {
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
                           onDragStart={(id) => setDraggingTaskId(id)}
                           onDragEnd={handleDragEnd}
+                          onSelectForAdd={selectCardForNewAdd}
                         />
                       ))}
                     </DroppableColumn>
@@ -2168,6 +2186,7 @@ export default function App() {
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
                           onDragStart={(id) => setDraggingTaskId(id)}
                           onDragEnd={handleDragEnd}
+                          onSelectForAdd={selectCardForNewAdd}
                         />
                     ))}
                   </DroppableColumn>
@@ -2206,6 +2225,7 @@ export default function App() {
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
                           onDragStart={(id) => setDraggingTaskId(id)}
                           onDragEnd={handleDragEnd}
+                          onSelectForAdd={selectCardForNewAdd}
                         />
                     ))}
                   </DroppableColumn>
@@ -2671,6 +2691,7 @@ function Card({
   onFlyToCompleted,
   onDragStart,
   onDragEnd,
+  onSelectForAdd,
 }: {
   task: Task;
   onComplete: (from?: DOMRect) => void;
@@ -2681,6 +2702,7 @@ function Card({
   onFlyToCompleted: (rect: DOMRect) => void;
   onDragStart: (id: string) => void;
   onDragEnd: () => void;
+  onSelectForAdd: (task: Task) => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
@@ -2758,8 +2780,11 @@ function Card({
           </button>
         )}
 
-        {/* Title (hyperlinked if note contains a URL) */}
-        <div className="flex-1 min-w-0 cursor-pointer" onClick={onEdit}>
+        {/* Title (tap selects target for new add; also opens edit) */}
+        <div
+          className="flex-1 min-w-0 cursor-pointer"
+          onClick={() => { try { onSelectForAdd(task); } catch {} onEdit(); }}
+        >
           <div className={`text-sm font-medium leading-[1.15] break-words ${task.completed ? 'line-through text-neutral-400' : ''}`}>
             {renderTitleWithLink(task.title, task.note)}
           </div>

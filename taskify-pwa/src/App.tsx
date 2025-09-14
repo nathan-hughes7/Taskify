@@ -4,6 +4,7 @@ import { CashuWalletModal } from "./components/CashuWalletModal";
 import { useCashu } from "./context/CashuContext";
 import { loadStore as loadProofStore, saveStore as saveProofStore, getActiveMint, setActiveMint } from "./wallet/storage";
 import { encryptToBoard, decryptFromBoard, boardTag } from "./boardCrypto";
+import { useToast } from "./context/ToastContext";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sun
@@ -33,6 +34,7 @@ type Task = {
   dueISO: string;                 // for week board day grouping
   completed?: boolean;
   completedAt?: string;
+  completedBy?: string;           // nostr pubkey of user who marked complete
   recurrence?: Recurrence;
   // Week board columns:
   column?: "day" | "bounties";
@@ -83,6 +85,7 @@ type Settings = {
   weekStart: Weekday; // 0=Sun, 1=Mon, 6=Sat
   newTaskPosition: "top" | "bottom";
   streaksEnabled: boolean;
+  completedTab: boolean;
 };
 
 const R_NONE: Recurrence = { type: "none" };
@@ -120,6 +123,7 @@ const DEFAULT_RELAYS = [
   "wss://relay.damus.io",
   "wss://nos.lol",
   "wss://relay.snort.social",
+  "wss://solife.me/nostrrelay/1",
 ];
 
 function loadDefaultRelays(): string[] {
@@ -445,9 +449,9 @@ function useSettings() {
   const [settings, setSettingsRaw] = useState<Settings>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}");
-      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, ...parsed };
+      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true, ...parsed };
     } catch {
-      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true };
+      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true };
     }
   });
   const setSettings = (s: Partial<Settings>) => {
@@ -522,6 +526,29 @@ function useTasks() {
 
 /* ================= App ================= */
 export default function App() {
+  const { show: showToast } = useToast();
+  // Show toast on any successful clipboard write across the app
+  useEffect(() => {
+    const clip: any = (navigator as any).clipboard;
+    if (!clip || typeof clip.writeText !== 'function') return;
+    const original = clip.writeText.bind(clip);
+    const patched = (text: string) => {
+      try {
+        const p = original(text);
+        if (p && typeof p.then === 'function') {
+          p.then(() => showToast()).catch(() => {});
+        } else {
+          showToast();
+        }
+        return p;
+      } catch {
+        // swallow, behave like original
+        try { return original(text); } catch {}
+      }
+    };
+    try { clip.writeText = patched; } catch {}
+    return () => { try { clip.writeText = original; } catch {} };
+  }, [showToast]);
   const [boards, setBoards] = useBoards();
   const [currentBoardId, setCurrentBoardId] = useState(boards[0]?.id || "");
   const currentBoard = boards.find(b => b.id === currentBoardId);
@@ -605,6 +632,10 @@ export default function App() {
   const [showWallet, setShowWallet] = useState(false);
   const { receiveToken } = useCashu();
 
+  useEffect(() => {
+    if (!settings.completedTab) setView("board");
+  }, [settings.completedTab]);
+
   // add bar
   const newTitleRef = useRef<HTMLInputElement>(null);
   const [newTitle, setNewTitle] = useState("");
@@ -638,6 +669,21 @@ export default function App() {
   // undo snackbar
   const [undoTask, setUndoTask] = useState<Task | null>(null);
 
+  // drag-to-delete
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const [trashHover, setTrashHover] = useState(false);
+  const [upcomingHover, setUpcomingHover] = useState(false);
+  const [boardDropOpen, setBoardDropOpen] = useState(false);
+  const boardDropTimer = useRef<number>();
+
+  function handleDragEnd() {
+    setDraggingTaskId(null);
+    setTrashHover(false);
+    setUpcomingHover(false);
+    setBoardDropOpen(false);
+    if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
+  }
+
   // upcoming drawer (out-of-the-way FAB)
   const [showUpcoming, setShowUpcoming] = useState(false);
 
@@ -646,6 +692,8 @@ export default function App() {
   // fly-to-completed overlay + target
   const flyLayerRef = useRef<HTMLDivElement>(null);
   const completedTabRef = useRef<HTMLButtonElement>(null);
+  // board selector target for coin animation
+  const boardSelectorRef = useRef<HTMLSelectElement>(null);
   function burst() {
     const el = confettiRef.current;
     if (!el) return;
@@ -709,6 +757,55 @@ export default function App() {
     });
   }
 
+  function flyCoinsToWallet(from: DOMRect) {
+    const layer = flyLayerRef.current;
+    const targetEl = boardSelectorRef.current;
+    if (!layer || !targetEl) return;
+    const target = targetEl.getBoundingClientRect();
+
+    const startX = from.left + from.width / 2;
+    const startY = from.top + from.height / 2;
+    const endX = target.left + target.width / 2;
+    const endY = target.top + target.height / 2;
+
+    const makeCoin = () => {
+      const coin = document.createElement('div');
+      coin.style.position = 'fixed';
+      coin.style.left = `${startX - 10}px`;
+      coin.style.top = `${startY - 10}px`;
+      coin.style.width = '20px';
+      coin.style.height = '20px';
+      coin.style.borderRadius = '9999px';
+      coin.style.display = 'grid';
+      coin.style.placeItems = 'center';
+      coin.style.fontSize = '14px';
+      coin.style.lineHeight = '20px';
+      coin.style.background = 'radial-gradient(circle at 30% 30%, #fde68a, #f59e0b)';
+      coin.style.boxShadow = '0 0 0 1px rgba(245,158,11,0.5), 0 6px 16px rgba(0,0,0,0.35)';
+      coin.style.zIndex = '1000';
+      coin.style.transform = 'translate(0, 0) scale(1)';
+      coin.style.transition = 'transform 700ms cubic-bezier(.2,.7,.3,1), opacity 450ms ease 450ms';
+      coin.textContent = '🪙';
+      return coin;
+    };
+
+    for (let i = 0; i < 3; i++) {
+      const coin = makeCoin();
+      layer.appendChild(coin);
+      const dx = endX - startX;
+      const dy = endY - startY;
+      // slight horizontal variance per coin
+      const wobble = (i - 1) * 8; // -8, 0, +8
+      setTimeout(() => {
+        coin.style.transform = `translate(${dx + wobble}px, ${dy}px) scale(0.6)`;
+        coin.style.opacity = '0.35';
+        setTimeout(() => {
+          try { layer.removeChild(coin); } catch {}
+        }, 800);
+      }, i * 140);
+    }
+  }
+
   /* ---------- Derived: board-scoped lists ---------- */
   const tasksForBoard = useMemo(() => {
     return tasks
@@ -721,25 +818,30 @@ export default function App() {
     if (!currentBoard || currentBoard.kind !== "week") return new Map<Weekday, Task[]>();
     const visible = tasksForBoard.filter(t => {
       const pendingBounty = t.completed && t.bounty && t.bounty.state !== "claimed";
-      return (!t.completed || pendingBounty) && t.column !== "bounties" && isVisibleNow(t);
+      return ((!t.completed || pendingBounty || !settings.completedTab) && t.column !== "bounties" && isVisibleNow(t));
     });
     const m = new Map<Weekday, Task[]>();
     for (const t of visible) {
       const wd = new Date(t.dueISO).getDay() as Weekday;
       if (!m.has(wd)) m.set(wd, []);
-      m.get(wd)!.push(t); // preserve insertion order for manual reordering
+      m.get(wd)!.push(t);
+    }
+    for (const arr of m.values()) {
+      arr.sort((a, b) => (a.completed === b.completed ? (a.order ?? 0) - (b.order ?? 0) : a.completed ? 1 : -1));
     }
     return m;
-  }, [tasksForBoard, currentBoard]);
+  }, [tasksForBoard, currentBoard, settings.completedTab]);
 
   const bounties = useMemo(
     () => currentBoard?.kind === "week"
-      ? tasksForBoard.filter(t => {
-          const pendingBounty = t.completed && t.bounty && t.bounty.state !== "claimed";
-          return (!t.completed || pendingBounty) && t.column === "bounties" && isVisibleNow(t);
-        })
+      ? tasksForBoard
+          .filter(t => {
+            const pendingBounty = t.completed && t.bounty && t.bounty.state !== "claimed";
+            return ((!t.completed || pendingBounty || !settings.completedTab) && t.column === "bounties" && isVisibleNow(t));
+          })
+          .sort((a, b) => (a.completed === b.completed ? (a.order ?? 0) - (b.order ?? 0) : a.completed ? 1 : -1))
       : [],
-    [tasksForBoard, currentBoard.kind]
+    [tasksForBoard, currentBoard.kind, settings.completedTab]
   );
 
   // Custom list boards
@@ -749,15 +851,18 @@ export default function App() {
     const m = new Map<string, Task[]>();
     const visible = tasksForBoard.filter(t => {
       const pendingBounty = t.completed && t.bounty && t.bounty.state !== "claimed";
-      return (!t.completed || pendingBounty) && t.columnId && isVisibleNow(t);
+      return ((!t.completed || pendingBounty || !settings.completedTab) && t.columnId && isVisibleNow(t));
     });
     for (const col of currentBoard.columns) m.set(col.id, []);
     for (const t of visible) {
       const arr = m.get(t.columnId!);
       if (arr) arr.push(t);
     }
+    for (const arr of m.values()) {
+      arr.sort((a, b) => (a.completed === b.completed ? (a.order ?? 0) - (b.order ?? 0) : a.completed ? 1 : -1));
+    }
     return m;
-  }, [tasksForBoard, currentBoard]);
+  }, [tasksForBoard, currentBoard, settings.completedTab]);
 
   const completed = useMemo(
     () =>
@@ -843,7 +948,7 @@ export default function App() {
     const status = t.completed ? "done" : "open";
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
     const tags: string[][] = [["d", t.id],["b", bTag],["col", String(colTag)],["status", status]];
-    const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, order: t.order, streak: t.streak };
+    const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, completedBy: t.completedBy, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, order: t.order, streak: t.streak };
     // Include explicit nulls to signal removals when undefined
     body.images = (typeof t.images === 'undefined') ? null : t.images;
     body.bounty = (typeof t.bounty === 'undefined') ? null : t.bounty;
@@ -942,6 +1047,7 @@ export default function App() {
       dueISO: payload.dueISO || isoForWeekday(0),
       completed: status === "done",
       completedAt: payload.completedAt,
+      completedBy: payload.completedBy,
       recurrence: payload.recurrence,
       hiddenUntilISO: payload.hiddenUntilISO,
       order: typeof payload.order === 'number' ? payload.order : undefined,
@@ -1053,8 +1159,37 @@ export default function App() {
   }
 
   function addTask(keepKeyboard = false) {
-    const title = newTitle.trim() || (newImages.length ? "Image" : "");
-    if ((!title && !newImages.length) || !currentBoard) return;
+    if (!currentBoard) return;
+
+    const raw = newTitle.trim();
+    if (raw) {
+      try {
+        const parsed: any = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && parsed.title && parsed.dueISO) {
+          const nextOrder = nextOrderForBoard(currentBoard.id, tasks);
+          const imported: Task = {
+            ...parsed,
+            id: crypto.randomUUID(),
+            boardId: currentBoard.id,
+            order: typeof parsed.order === "number" ? parsed.order : nextOrder,
+          };
+          applyHiddenForFuture(imported);
+          setTasks(prev => [...prev, imported]);
+          maybePublishTask(imported).catch(() => {});
+          setNewTitle("");
+          setNewImages([]);
+          setQuickRule("none");
+          setAddCustomRule(R_NONE);
+          setScheduleDate("");
+          if (keepKeyboard) newTitleRef.current?.focus();
+          else newTitleRef.current?.blur();
+          return;
+        }
+      } catch {}
+    }
+
+    const title = raw || (newImages.length ? "Image" : "");
+    if ((!title && !newImages.length)) return;
 
     const candidate = resolveQuickRule();
     const recurrence = candidate.type === "none" ? undefined : candidate;
@@ -1117,7 +1252,7 @@ export default function App() {
         // regardless of the current timestamp.
         newStreak = newStreak + 1;
       }
-      const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now, streak:newStreak}) : t);
+      const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now, completedBy: (window as any).nostrPK || undefined, streak:newStreak}) : t);
       const doneOne = updated.find(x => x.id === id);
       if (doneOne) { maybePublishTask(doneOne).catch(() => {}); }
       const nextISO = cur.recurrence ? nextOccurrence(cur.dueISO, cur.recurrence) : null;
@@ -1128,6 +1263,7 @@ export default function App() {
           id: crypto.randomUUID(),
           completed: false,
           completedAt: undefined,
+          completedBy: undefined,
           dueISO: nextISO,
           hiddenUntilISO: hiddenUntilForNext(nextISO, cur.recurrence, settings.weekStart),
           order: nextOrder,
@@ -1176,7 +1312,7 @@ export default function App() {
   function restoreTask(id: string) {
     const t = tasks.find((x) => x.id === id);
     if (!t) return;
-    const updated: Task = { ...t, completed: false, completedAt: undefined };
+    const updated: Task = { ...t, completed: false, completedAt: undefined, completedBy: undefined };
     setTasks((prev) => prev.map((x) => (x.id === id ? updated : x)));
     maybePublishTask(updated).catch(() => {});
   }
@@ -1185,6 +1321,25 @@ export default function App() {
       if (t.completed && (!t.bounty || t.bounty.state === 'claimed'))
         publishTaskDeleted(t).catch(() => {});
     setTasks(prev => prev.filter(t => !(t.completed && (!t.bounty || t.bounty.state === 'claimed'))));
+  }
+
+  function postponeTaskOneWeek(id: string) {
+    let updated: Task | undefined;
+    setTasks(prev => prev.map(t => {
+      if (t.id !== id) return t;
+      const nextDue = startOfDay(new Date(t.dueISO));
+      nextDue.setDate(nextDue.getDate() + 7);
+      updated = {
+        ...t,
+        dueISO: nextDue.toISOString(),
+        hiddenUntilISO: startOfWeek(nextDue, settings.weekStart).toISOString(),
+      };
+      return updated!;
+    }));
+    if (updated) {
+      maybePublishTask(updated).catch(() => {});
+      showToast('Task moved to next week');
+    }
   }
 
   async function revealBounty(id: string) {
@@ -1215,7 +1370,7 @@ export default function App() {
     }
   }
 
-  async function claimBounty(id: string) {
+  async function claimBounty(id: string, from?: DOMRect) {
     const t = tasks.find(x => x.id === id);
     if (!t || !t.bounty || t.bounty.state !== 'unlocked' || !t.bounty.token) return;
     try {
@@ -1223,6 +1378,7 @@ export default function App() {
       if (res.crossMint) {
         alert(`Redeemed to a different mint: ${res.usedMintUrl}. Switch to that mint to view the balance.`);
       }
+      try { if (from) flyCoinsToWallet(from); } catch {}
       const updated: Task = {
         ...t,
         bounty: { ...t.bounty, token: '', state: 'claimed', updatedAt: new Date().toISOString() },
@@ -1305,6 +1461,7 @@ export default function App() {
       if (updated.completed && (!updated.bounty || updated.bounty.state === "claimed")) {
         updated.completed = false;
         updated.completedAt = undefined;
+        updated.completedBy = undefined;
       }
 
       // remove original
@@ -1331,6 +1488,65 @@ export default function App() {
       }
       try {
         for (const t of boardTasks) maybePublishTask(t).catch(() => {});
+      } catch {}
+
+      return arr;
+    });
+  }
+
+  function moveTaskToBoard(id: string, boardId: string) {
+    setTasks(prev => {
+      const arr = [...prev];
+      const fromIdx = arr.findIndex(t => t.id === id);
+      if (fromIdx < 0) return prev;
+      const task = arr[fromIdx];
+      const targetBoard = boards.find(b => b.id === boardId);
+      if (!targetBoard) return prev;
+
+      // remove from source
+      arr.splice(fromIdx, 1);
+
+      // recompute order for source board
+      const sourceTasks: Task[] = [];
+      let order = 0;
+      for (let i = 0; i < arr.length; i++) {
+        const t = arr[i];
+        if (t.boardId === task.boardId) {
+          arr[i] = { ...t, order };
+          sourceTasks.push(arr[i]);
+          order++;
+        }
+      }
+
+      const updated: Task = { ...task, boardId };
+      if (targetBoard.kind === "week") {
+        updated.column = "day";
+        updated.columnId = undefined;
+      } else {
+        updated.column = undefined;
+        updated.columnId = targetBoard.columns[0]?.id;
+        updated.dueISO = isoForWeekday(0);
+      }
+
+      arr.push(updated);
+
+      const targetTasks: Task[] = [];
+      order = 0;
+      for (let i = 0; i < arr.length; i++) {
+        const t = arr[i];
+        if (t.boardId === boardId) {
+          if (t === updated) {
+            updated.order = order;
+          } else {
+            arr[i] = { ...t, order };
+          }
+          targetTasks.push(arr[i]);
+          order++;
+        }
+      }
+
+      try {
+        for (const t of [...sourceTasks, ...targetTasks]) maybePublishTask(t).catch(() => {});
       } catch {}
 
       return arr;
@@ -1401,19 +1617,54 @@ export default function App() {
           <div ref={confettiRef} className="relative h-0 w-full" />
           <div className="ml-auto flex items-center gap-2">
             {/* Board switcher */}
-            <select
-              value={currentBoardId}
-              onChange={handleBoardSelect}
-              className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              title="Boards"
+            <div
+              className="relative"
+              onDragEnter={e => {
+                if (!draggingTaskId) return;
+                e.preventDefault();
+                if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
+                boardDropTimer.current = window.setTimeout(() => setBoardDropOpen(true), 500);
+              }}
+              onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
+              onDragLeave={() => {
+                if (!draggingTaskId) return;
+                if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
+              }}
             >
-              <option value="__wallet">💰 Wallet</option>
-              {boards.length === 0 ? (
-                <option value="">No boards</option>
-              ) : (
-                boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
+              <select
+                ref={boardSelectorRef}
+                value={currentBoardId}
+                onChange={handleBoardSelect}
+                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                title="Boards"
+              >
+                <option value="__wallet">💰 Wallet</option>
+                {boards.length === 0 ? (
+                  <option value="">No boards</option>
+                ) : (
+                  boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
+                )}
+              </select>
+              {boardDropOpen && (
+                <div className="absolute left-full ml-2 top-0 w-48 rounded-xl border border-neutral-800 bg-neutral-900 z-50">
+                  {boards.map(b => (
+                    <div
+                      key={b.id}
+                      className="px-3 py-2 hover:bg-neutral-800"
+                      onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
+                      onDrop={e => {
+                        if (!draggingTaskId) return;
+                        e.preventDefault();
+                        moveTaskToBoard(draggingTaskId, b.id);
+                        handleDragEnd();
+                      }}
+                    >
+                      {b.name}
+                    </div>
+                  ))}
+                </div>
               )}
-            </select>
+            </div>
             {currentBoard?.nostr?.boardId && (
               <button
                 className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
@@ -1432,18 +1683,28 @@ export default function App() {
             >
               ⚙️
             </button>
-            <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
-              <button className={`px-3 py-2 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
-              <button ref={completedTabRef} className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
-            </div>
+            {settings.completedTab ? (
+              <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
+                <button className={`px-3 py-2 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
+                <button ref={completedTabRef} className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
+              </div>
+            ) : (
+              <button
+                className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600 disabled:opacity-50"
+                onClick={clearCompleted}
+                disabled={completed.length === 0}
+              >
+                Clear completed
+              </button>
+            )}
           </div>
         </header>
 
-        {/* Animation overlay for fly-to-completed */}
-        <div ref={flyLayerRef} className="pointer-events-none fixed inset-0 z-50" />
+        {/* Animation overlay for fly effects (coins, etc.) */}
+        <div ref={flyLayerRef} className="pointer-events-none fixed inset-0 z-[9999]" />
 
         {/* Add bar */}
-        {view === "board" && currentBoard && (
+        {(view === "board" || !settings.completedTab) && currentBoard && (
           <div className="flex flex-wrap gap-2 items-center mb-4">
             <input
               ref={newTitleRef}
@@ -1524,7 +1785,7 @@ export default function App() {
         )}
 
         {/* Board/Completed */}
-        {view === "board" ? (
+        {view === "board" || !settings.completedTab ? (
           !currentBoard ? (
             <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-6 text-center text-sm text-neutral-400">No boards. Open Settings to create one.</div>
           ) : currentBoard.kind === "week" ? (
@@ -1541,23 +1802,26 @@ export default function App() {
                       key={day}
                       title={WD_SHORT[day]}
                       onDropCard={(payload) => moveTask(payload.id, { type: "day", day })}
+                      onDropEnd={handleDragEnd}
                       data-day={day}
                     >
                         {(byDay.get(day) || []).map((t) => (
                         <Card
                           key={t.id}
                           task={t}
-                          onFlyToCompleted={(rect) => flyToCompleted(rect)}
-                          onComplete={() => {
+                          onFlyToCompleted={(rect) => { if (settings.completedTab) flyToCompleted(rect); }}
+                          onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, from);
                             else restoreTask(t.id);
                           }}
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "day", day }, t.id)}
                           showStreaks={settings.streaksEnabled}
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
+                          onDragStart={(id) => setDraggingTaskId(id)}
+                          onDragEnd={handleDragEnd}
                         />
                       ))}
                     </DroppableColumn>
@@ -1567,22 +1831,25 @@ export default function App() {
                   <DroppableColumn
                     title="Bounties"
                     onDropCard={(payload) => moveTask(payload.id, { type: "bounties" })}
+                    onDropEnd={handleDragEnd}
                   >
                       {bounties.map((t) => (
                         <Card
                           key={t.id}
                           task={t}
-                          onFlyToCompleted={(rect) => flyToCompleted(rect)}
-                          onComplete={() => {
+                          onFlyToCompleted={(rect) => { if (settings.completedTab) flyToCompleted(rect); }}
+                          onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, from);
                             else restoreTask(t.id);
                           }}
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
                           showStreaks={settings.streaksEnabled}
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
+                          onDragStart={(id) => setDraggingTaskId(id)}
+                          onDragEnd={handleDragEnd}
                         />
                     ))}
                   </DroppableColumn>
@@ -1602,22 +1869,25 @@ export default function App() {
                     key={col.id}
                     title={col.name}
                     onDropCard={(payload) => moveTask(payload.id, { type: "list", columnId: col.id })}
+                    onDropEnd={handleDragEnd}
                   >
                       {(itemsByColumn.get(col.id) || []).map((t) => (
                         <Card
                           key={t.id}
                           task={t}
-                          onFlyToCompleted={(rect) => flyToCompleted(rect)}
-                          onComplete={() => {
+                          onFlyToCompleted={(rect) => { if (settings.completedTab) flyToCompleted(rect); }}
+                          onComplete={(from) => {
                             if (!t.completed) completeTask(t.id);
                             else if (t.bounty && t.bounty.state === 'locked') revealBounty(t.id);
-                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id);
+                            else if (t.bounty && t.bounty.state === 'unlocked' && t.bounty.token) claimBounty(t.id, from);
                             else restoreTask(t.id);
                           }}
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
                           showStreaks={settings.streaksEnabled}
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
+                          onDragStart={(id) => setDraggingTaskId(id)}
+                          onDragEnd={handleDragEnd}
                         />
                     ))}
                   </DroppableColumn>
@@ -1696,9 +1966,17 @@ export default function App() {
 
       {/* Floating Upcoming Drawer Button */}
       <button
-        className="fixed bottom-4 right-4 px-3 py-2 rounded-full bg-neutral-800 border border-neutral-700 shadow-lg text-sm"
+        className={`fixed bottom-4 right-4 px-3 py-2 rounded-full bg-neutral-800 border border-neutral-700 shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
         onClick={() => setShowUpcoming(true)}
         title="Upcoming (hidden) tasks"
+        onDragOver={(e) => { e.preventDefault(); setUpcomingHover(true); }}
+        onDragLeave={() => setUpcomingHover(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          const id = e.dataTransfer.getData("text/task-id");
+          if (id) postponeTaskOneWeek(id);
+          handleDragEnd();
+        }}
       >
         Upcoming {upcoming.length ? `(${upcoming.length})` : ""}
       </button>
@@ -1767,6 +2045,39 @@ export default function App() {
         </SideDrawer>
       )}
 
+      {/* Drag trash can */}
+      {draggingTaskId && (
+        <div
+          className="fixed bottom-4 left-4 z-50"
+          onDragOver={(e) => {
+            e.preventDefault();
+            setTrashHover(true);
+          }}
+          onDragLeave={() => setTrashHover(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            const id = e.dataTransfer.getData("text/task-id");
+            if (id) deleteTask(id);
+            handleDragEnd();
+          }}
+        >
+          <div
+            className={`w-14 h-14 rounded-full bg-neutral-900 border border-neutral-700 flex items-center justify-center text-neutral-400 transition-transform ${trashHover ? 'scale-110' : ''}`}
+          >
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              className="pointer-events-none"
+            >
+              <path d="M9 3h6l1 1h5v2H3V4h5l1-1z" />
+              <path d="M5 7h14l-1.5 13h-11L5 7z" />
+            </svg>
+          </div>
+        </div>
+      )}
+
       {/* Undo Snackbar */}
       {undoTask && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-neutral-800 border border-neutral-700 text-sm px-4 py-2 rounded-xl shadow-lg flex items-center gap-3">
@@ -1783,6 +2094,7 @@ export default function App() {
           onDelete={() => { deleteTask(editing.id); setEditing(null); }}
           onSave={saveEdit}
           weekStart={settings.weekStart}
+          onRedeemCoins={(rect)=>flyCoinsToWallet(rect)}
         />
       )}
 
@@ -1990,11 +2302,13 @@ function TaskMedia({ task }: { task: Task }) {
 function DroppableColumn({
   title,
   onDropCard,
+  onDropEnd,
   children,
   ...props
 }: {
   title: string;
   onDropCard: (payload: { id: string }) => void;
+  onDropEnd?: () => void;
   children: React.ReactNode;
 } & React.HTMLAttributes<HTMLDivElement>) {
   const ref = useRef<HTMLDivElement>(null);
@@ -2006,6 +2320,7 @@ function DroppableColumn({
       e.preventDefault();
       const id = e.dataTransfer?.getData("text/task-id");
       if (id) onDropCard({ id });
+      if (onDropEnd) onDropEnd();
     };
     el.addEventListener("dragover", onDragOver);
     el.addEventListener("drop", onDrop);
@@ -2013,7 +2328,7 @@ function DroppableColumn({
       el.removeEventListener("dragover", onDragOver);
       el.removeEventListener("drop", onDrop);
     };
-  }, [onDropCard]);
+  }, [onDropCard, onDropEnd]);
 
   return (
     <div
@@ -2036,14 +2351,18 @@ function Card({
   showStreaks,
   onToggleSubtask,
   onFlyToCompleted,
+  onDragStart,
+  onDragEnd,
 }: {
   task: Task;
-  onComplete: () => void;
+  onComplete: (from?: DOMRect) => void;
   onEdit: () => void;
   onDropBefore: (dragId: string) => void;
   showStreaks: boolean;
   onToggleSubtask: (subId: string) => void;
   onFlyToCompleted: (rect: DOMRect) => void;
+  onDragStart: (id: string) => void;
+  onDragEnd: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
@@ -2052,6 +2371,7 @@ function Card({
     e.dataTransfer.setData("text/task-id", task.id);
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setDragImage(e.currentTarget as HTMLElement, 0, 0);
+    onDragStart(task.id);
   }
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault();
@@ -2064,8 +2384,10 @@ function Card({
     const dragId = e.dataTransfer.getData("text/task-id");
     if (dragId) onDropBefore(dragId);
     setOverBefore(false);
+    onDragEnd();
   }
   function handleDragLeave() { setOverBefore(false); }
+  function handleDragEnd() { onDragEnd(); }
 
   return (
     <div
@@ -2074,6 +2396,7 @@ function Card({
       style={{ touchAction: "pan-y" }}
       draggable
       onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       onDragLeave={handleDragLeave}
@@ -2086,7 +2409,10 @@ function Card({
       <div className="flex items-center gap-2">
         {task.completed ? (
           <button
-            onClick={onComplete}
+            onClick={(e) => {
+              const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+              onComplete(rect);
+            }}
             aria-label="Mark incomplete"
             title="Mark incomplete"
             className="flex items-center justify-center w-9 h-9 rounded-full border border-emerald-500 text-emerald-500"
@@ -2099,8 +2425,9 @@ function Card({
         ) : (
           <button
             onClick={(e) => {
-              try { onFlyToCompleted((e.currentTarget as HTMLButtonElement).getBoundingClientRect()); } catch {}
-              onComplete();
+              const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+              try { onFlyToCompleted(rect); } catch {}
+              onComplete(rect);
             }}
             aria-label="Complete task"
             title="Mark complete"
@@ -2165,13 +2492,13 @@ function Card({
 
 /* Small circular icon button */
 function IconButton({
-  children, onClick, label, intent
-}: React.PropsWithChildren<{ onClick: ()=>void; label: string; intent?: "danger"|"success" }>) {
+  children, onClick, label, intent, buttonRef
+}: React.PropsWithChildren<{ onClick: ()=>void; label: string; intent?: "danger"|"success"; buttonRef?: React.Ref<HTMLButtonElement> }>) {
   const base = "w-9 h-9 rounded-full inline-flex items-center justify-center text-sm border border-transparent bg-neutral-700/40 hover:bg-neutral-700/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500";
   const danger = " border-rose-700";
   const success = " bg-emerald-700/30 hover:bg-emerald-700/50";
   const cls = base + (intent==="danger" ? danger : intent==="success" ? success : "");
-  return <button aria-label={label} title={label} className={cls} onClick={onClick}>{children}</button>;
+  return <button ref={buttonRef} aria-label={label} title={label} className={cls} onClick={onClick}>{children}</button>;
 }
 
 /* ---------- Recurrence helpers & UI ---------- */
@@ -2186,8 +2513,8 @@ function labelOf(r: Recurrence): string {
 }
 
 /* Edit modal with Advanced recurrence */
-function EditModal({ task, onCancel, onDelete, onSave, weekStart }: { 
-  task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void; weekStart: Weekday;
+function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins }: { 
+  task: Task; onCancel: ()=>void; onDelete: ()=>void; onSave: (t: Task)=>void; weekStart: Weekday; onRedeemCoins?: (from: DOMRect)=>void;
 }) {
   const [title, setTitle] = useState(task.title);
   const [note, setNote] = useState(task.note || "");
@@ -2247,13 +2574,13 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
     else newSubtaskRef.current?.blur();
   }
 
-  function save(overrides: Partial<Task> = {}) {
+  function buildTask(overrides: Partial<Task> = {}): Task {
     const dueISO = new Date(scheduledDate + "T00:00").toISOString();
     const due = startOfDay(new Date(dueISO));
     const nowSow = startOfWeek(new Date(), weekStart);
     const dueSow = startOfWeek(due, weekStart);
     const hiddenUntilISO = dueSow.getTime() > nowSow.getTime() ? dueSow.toISOString() : undefined;
-    const base: Task = {
+    return {
       ...task,
       title,
       note: note || undefined,
@@ -2264,7 +2591,15 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
       hiddenUntilISO,
       ...overrides,
     };
-    onSave(base);
+  }
+
+  function save(overrides: Partial<Task> = {}) {
+    onSave(buildTask(overrides));
+  }
+
+  async function copyCurrent() {
+    const base = buildTask();
+    try { await navigator.clipboard?.writeText(JSON.stringify(base)); } catch {}
   }
 
   return (
@@ -2508,12 +2843,25 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                   task.bounty.state === 'unlocked' ? (
                     <button
                       className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
-                      onClick={async () => {
+                      onClick={async (e) => {
+                        const fromRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                         try {
                           const res = await receiveToken(task.bounty!.token!);
                           if (res.crossMint) {
                             alert(`Redeemed to a different mint: ${res.usedMintUrl}. Switch to that mint to view the balance.`);
                           }
+                          try {
+                            const amt = res.proofs.reduce((a, p) => a + (p?.amount || 0), 0);
+                            const raw = localStorage.getItem("cashuHistory");
+                            const existing = raw ? JSON.parse(raw) : [];
+                            const historyItem = {
+                              id: `redeem-bounty-${Date.now()}`,
+                              summary: `Redeemed bounty • ${amt} sats${res.crossMint ? ` at ${res.usedMintUrl}` : ''}`,
+                            };
+                            localStorage.setItem("cashuHistory", JSON.stringify([historyItem, ...existing]));
+                          } catch {}
+                          // Coins fly from the button to the selector target
+                          try { onRedeemCoins?.(fromRect); } catch {}
                           setBountyState('claimed');
                           save({ bounty: { ...task.bounty!, token: '', state: 'claimed', updatedAt: new Date().toISOString() } });
                         } catch (e) {
@@ -2526,7 +2874,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                   ) : (
                     <button
                       className="pressable px-3 py-2 rounded-xl bg-neutral-800"
-                      onClick={() => navigator.clipboard?.writeText(task.bounty!.token!)}
+                      onClick={async () => { try { await navigator.clipboard?.writeText(task.bounty!.token!); } catch {} }}
                     >
                       Copy token
                     </button>
@@ -2593,11 +2941,16 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
         {/* Creator info */}
         <div className="pt-2">
           {(() => {
-            const hex = task.createdBy || "";
-            let display = hex;
+            const raw = task.createdBy || "";
+            let display = raw;
             try {
-              if (/^[0-9a-fA-F]{64}$/.test(hex)) {
-                display = nip19.npubEncode(hex);
+              if (raw.startsWith("npub")) {
+                const dec = nip19.decode(raw);
+                if (typeof dec.data === 'string') display = dec.data;
+                else if (dec.data && (dec.data as any).length) {
+                  const arr = dec.data as unknown as ArrayLike<number>;
+                  display = Array.from(arr).map((x)=>x.toString(16).padStart(2,'0')).join('');
+                }
               }
             } catch {}
             const short = display
@@ -2605,7 +2958,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                 ? display.slice(0, 10) + "…" + display.slice(-6)
                 : display
               : "(not set)";
-            const canCopy = !!hex;
+            const canCopy = !!display;
             return (
               <div className="flex items-center justify-between text-[11px] text-neutral-400">
                 <div>
@@ -2613,8 +2966,8 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
                 </div>
                 <button
                   className={`px-2 py-1 rounded-lg bg-neutral-800 ${canCopy ? '' : 'opacity-50 cursor-not-allowed'} text-xs`}
-                  title={canCopy ? 'Copy creator key' : 'No key to copy'}
-                  onClick={() => { if (canCopy) { try { navigator.clipboard?.writeText(display); } catch {} } }}
+                  title={canCopy ? 'Copy creator key (hex)' : 'No key to copy'}
+                  onClick={async () => { if (canCopy) { try { await navigator.clipboard?.writeText(display); } catch {} } }}
                   disabled={!canCopy}
                 >
                   Copy
@@ -2624,9 +2977,53 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart }: {
           })()}
         </div>
 
+        {/* Completed by info (only when completed) */}
+        {task.completed && (
+          <div className="pt-1">
+            {(() => {
+              const raw = task.completedBy || "";
+              let display = raw;
+              try {
+                if (raw.startsWith("npub")) {
+                  const dec = nip19.decode(raw);
+                  if (typeof dec.data === 'string') display = dec.data;
+                  else if (dec.data && (dec.data as any).length) {
+                    const arr = dec.data as unknown as ArrayLike<number>;
+                    display = Array.from(arr).map((x)=>x.toString(16).padStart(2,'0')).join('');
+                  }
+                }
+              } catch {}
+              const short = display
+                ? display.length > 16
+                  ? display.slice(0, 10) + "…" + display.slice(-6)
+                  : display
+                : "(not set)";
+              const canCopy = !!display;
+              return (
+                <div className="flex items-center justify-between text-[11px] text-neutral-400">
+                  <div>
+                    Completed by: <span className="font-mono text-neutral-300">{short}</span>
+                  </div>
+                  <button
+                    className={`px-2 py-1 rounded-lg bg-neutral-800 ${canCopy ? '' : 'opacity-50 cursor-not-allowed'} text-xs`}
+                    title={canCopy ? 'Copy completer key (hex)' : 'No key to copy'}
+                    onClick={async () => { if (canCopy) { try { await navigator.clipboard?.writeText(display); } catch {} } }}
+                    disabled={!canCopy}
+                  >
+                    Copy
+                  </button>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
         <div className="pt-2 flex justify-between">
           <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
-          <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
+          <div className="flex gap-2">
+            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={copyCurrent}>Copy</button>
+            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
+          </div>
         </div>
       </div>
 
@@ -2882,7 +3279,27 @@ function SettingsModal({
   const [customSk, setCustomSk] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [reloadNeeded, setReloadNeeded] = useState(false);
+  const [newDefaultRelay, setNewDefaultRelay] = useState("");
+  const [newBoardRelay, setNewBoardRelay] = useState("");
+  const [newOverrideRelay, setNewOverrideRelay] = useState("");
   // Mint selector moved to Wallet modal; no need to read here.
+
+  function parseCsv(csv: string): string[] {
+    return csv.split(",").map(s => s.trim()).filter(Boolean);
+  }
+
+  function addRelayToCsv(csv: string, relay: string): string {
+    const list = parseCsv(csv);
+    const val = relay.trim();
+    if (!val) return csv;
+    if (list.includes(val)) return csv;
+    return [...list, val].join(",");
+  }
+
+  function removeRelayFromCsv(csv: string, relay: string): string {
+    const list = parseCsv(csv);
+    return list.filter(r => r !== relay).join(",");
+  }
 
   function backupData() {
     const data = {
@@ -3148,6 +3565,20 @@ function SettingsModal({
           <div className="text-xs text-neutral-400 mt-2">Track consecutive completions on recurring tasks.</div>
         </section>
 
+        {/* Completed tab */}
+        <section>
+          <div className="text-sm font-medium mb-2">Completed tab</div>
+          <div className="flex gap-2">
+            <button
+              className={`px-3 py-2 rounded-xl ${settings.completedTab ? "bg-emerald-600" : "bg-neutral-800"}`}
+              onClick={() => setSettings({ completedTab: !settings.completedTab })}
+            >
+              {settings.completedTab ? "On" : "Off"}
+            </button>
+          </div>
+          <div className="text-xs text-neutral-400 mt-2">Hide the completed tab and show a Clear completed button instead.</div>
+        </section>
+
         {/* Boards & Columns */}
         <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
           <div className="flex items-center gap-2 mb-3">
@@ -3189,6 +3620,31 @@ function SettingsModal({
               onClick={()=>setShowAdvanced(a=>!a)}
             >{showAdvanced ? "Hide advanced" : "Advanced"}</button>
           </div>
+          {/* Quick actions available outside Advanced */}
+          <div className="mb-3 flex gap-2">
+            <button
+              className="px-3 py-2 rounded-xl bg-neutral-800"
+              onClick={async ()=>{
+                try {
+                  const sk = localStorage.getItem(LS_NOSTR_SK) || "";
+                  if (!sk) return;
+                  let nsec = "";
+                  try {
+                    // Prefer nip19.nsecEncode when available
+                    // @ts-expect-error - guard at runtime below
+                    nsec = typeof (nip19 as any)?.nsecEncode === 'function' ? (nip19 as any).nsecEncode(sk) : sk;
+                  } catch {
+                    nsec = sk;
+                  }
+                  await navigator.clipboard?.writeText(nsec);
+                } catch {}
+              }}
+            >Copy nsec</button>
+            <button
+              className="px-3 py-2 rounded-xl bg-neutral-800"
+              onClick={()=>setDefaultRelays(DEFAULT_RELAYS.slice())}
+            >Reload default relays</button>
+          </div>
           {showAdvanced && (
             <>
               {/* Public key */}
@@ -3197,7 +3653,7 @@ function SettingsModal({
                 <div className="flex gap-2 items-center">
                   <input readOnly value={pubkeyHex || "(generating…)"}
                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{if(pubkeyHex) navigator.clipboard?.writeText(pubkeyHex);}}>Copy</button>
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ if(pubkeyHex) { try { await navigator.clipboard?.writeText(pubkeyHex); } catch {} } }}>Copy</button>
                 </div>
               </div>
 
@@ -3209,18 +3665,59 @@ function SettingsModal({
                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="nsec or hex"/>
                   <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{onSetKey(customSk); setCustomSk('');}}>Use</button>
                 </div>
-                <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onGenerateKey}>Generate new key</button>
+                <div className="flex gap-2">
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onGenerateKey}>Generate new key</button>
+                  <button
+                    className="px-3 py-2 rounded-xl bg-neutral-800"
+                    onClick={async ()=>{
+                      try {
+                        const sk = localStorage.getItem(LS_NOSTR_SK) || "";
+                        if (!sk) return;
+                        let nsec = "";
+                        try {
+                          // Prefer nip19.nsecEncode when available
+                          // @ts-expect-error - guard at runtime below
+                          nsec = typeof (nip19 as any)?.nsecEncode === 'function' ? (nip19 as any).nsecEncode(sk) : sk;
+                        } catch {
+                          nsec = sk;
+                        }
+                        await navigator.clipboard?.writeText(nsec);
+                      } catch {}
+                    }}
+                  >Copy private key (nsec)</button>
+                </div>
               </div>
 
               {/* Default relays */}
               <div className="mb-3">
-                <div className="text-xs text-neutral-400 mb-1">Default relays (CSV)</div>
-                <input
-                  value={defaultRelays.join(",")}
-                  onChange={(e)=>setDefaultRelays(e.target.value.split(",").map(s=>s.trim()).filter(Boolean))}
-                  className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                  placeholder="wss://relay1, wss://relay2"
-                />
+                <div className="text-xs text-neutral-400 mb-1">Default relays</div>
+                <div className="flex gap-2 mb-2">
+                  <input
+                    value={newDefaultRelay}
+                    onChange={(e)=>setNewDefaultRelay(e.target.value)}
+                    onKeyDown={(e)=>{ if (e.key === 'Enter') { const v = newDefaultRelay.trim(); if (v && !defaultRelays.includes(v)) { setDefaultRelays([...defaultRelays, v]); setNewDefaultRelay(""); } } }}
+                    className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                    placeholder="wss://relay.example"
+                  />
+                  <button
+                    className="px-3 py-2 rounded-xl bg-neutral-800"
+                    onClick={()=>{ const v = newDefaultRelay.trim(); if (v && !defaultRelays.includes(v)) { setDefaultRelays([...defaultRelays, v]); setNewDefaultRelay(""); } }}
+                  >Add</button>
+                </div>
+                <ul className="space-y-2">
+                  {defaultRelays.map((r) => (
+                    <li key={r} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
+                      <div className="flex-1 truncate">{r}</div>
+                      <button className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>setDefaultRelays(defaultRelays.filter(x => x !== r))}>Delete</button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    className="px-3 py-2 rounded-xl bg-neutral-800"
+                    onClick={()=>setDefaultRelays(DEFAULT_RELAYS.slice())}
+                  >Reload defaults</button>
+                </div>
               </div>
             </>
           )}
@@ -3284,15 +3781,39 @@ function SettingsModal({
                 <div className="flex gap-2 items-center">
                   <input readOnly value={manageBoard.nostr.boardId}
                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{navigator.clipboard?.writeText(manageBoard.nostr!.boardId);}}>Copy</button>
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ try { await navigator.clipboard?.writeText(manageBoard.nostr!.boardId); } catch {} }}>Copy</button>
                 </div>
                   {showAdvanced && (
                     <>
-                      <div className="text-xs text-neutral-400">Relays (CSV)</div>
-                      <input value={(manageBoard.nostr.relays || []).join(",")} onChange={(e)=>{
-                        const relays = e.target.value.split(",").map(s=>s.trim()).filter(Boolean);
-                        setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays } }) : b));
-                      }} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                      <div className="text-xs text-neutral-400">Relays</div>
+                      <div className="flex gap-2 mb-2">
+                        <input
+                          value={newBoardRelay}
+                          onChange={(e)=>setNewBoardRelay(e.target.value)}
+                          onKeyDown={(e)=>{ if (e.key === 'Enter' && manageBoard?.nostr) { const v = newBoardRelay.trim(); if (v && !(manageBoard.nostr.relays || []).includes(v)) { setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays: [...(manageBoard.nostr!.relays || []), v] } }) : b)); setNewBoardRelay(""); } } }}
+                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                          placeholder="wss://relay.example"
+                        />
+                        <button
+                          className="px-3 py-2 rounded-xl bg-neutral-800"
+                          onClick={()=>{ if (!manageBoard?.nostr) return; const v = newBoardRelay.trim(); if (v && !(manageBoard.nostr.relays || []).includes(v)) { setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays: [...(manageBoard.nostr!.relays || []), v] } }) : b)); setNewBoardRelay(""); } }}
+                        >Add</button>
+                      </div>
+                      <ul className="space-y-2 mb-2">
+                        {(manageBoard.nostr.relays || []).map((r) => (
+                          <li key={r} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
+                            <div className="flex-1 truncate">{r}</div>
+                            <button
+                              className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600"
+                              onClick={()=>{
+                                if (!manageBoard?.nostr) return;
+                                const relays = (manageBoard.nostr.relays || []).filter(x => x !== r);
+                                setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays } }) : b));
+                              }}
+                            >Delete</button>
+                          </li>
+                        ))}
+                      </ul>
                       <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onRegenerateBoardId(manageBoard.id)}>Generate new board ID</button>
                     </>
                   )}
@@ -3307,8 +3828,25 @@ function SettingsModal({
               <>
                 {showAdvanced && (
                   <>
-                    <div className="text-xs text-neutral-400">Relays override (optional, CSV)</div>
-                    <input value={relaysCsv} onChange={(e)=>setRelaysCsv(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="wss://relay1, wss://relay2"/>
+                    <div className="text-xs text-neutral-400">Relays override (optional)</div>
+                    <div className="flex gap-2 mb-2">
+                      <input
+                        value={newOverrideRelay}
+                        onChange={(e)=>setNewOverrideRelay(e.target.value)}
+                        onKeyDown={(e)=>{ if (e.key === 'Enter') { const v = newOverrideRelay.trim(); if (v) { setRelaysCsv(addRelayToCsv(relaysCsv, v)); setNewOverrideRelay(""); } } }}
+                        className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                        placeholder="wss://relay.example"
+                      />
+                      <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{ const v = newOverrideRelay.trim(); if (v) { setRelaysCsv(addRelayToCsv(relaysCsv, v)); setNewOverrideRelay(""); } }}>Add</button>
+                    </div>
+                    <ul className="space-y-2 mb-2">
+                      {parseCsv(relaysCsv).map((r) => (
+                        <li key={r} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
+                          <div className="flex-1 truncate">{r}</div>
+                          <button className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>setRelaysCsv(removeRelayFromCsv(relaysCsv, r))}>Delete</button>
+                        </li>
+                      ))}
+                    </ul>
                   </>
                 )}
                 <button className="block w-full px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={()=>{onShareBoard(manageBoard.id, showAdvanced ? relaysCsv : ""); setRelaysCsv('');}}>Share this board</button>

@@ -1697,16 +1697,23 @@ export default function App() {
             <div className="flex items-center gap-2">
               <div
                 className="relative"
-                onDragEnter={e => {
+                onDragOver={e => {
                   if (!draggingTaskId) return;
                   e.preventDefault();
-                  if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
-                  boardDropTimer.current = window.setTimeout(() => setBoardDropOpen(true), 500);
+                  if (!boardDropOpen && !boardDropTimer.current) {
+                    boardDropTimer.current = window.setTimeout(() => {
+                      setBoardDropOpen(true);
+                      boardDropTimer.current = undefined;
+                    }, 500);
+                  }
                 }}
-                onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
                 onDragLeave={() => {
                   if (!draggingTaskId) return;
-                  if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
+                  if (boardDropTimer.current) {
+                    window.clearTimeout(boardDropTimer.current);
+                    boardDropTimer.current = undefined;
+                  }
+                  setBoardDropOpen(false);
                 }}
               >
                 <select

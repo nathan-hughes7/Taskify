@@ -1914,10 +1914,10 @@ export default function App() {
             ) : (
               <ul className="space-y-2">
                 {completed.map((t) => (
-                  <li key={t.id} className="px-3 py-2 rounded-xl bg-neutral-800 border border-neutral-700">
+                  <li key={t.id} className="px-3 py-1 rounded-xl bg-neutral-800 border border-neutral-700">
                     <div className="flex items-start gap-2">
                       <div className="flex-1">
-                      <div className="text-sm font-medium leading-tight">
+                      <div className="text-sm font-medium leading-[1.15]">
                           {renderTitleWithLink(t.title, t.note)}
                         </div>
                         <div className="text-xs text-neutral-400">
@@ -1934,7 +1934,7 @@ export default function App() {
                         </div>
                         <TaskMedia task={t} />
                         {t.subtasks?.length ? (
-                          <ul className="mt-2 space-y-1">
+                          <ul className="mt-1 space-y-1">
                             {t.subtasks.map(st => (
                               <li key={st.id} className="flex items-center gap-2 text-xs">
                                 <input type="checkbox" checked={!!st.completed} disabled className="accent-emerald-600"/>
@@ -1944,7 +1944,7 @@ export default function App() {
                           </ul>
                         ) : null}
                         {t.bounty && (
-                          <div className="mt-2">
+                          <div className="mt-1">
                             <span className={`text-[11px] px-2 py-0.5 rounded-full border ${t.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : t.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : t.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
                               Bounty {typeof t.bounty.amount==='number' ? `• ${t.bounty.amount} sats` : ''} • {t.bounty.state}
                             </span>
@@ -1989,10 +1989,10 @@ export default function App() {
           ) : (
             <ul className="space-y-2">
               {upcoming.map((t) => (
-                <li key={t.id} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800">
+                <li key={t.id} className="px-3 py-1 rounded-xl bg-neutral-900 border border-neutral-800">
                   <div className="flex items-start gap-2">
                     <div className="flex-1">
-                      <div className="text-sm font-medium leading-tight">{renderTitleWithLink(t.title, t.note)}</div>
+                      <div className="text-sm font-medium leading-[1.15]">{renderTitleWithLink(t.title, t.note)}</div>
                       <div className="text-xs text-neutral-400">
                         {currentBoard?.kind === "week"
                           ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
@@ -2001,7 +2001,7 @@ export default function App() {
                       </div>
                       <TaskMedia task={t} />
                       {t.subtasks?.length ? (
-                        <ul className="mt-2 space-y-1">
+                        <ul className="mt-1 space-y-1">
                           {t.subtasks.map(st => (
                             <li key={st.id} className="flex items-center gap-2 text-xs">
                               <input type="checkbox" checked={!!st.completed} disabled className="accent-emerald-600"/>
@@ -2259,7 +2259,7 @@ function UrlPreview({ text }: { text: string }) {
       href={data.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="block w-full border border-neutral-700 rounded-lg overflow-hidden mt-2"
+      className="block w-full border border-neutral-700 rounded-lg overflow-hidden mt-1"
     >
       {data.image && <img src={data.image} className="w-full h-40 object-cover" />}
       <div className="p-2 text-xs">
@@ -2280,14 +2280,14 @@ function TaskMedia({ task }: { task: Task }) {
     <>
       {noteText && (
         <div
-          className="text-xs text-neutral-400 mt-1 break-words"
+          className="text-xs text-neutral-400 mt-0.5 break-words"
           style={{ display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}
         >
           {autolink(noteText)}
         </div>
       )}
       {task.images?.length ? (
-        <div className="mt-2 space-y-2">
+        <div className="mt-1.5 space-y-2">
           {task.images.map((img, i) => (
             <img key={i} src={img} className="max-h-40 w-full object-contain rounded-lg" />
           ))}
@@ -2392,7 +2392,7 @@ function Card({
   return (
     <div
       ref={cardRef}
-      className="group relative px-2 py-1.5 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
+      className="group relative px-2 py-1 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
       style={{ touchAction: "pan-y" }}
       draggable
       onDragStart={handleDragStart}
@@ -2415,9 +2415,9 @@ function Card({
             }}
             aria-label="Mark incomplete"
             title="Mark incomplete"
-            className="flex items-center justify-center w-8 h-8 rounded-full text-emerald-500"
+            className="flex items-center justify-center w-7 h-7 rounded-full text-emerald-500"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none">
+            <svg width="18" height="18" viewBox="0 0 24 24" className="pointer-events-none">
               <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
               <path d="M8 12l2.5 2.5L16 9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -2431,9 +2431,9 @@ function Card({
             }}
             aria-label="Complete task"
             title="Mark complete"
-            className="flex items-center justify-center w-8 h-8 rounded-full text-neutral-300 hover:text-emerald-500 transition"
+            className="flex items-center justify-center w-7 h-7 rounded-full text-neutral-300 hover:text-emerald-500 transition"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none">
+            <svg width="18" height="18" viewBox="0 0 24 24" className="pointer-events-none">
               <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
             </svg>
           </button>
@@ -2441,14 +2441,14 @@ function Card({
 
         {/* Title (hyperlinked if note contains a URL) */}
         <div className="flex-1 min-w-0 cursor-pointer" onClick={onEdit}>
-          <div className={`text-sm font-medium leading-tight break-words ${task.completed ? 'line-through text-neutral-400' : ''}`}>
+          <div className={`text-sm font-medium leading-[1.15] break-words ${task.completed ? 'line-through text-neutral-400' : ''}`}>
             {renderTitleWithLink(task.title, task.note)}
           </div>
           {showStreaks &&
             task.recurrence &&
             (task.recurrence.type === "daily" || task.recurrence.type === "weekly") &&
             typeof task.streak === "number" && task.streak > 0 && (
-              <div className="text-xs text-amber-400 mt-1 flex items-center gap-1">
+              <div className="text-xs text-amber-400 mt-0.5 flex items-center gap-1">
                 <span>🔥</span>
                 <span>{task.streak}</span>
               </div>
@@ -2459,7 +2459,7 @@ function Card({
 
       <TaskMedia task={task} />
       {task.subtasks?.length ? (
-        <ul className="mt-2 space-y-1">
+        <ul className="mt-1 space-y-1">
           {task.subtasks.map((st) => (
             <li key={st.id} className="flex items-center gap-2 text-xs">
               <input
@@ -2474,13 +2474,13 @@ function Card({
         </ul>
       ) : null}
       {task.completed && task.bounty && task.bounty.state !== 'claimed' && (
-        <div className="mt-2 text-xs text-emerald-400">
+        <div className="mt-1 text-xs text-emerald-400">
           {task.bounty.state === 'unlocked' ? 'Bounty unlocked!' : 'Complete! - Unlock bounty'}
         </div>
       )}
       {/* Bounty badge */}
       {task.bounty && (
-        <div className="mt-2">
+        <div className="mt-1">
           <span className={`text-[11px] px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
             Bounty {typeof task.bounty.amount==='number' ? `• ${task.bounty.amount} sats` : ''} • {task.bounty.state}
           </span>

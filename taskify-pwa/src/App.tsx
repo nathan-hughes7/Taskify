@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19, nip04 } from "nostr-tools";
 import { CashuWalletModal } from "./components/CashuWalletModal";
 import { useCashu } from "./context/CashuContext";
@@ -705,6 +706,7 @@ export default function App() {
   const [trashHover, setTrashHover] = useState(false);
   const [upcomingHover, setUpcomingHover] = useState(false);
   const [boardDropOpen, setBoardDropOpen] = useState(false);
+  const [boardDropPos, setBoardDropPos] = useState<{ top: number; left: number } | null>(null);
   const boardDropTimer = useRef<number>();
 
   function handleDragEnd() {
@@ -712,6 +714,7 @@ export default function App() {
     setTrashHover(false);
     setUpcomingHover(false);
     setBoardDropOpen(false);
+    setBoardDropPos(null);
     if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
   }
 
@@ -1700,11 +1703,15 @@ export default function App() {
               <div
                 ref={boardDropContainerRef}
                 className="relative"
-                onDragOver={e => {
+              onDragOver={e => {
                   if (!draggingTaskId) return;
                   e.preventDefault();
                   if (!boardDropOpen && !boardDropTimer.current) {
                     boardDropTimer.current = window.setTimeout(() => {
+                      const rect = boardDropContainerRef.current?.getBoundingClientRect();
+                      if (rect) {
+                        setBoardDropPos({ top: rect.top, left: rect.right });
+                      }
                       setBoardDropOpen(true);
                       boardDropTimer.current = undefined;
                     }, 500);
@@ -1735,6 +1742,7 @@ export default function App() {
                     if (withinContainer || withinList) return;
                   }
                   setBoardDropOpen(false);
+                  setBoardDropPos(null);
                 }}
               >
                 <select
@@ -1751,44 +1759,48 @@ export default function App() {
                     boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
                   )}
                 </select>
-                {boardDropOpen && (
-                  <div
-                    ref={boardDropListRef}
-                    className="absolute left-full top-0 w-48 rounded-xl border border-neutral-800 bg-neutral-900 z-50"
-                    onDragLeave={e => {
-                      if (!draggingTaskId) return;
-                      const containerRect = boardDropContainerRef.current?.getBoundingClientRect();
-                      if (containerRect) {
-                        const { clientX: x, clientY: y } = e;
-                        if (
-                          x >= containerRect.left &&
-                          x <= containerRect.right &&
-                          y >= containerRect.top &&
-                          y <= containerRect.bottom
-                        ) {
-                          return;
+                {boardDropOpen && boardDropPos &&
+                  createPortal(
+                    <div
+                      ref={boardDropListRef}
+                      className="fixed w-48 rounded-xl border border-neutral-800 bg-neutral-900 z-50"
+                      style={{ top: boardDropPos.top, left: boardDropPos.left }}
+                      onDragLeave={e => {
+                        if (!draggingTaskId) return;
+                        const containerRect = boardDropContainerRef.current?.getBoundingClientRect();
+                        if (containerRect) {
+                          const { clientX: x, clientY: y } = e;
+                          if (
+                            x >= containerRect.left &&
+                            x <= containerRect.right &&
+                            y >= containerRect.top &&
+                            y <= containerRect.bottom
+                          ) {
+                            return;
+                          }
                         }
-                      }
-                      setBoardDropOpen(false);
-                    }}
-                  >
-                    {boards.map(b => (
-                      <div
-                        key={b.id}
-                        className="px-3 py-2 hover:bg-neutral-800"
-                        onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
-                        onDrop={e => {
-                          if (!draggingTaskId) return;
-                          e.preventDefault();
-                          moveTaskToBoard(draggingTaskId, b.id);
-                          handleDragEnd();
-                        }}
-                      >
-                        {b.name}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                        setBoardDropOpen(false);
+                        setBoardDropPos(null);
+                      }}
+                    >
+                      {boards.map(b => (
+                        <div
+                          key={b.id}
+                          className="px-3 py-2 hover:bg-neutral-800"
+                          onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
+                          onDrop={e => {
+                            if (!draggingTaskId) return;
+                            e.preventDefault();
+                            moveTaskToBoard(draggingTaskId, b.id);
+                            handleDragEnd();
+                          }}
+                        >
+                          {b.name}
+                        </div>
+                      ))}
+                    </div>,
+                    document.body
+                  )}
               </div>
             </div>
             <div className="ml-auto flex-shrink-0">

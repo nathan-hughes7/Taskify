@@ -1369,9 +1369,54 @@ export default function App() {
         // regardless of the current timestamp.
         newStreak = newStreak + 1;
       }
-      const updated = prev.map(t => t.id===id ? ({...t, completed:true, completedAt:now, completedBy: (window as any).nostrPK || undefined, streak:newStreak}) : t);
-      const doneOne = updated.find(x => x.id === id);
-      if (doneOne) { maybePublishTask(doneOne).catch(() => {}); }
+      const toPublish: Task[] = [];
+      let nextId: string | null = null;
+      if (
+        settings.showFullWeekRecurring &&
+        settings.streaksEnabled &&
+        cur.recurrence &&
+        (cur.recurrence.type === "daily" || cur.recurrence.type === "weekly")
+      ) {
+        nextId =
+          prev
+            .filter(
+              t =>
+                t.id !== id &&
+                !t.completed &&
+                t.boardId === cur.boardId &&
+                t.title === cur.title &&
+                t.note === cur.note &&
+                t.recurrence &&
+                JSON.stringify(t.recurrence) === JSON.stringify(cur.recurrence) &&
+                new Date(t.dueISO) > new Date(cur.dueISO)
+            )
+            .sort(
+              (a, b) =>
+                new Date(a.dueISO).getTime() - new Date(b.dueISO).getTime()
+            )[0]?.id || null;
+      }
+      const updated = prev.map(t => {
+        if (t.id === id) {
+          const done = {
+            ...t,
+            completed: true,
+            completedAt: now,
+            completedBy: (window as any).nostrPK || undefined,
+            streak: newStreak,
+          };
+          toPublish.push(done);
+          return done;
+        }
+        if (t.id === nextId) {
+          const upd = { ...t, streak: newStreak };
+          toPublish.push(upd);
+          return upd;
+        }
+        return t;
+      });
+      toPublish.forEach(t => {
+        maybePublishTask(t).catch(() => {});
+      });
       const nextISO = cur.recurrence ? nextOccurrence(cur.dueISO, cur.recurrence) : null;
       if (nextISO && cur.recurrence) {
         let shouldClone = true;

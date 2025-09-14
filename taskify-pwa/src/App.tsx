@@ -2415,7 +2415,8 @@ function Card({
     <div
       ref={cardRef}
       className="group relative px-2 py-0.5 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
-      style={{ touchAction: "pan-y" }}
+      // Allow horizontal swiping across columns on mobile
+      style={{ touchAction: "auto" }}
       draggable
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}

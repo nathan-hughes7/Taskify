@@ -1708,7 +1708,7 @@ export default function App() {
                 </div>
               )}
             </div>
-            <div className="grid gap-2">
+            <div className="flex gap-2">
               {currentBoard?.nostr?.boardId && (
                 <button
                   className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"

@@ -1708,7 +1708,7 @@ export default function App() {
                 </div>
               )}
             </div>
-            <div className="flex flex-col gap-2">
+            <div className="grid gap-2">
               {currentBoard?.nostr?.boardId && (
                 <button
                   className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
@@ -1761,7 +1761,7 @@ export default function App() {
                 }
               }}
               placeholder="New task…"
-              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
+              className="w-full basis-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
             />
             {newImages.length > 0 && (
               <div className="w-full flex gap-2 mt-2">

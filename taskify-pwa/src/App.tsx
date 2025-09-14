@@ -1694,7 +1694,7 @@ export default function App() {
             </div>
           </div>
           <div ref={confettiRef} className="relative h-0 w-full" />
-          <div className="flex items-center gap-3 w-full overflow-x-auto">
+          <div className="flex items-center gap-3 w-full overflow-x-auto overflow-y-visible">
             {/* Board switcher */}
             <div className="flex items-center gap-2">
               <div
@@ -1716,12 +1716,23 @@ export default function App() {
                     window.clearTimeout(boardDropTimer.current);
                     boardDropTimer.current = undefined;
                   }
-                  const rect = boardDropListRef.current?.getBoundingClientRect();
-                  if (boardDropOpen && rect) {
+                  const listRect = boardDropListRef.current?.getBoundingClientRect();
+                  const containerRect = boardDropContainerRef.current?.getBoundingClientRect();
+                  if (boardDropOpen && (listRect || containerRect)) {
                     const { clientX: x, clientY: y } = e;
-                    if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-                      return;
-                    }
+                    const withinContainer =
+                      !!containerRect &&
+                      x >= containerRect.left &&
+                      x <= containerRect.right &&
+                      y >= containerRect.top &&
+                      y <= containerRect.bottom;
+                    const withinList =
+                      !!listRect &&
+                      x >= listRect.left &&
+                      x <= listRect.right &&
+                      y >= listRect.top &&
+                      y <= listRect.bottom;
+                    if (withinContainer || withinList) return;
                   }
                   setBoardDropOpen(false);
                 }}
@@ -1743,13 +1754,18 @@ export default function App() {
                 {boardDropOpen && (
                   <div
                     ref={boardDropListRef}
-                    className="absolute left-full ml-2 top-0 w-48 rounded-xl border border-neutral-800 bg-neutral-900 z-50"
+                    className="absolute left-full top-0 w-48 rounded-xl border border-neutral-800 bg-neutral-900 z-50"
                     onDragLeave={e => {
                       if (!draggingTaskId) return;
                       const containerRect = boardDropContainerRef.current?.getBoundingClientRect();
                       if (containerRect) {
                         const { clientX: x, clientY: y } = e;
-                        if (x >= containerRect.left && x <= containerRect.right && y >= containerRect.top && y <= containerRect.bottom) {
+                        if (
+                          x >= containerRect.left &&
+                          x <= containerRect.right &&
+                          y >= containerRect.top &&
+                          y <= containerRect.bottom
+                        ) {
                           return;
                         }
                       }

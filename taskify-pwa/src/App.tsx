@@ -1652,7 +1652,7 @@ export default function App() {
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 py-4">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <header className="mb-4">
@@ -1667,7 +1667,7 @@ export default function App() {
             </button>
           </div>
           <div ref={confettiRef} className="relative h-0 w-full" />
-          <div className="flex items-center gap-3 w-full overflow-x-auto">
+          <div className="flex items-center gap-3 w-full overflow-x-auto pr-4">
             {/* Board switcher and refresh */}
             <div className="flex items-center gap-2">
               <div

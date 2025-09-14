@@ -691,10 +691,6 @@ export default function App() {
 
   function handleBoardSelect(e: React.ChangeEvent<HTMLSelectElement>) {
     const val = e.target.value;
-    if (val === "__wallet") {
-      setShowWallet(true);
-      return;
-    }
     setCurrentBoardId(val);
   }
 
@@ -1885,6 +1881,14 @@ export default function App() {
           <div className="flex items-center mb-4">
             <h1 className="text-2xl font-semibold tracking-tight">Taskify</h1>
             <div className="ml-auto flex items-center gap-2">
+              {/* Wallet button */}
+              <button
+                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                onClick={() => setShowWallet(true)}
+                title="Wallet"
+              >
+                💰
+              </button>
               {currentBoard?.nostr?.boardId && (
                 <button
                   className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
@@ -1955,7 +1959,6 @@ export default function App() {
                   className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
                   title="Boards"
                 >
-                  <option value="__wallet">💰 Wallet</option>
                   {boards.length === 0 ? (
                     <option value="">No boards</option>
                   ) : (

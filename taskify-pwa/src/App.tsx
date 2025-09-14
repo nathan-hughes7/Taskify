@@ -3531,6 +3531,37 @@ function SettingsModal({
     <Modal onClose={handleClose} title="Settings">
       <div className="space-y-6">
 
+        {/* Boards & Columns */}
+        <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="text-sm font-medium">Boards & Lists</div>
+          </div>
+          <ul className="space-y-2 mb-3">
+            {boards.map((b) => (
+              <BoardListItem
+                key={b.id}
+                board={b}
+                onOpen={() => setManageBoardId(b.id)}
+                onDrop={(dragId, before) => reorderBoards(dragId, b.id, before)}
+              />
+            ))}
+          </ul>
+          <div className="flex gap-2">
+            <input
+              value={newBoardName}
+              onChange={e=>setNewBoardName(e.target.value)}
+              placeholder="Board name or ID"
+              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+            />
+            <button
+              className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 shrink-0"
+              onClick={addBoard}
+            >
+              Create/Join
+            </button>
+          </div>
+        </section>
+
         {/* Week start */}
         <section>
           <div className="text-sm font-medium mb-2">Week starts on</div>
@@ -3577,37 +3608,6 @@ function SettingsModal({
             </button>
           </div>
           <div className="text-xs text-neutral-400 mt-2">Hide the completed tab and show a Clear completed button instead.</div>
-        </section>
-
-        {/* Boards & Columns */}
-        <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="text-sm font-medium">Boards & Lists</div>
-          </div>
-          <ul className="space-y-2 mb-3">
-            {boards.map((b) => (
-              <BoardListItem
-                key={b.id}
-                board={b}
-                onOpen={() => setManageBoardId(b.id)}
-                onDrop={(dragId, before) => reorderBoards(dragId, b.id, before)}
-              />
-            ))}
-          </ul>
-          <div className="flex gap-2">
-            <input
-              value={newBoardName}
-              onChange={e=>setNewBoardName(e.target.value)}
-              placeholder="Board name or ID"
-              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-            />
-            <button
-              className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 shrink-0"
-              onClick={addBoard}
-            >
-              Create/Join
-            </button>
-          </div>
         </section>
 
         {/* Nostr */}

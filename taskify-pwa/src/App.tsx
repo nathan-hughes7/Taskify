@@ -1914,10 +1914,10 @@ export default function App() {
             ) : (
               <ul className="space-y-2">
                 {completed.map((t) => (
-                  <li key={t.id} className="p-3 rounded-xl bg-neutral-800 border border-neutral-700">
+                  <li key={t.id} className="px-3 py-2 rounded-xl bg-neutral-800 border border-neutral-700">
                     <div className="flex items-start gap-2">
                       <div className="flex-1">
-                      <div className="text-sm font-medium">
+                      <div className="text-sm font-medium leading-tight">
                           {renderTitleWithLink(t.title, t.note)}
                         </div>
                         <div className="text-xs text-neutral-400">
@@ -1989,10 +1989,10 @@ export default function App() {
           ) : (
             <ul className="space-y-2">
               {upcoming.map((t) => (
-                <li key={t.id} className="p-3 rounded-xl bg-neutral-900 border border-neutral-800">
+                <li key={t.id} className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800">
                   <div className="flex items-start gap-2">
                     <div className="flex-1">
-                      <div className="text-sm font-medium">{renderTitleWithLink(t.title, t.note)}</div>
+                      <div className="text-sm font-medium leading-tight">{renderTitleWithLink(t.title, t.note)}</div>
                       <div className="text-xs text-neutral-400">
                         {currentBoard?.kind === "week"
                           ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
@@ -2392,7 +2392,7 @@ function Card({
   return (
     <div
       ref={cardRef}
-      className="group relative p-2 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
+      className="group relative px-2 py-1.5 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
       style={{ touchAction: "pan-y" }}
       draggable
       onDragStart={handleDragStart}
@@ -2441,7 +2441,7 @@ function Card({
 
         {/* Title (hyperlinked if note contains a URL) */}
         <div className="flex-1 min-w-0 cursor-pointer" onClick={onEdit}>
-          <div className={`text-sm font-medium leading-5 break-words ${task.completed ? 'line-through text-neutral-400' : ''}`}>
+          <div className={`text-sm font-medium leading-tight break-words ${task.completed ? 'line-through text-neutral-400' : ''}`}>
             {renderTitleWithLink(task.title, task.note)}
           </div>
           {showStreaks &&

@@ -20,7 +20,7 @@
 /* Ensure app fills screen */
 :root {
   /* Default base font size; overridden by app setting */
-  --app-font-size: 16px;
+  --app-font-size: 18px;
 }
 html, body, #root {
   height: 100%;

@@ -1807,7 +1807,7 @@ export default function App() {
                     setDayChoice(v === "bounties" ? "bounties" : (Number(v) as Weekday));
                     setScheduleDate("");
                   }}
-                  className="shrink-0 w-28 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
+                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
                 >
                   {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
                   <option value="bounties">Bounties</option>
@@ -1816,7 +1816,7 @@ export default function App() {
                 <select
                   value={String(dayChoice)}
                   onChange={(e)=>setDayChoice(e.target.value)}
-                  className="shrink-0 w-28 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
+                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
                 >
                   {listColumns.map(c => (<option key={c.id} value={c.id}>{c.name}</option>))}
                 </select>
@@ -1830,7 +1830,7 @@ export default function App() {
                   setQuickRule(v);
                   if (v === "custom") setShowAddAdvanced(true);
                 }}
-                className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                className="shrink-0 w-fit px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
                 title="Recurrence"
               >
                 <option value="none">No recurrence</option>

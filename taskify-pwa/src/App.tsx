@@ -86,8 +86,8 @@ type Settings = {
   newTaskPosition: "top" | "bottom";
   streaksEnabled: boolean;
   completedTab: boolean;
-  // Base UI font size in pixels (applied to :root; rem-based UI scales)
-  baseFontSize: number;
+  // Base UI font size in pixels; null uses the OS preferred size
+  baseFontSize: number | null;
 };
 
 const R_NONE: Recurrence = { type: "none" };
@@ -451,9 +451,9 @@ function useSettings() {
   const [settings, setSettingsRaw] = useState<Settings>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}");
-      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true, baseFontSize: 18, ...parsed };
+      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true, baseFontSize: null, ...parsed };
     } catch {
-      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true, baseFontSize: 18 };
+      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true, baseFontSize: null };
     }
   });
   const setSettings = (s: Partial<Settings>) => {
@@ -560,11 +560,16 @@ export default function App() {
   const [defaultRelays, setDefaultRelays] = useState<string[]>(() => loadDefaultRelays());
   useEffect(() => { saveDefaultRelays(defaultRelays); }, [defaultRelays]);
 
-  // Apply font size setting to root for rem-based scaling
+  // Apply font size setting to root; fall back to OS preferred size
   useEffect(() => {
-    const px = Math.max(12, Math.min(22, Number(settings.baseFontSize) || 18));
     try {
-      document.documentElement.style.setProperty('--app-font-size', `${px}px`);
+      const base = settings.baseFontSize;
+      if (typeof base === "number" && base >= 12) {
+        const px = Math.min(22, base);
+        document.documentElement.style.fontSize = `${px}px`;
+      } else {
+        document.documentElement.style.fontSize = "";
+      }
     } catch {}
   }, [settings.baseFontSize]);
 
@@ -3610,6 +3615,10 @@ function SettingsModal({
           <div className="text-sm font-medium mb-2">Font size</div>
           <div className="flex gap-2 flex-wrap">
             <button
+              className={`px-3 py-2 rounded-xl ${settings.baseFontSize == null ? "bg-emerald-600" : "bg-neutral-800"}`}
+              onClick={() => setSettings({ baseFontSize: null })}
+            >System</button>
+            <button
               className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 14 ? "bg-emerald-600" : "bg-neutral-800"}`}
               onClick={() => setSettings({ baseFontSize: 14 })}
             >Small</button>
@@ -3626,7 +3635,7 @@ function SettingsModal({
               onClick={() => setSettings({ baseFontSize: 20 })}
             >X-Large</button>
           </div>
-          <div className="text-xs text-neutral-400 mt-2">Scales the entire UI. You can fine-tune later.</div>
+          <div className="text-xs text-neutral-400 mt-2">Scales the entire UI. Defaults to the OS reading size.</div>
         </section>
 
         {/* Streaks */}

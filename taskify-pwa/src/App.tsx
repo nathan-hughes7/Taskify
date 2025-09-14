@@ -1690,7 +1690,7 @@ export default function App() {
               </div>
             ) : (
               <button
-                className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600 disabled:opacity-50"
+                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 disabled:opacity-50"
                 onClick={clearCompleted}
                 disabled={completed.length === 0}
               >

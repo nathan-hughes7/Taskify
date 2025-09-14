@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19, nip04 } from "nostr-tools";
 import { CashuWalletModal } from "./components/CashuWalletModal";
 import { useCashu } from "./context/CashuContext";
@@ -86,8 +87,8 @@ type Settings = {
   newTaskPosition: "top" | "bottom";
   streaksEnabled: boolean;
   completedTab: boolean;
-  // Base UI font size in pixels (applied to :root; rem-based UI scales)
-  baseFontSize: number;
+  // Base UI font size in pixels; null uses the OS preferred size
+  baseFontSize: number | null;
 };
 
 const R_NONE: Recurrence = { type: "none" };
@@ -451,9 +452,25 @@ function useSettings() {
   const [settings, setSettingsRaw] = useState<Settings>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}");
-      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true, baseFontSize: 18, ...parsed };
+      let baseFontSize =
+        typeof parsed.baseFontSize === "number" ? parsed.baseFontSize : null;
+      if (baseFontSize === 16) baseFontSize = null; // default to system size
+      return {
+        weekStart: 0,
+        newTaskPosition: "bottom",
+        streaksEnabled: true,
+        completedTab: true,
+        ...parsed,
+        baseFontSize,
+      };
     } catch {
-      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true, baseFontSize: 18 };
+      return {
+        weekStart: 0,
+        newTaskPosition: "bottom",
+        streaksEnabled: true,
+        completedTab: true,
+        baseFontSize: null,
+      };
     }
   });
   const setSettings = (s: Partial<Settings>) => {
@@ -560,11 +577,16 @@ export default function App() {
   const [defaultRelays, setDefaultRelays] = useState<string[]>(() => loadDefaultRelays());
   useEffect(() => { saveDefaultRelays(defaultRelays); }, [defaultRelays]);
 
-  // Apply font size setting to root for rem-based scaling
+  // Apply font size setting to root; fall back to OS preferred size
   useEffect(() => {
-    const px = Math.max(12, Math.min(22, Number(settings.baseFontSize) || 18));
     try {
-      document.documentElement.style.setProperty('--app-font-size', `${px}px`);
+      const base = settings.baseFontSize;
+      if (typeof base === "number" && base >= 12) {
+        const px = Math.min(22, base);
+        document.documentElement.style.fontSize = `${px}px`;
+      } else {
+        document.documentElement.style.fontSize = "";
+      }
     } catch {}
   }, [settings.baseFontSize]);
 
@@ -684,14 +706,34 @@ export default function App() {
   const [trashHover, setTrashHover] = useState(false);
   const [upcomingHover, setUpcomingHover] = useState(false);
   const [boardDropOpen, setBoardDropOpen] = useState(false);
+  const [boardDropPos, setBoardDropPos] = useState<{ top: number; left: number } | null>(null);
   const boardDropTimer = useRef<number>();
+  const boardDropCloseTimer = useRef<number>();
+
+  function scheduleBoardDropClose() {
+    if (boardDropCloseTimer.current) window.clearTimeout(boardDropCloseTimer.current);
+    boardDropCloseTimer.current = window.setTimeout(() => {
+      setBoardDropOpen(false);
+      setBoardDropPos(null);
+      boardDropCloseTimer.current = undefined;
+    }, 100);
+  }
+
+  function cancelBoardDropClose() {
+    if (boardDropCloseTimer.current) {
+      window.clearTimeout(boardDropCloseTimer.current);
+      boardDropCloseTimer.current = undefined;
+    }
+  }
 
   function handleDragEnd() {
     setDraggingTaskId(null);
     setTrashHover(false);
     setUpcomingHover(false);
     setBoardDropOpen(false);
+    setBoardDropPos(null);
     if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
+    if (boardDropCloseTimer.current) window.clearTimeout(boardDropCloseTimer.current);
   }
 
   // upcoming drawer (out-of-the-way FAB)
@@ -704,6 +746,8 @@ export default function App() {
   const completedTabRef = useRef<HTMLButtonElement>(null);
   // board selector target for coin animation
   const boardSelectorRef = useRef<HTMLSelectElement>(null);
+  const boardDropContainerRef = useRef<HTMLDivElement>(null);
+  const boardDropListRef = useRef<HTMLDivElement>(null);
   function burst() {
     const el = confettiRef.current;
     if (!el) return;
@@ -1634,91 +1678,139 @@ export default function App() {
     <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <header className="flex flex-wrap gap-3 items-center mb-4">
-          <h1 className="text-2xl font-semibold tracking-tight">Taskify</h1>
-          <div ref={confettiRef} className="relative h-0 w-full" />
-          <div className="ml-auto flex items-center gap-2">
-            {/* Board switcher */}
-            <div
-              className="relative"
-              onDragEnter={e => {
-                if (!draggingTaskId) return;
-                e.preventDefault();
-                if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
-                boardDropTimer.current = window.setTimeout(() => setBoardDropOpen(true), 500);
-              }}
-              onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
-              onDragLeave={() => {
-                if (!draggingTaskId) return;
-                if (boardDropTimer.current) window.clearTimeout(boardDropTimer.current);
-              }}
-            >
-              <select
-                ref={boardSelectorRef}
-                value={currentBoardId}
-                onChange={handleBoardSelect}
+        <header className="mb-4">
+          <div className="flex items-center mb-4">
+            <h1 className="text-2xl font-semibold tracking-tight">Taskify</h1>
+            <div className="ml-auto flex items-center gap-2">
+              {currentBoard?.nostr?.boardId && (
+                <button
+                  className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                  onClick={() => setNostrRefresh(n => n + 1)}
+                  title="Refresh shared board"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="w-5 h-5 text-white"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polyline points="23 4 23 10 17 10" />
+                    <polyline points="1 20 1 14 7 14" />
+                    <path d="M3.51 9a9 9 0 0114.13-3.36L23 10" />
+                    <path d="M20.49 15a9 9 0 01-14.13 3.36L1 14" />
+                  </svg>
+                </button>
+              )}
+              <button
                 className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                title="Boards"
+                onClick={() => setShowSettings(true)}
+                title="Settings"
               >
-                <option value="__wallet">💰 Wallet</option>
-                {boards.length === 0 ? (
-                  <option value="">No boards</option>
-                ) : (
-                  boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
-                )}
-              </select>
-              {boardDropOpen && (
-                <div className="absolute left-full ml-2 top-0 w-48 rounded-xl border border-neutral-800 bg-neutral-900 z-50">
-                  {boards.map(b => (
+                ⚙️
+              </button>
+            </div>
+          </div>
+          <div ref={confettiRef} className="relative h-0 w-full" />
+          <div className="flex items-center gap-3 w-full overflow-x-auto overflow-y-visible">
+            {/* Board switcher */}
+            <div className="flex items-center gap-2">
+              <div
+                ref={boardDropContainerRef}
+                className="relative"
+                onDragOver={e => {
+                  if (!draggingTaskId) return;
+                  e.preventDefault();
+                  cancelBoardDropClose();
+                  if (!boardDropOpen && !boardDropTimer.current) {
+                    boardDropTimer.current = window.setTimeout(() => {
+                      const rect = boardDropContainerRef.current?.getBoundingClientRect();
+                      if (rect) {
+                        setBoardDropPos({ top: rect.top, left: rect.right });
+                      }
+                      setBoardDropOpen(true);
+                      boardDropTimer.current = undefined;
+                    }, 500);
+                  }
+                }}
+                onDragLeave={() => {
+                  if (!draggingTaskId) return;
+                  if (boardDropTimer.current) {
+                    window.clearTimeout(boardDropTimer.current);
+                    boardDropTimer.current = undefined;
+                  }
+                  scheduleBoardDropClose();
+                }}
+              >
+                <select
+                  ref={boardSelectorRef}
+                  value={currentBoardId}
+                  onChange={handleBoardSelect}
+                  className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                  title="Boards"
+                >
+                  <option value="__wallet">💰 Wallet</option>
+                  {boards.length === 0 ? (
+                    <option value="">No boards</option>
+                  ) : (
+                    boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
+                  )}
+                </select>
+                {boardDropOpen && boardDropPos &&
+                  createPortal(
                     <div
-                      key={b.id}
-                      className="px-3 py-2 hover:bg-neutral-800"
-                      onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
-                      onDrop={e => {
+                      ref={boardDropListRef}
+                      className="fixed w-48 rounded-xl border border-neutral-800 bg-neutral-900 z-50"
+                      style={{ top: boardDropPos.top, left: boardDropPos.left }}
+                      onDragOver={e => {
                         if (!draggingTaskId) return;
                         e.preventDefault();
-                        moveTaskToBoard(draggingTaskId, b.id);
-                        handleDragEnd();
+                        cancelBoardDropClose();
+                      }}
+                      onDragLeave={() => {
+                        if (!draggingTaskId) return;
+                        scheduleBoardDropClose();
                       }}
                     >
-                      {b.name}
-                    </div>
-                  ))}
+                      {boards.map(b => (
+                        <div
+                          key={b.id}
+                          className="px-3 py-2 hover:bg-neutral-800"
+                          onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
+                          onDrop={e => {
+                            if (!draggingTaskId) return;
+                            e.preventDefault();
+                            moveTaskToBoard(draggingTaskId, b.id);
+                            handleDragEnd();
+                          }}
+                        >
+                          {b.name}
+                        </div>
+                      ))}
+                    </div>,
+                    document.body
+                  )}
+              </div>
+            </div>
+            <div className="ml-auto flex-shrink-0">
+              {settings.completedTab ? (
+                <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden flex">
+                  <button className={`px-3 py-2 flex-1 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
+                  <button ref={completedTabRef} className={`px-3 py-2 flex-1 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
                 </div>
+              ) : (
+                <button
+                  className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 disabled:opacity-50"
+                  onClick={clearCompleted}
+                  disabled={completed.length === 0}
+                >
+                  Clear completed
+                </button>
               )}
             </div>
-            {currentBoard?.nostr?.boardId && (
-              <button
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                onClick={() => setNostrRefresh(n => n + 1)}
-                title="Refresh shared board"
-              >
-                🔄
-              </button>
-            )}
-
-            {/* Settings + View */}
-            <button
-              className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              onClick={() => setShowSettings(true)}
-              title="Settings"
-            >
-              ⚙️
-            </button>
-            {settings.completedTab ? (
-              <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
-                <button className={`px-3 py-2 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
-                <button ref={completedTabRef} className={`px-3 py-2 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
-              </div>
-            ) : (
-              <button
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 disabled:opacity-50"
-                onClick={clearCompleted}
-                disabled={completed.length === 0}
-              >
-                Clear completed
-              </button>
-            )}
           </div>
         </header>
 
@@ -1740,8 +1832,14 @@ export default function App() {
                 }
               }}
               placeholder="New task…"
-              className="flex-1 min-w-[13.75rem] px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
+              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
             />
+            <button
+              onClick={() => addTask()}
+              className="shrink-0 px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium"
+            >
+              Add
+            </button>
             {newImages.length > 0 && (
               <div className="w-full flex gap-2 mt-2">
                 {newImages.map((img, i) => (
@@ -1750,59 +1848,54 @@ export default function App() {
               </div>
             )}
 
-            {/* Column picker (adapts to board) */}
-            {currentBoard.kind === "week" ? (
+            {/* Column picker and recurrence */}
+            <div className="w-full flex gap-2 items-center">
+              {currentBoard.kind === "week" ? (
+                <select
+                  value={dayChoice === "bounties" ? "bounties" : String(dayChoice)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setDayChoice(v === "bounties" ? "bounties" : (Number(v) as Weekday));
+                    setScheduleDate("");
+                  }}
+                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
+                >
+                  {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
+                  <option value="bounties">Bounties</option>
+                </select>
+              ) : (
+                <select
+                  value={String(dayChoice)}
+                  onChange={(e)=>setDayChoice(e.target.value)}
+                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
+                >
+                  {listColumns.map(c => (<option key={c.id} value={c.id}>{c.name}</option>))}
+                </select>
+              )}
+
+              {/* Recurrence select with Custom… */}
               <select
-                value={dayChoice === "bounties" ? "bounties" : String(dayChoice)}
+                value={quickRule}
                 onChange={(e) => {
-                  const v = e.target.value;
-                  setDayChoice(v === "bounties" ? "bounties" : (Number(v) as Weekday));
-                  setScheduleDate("");
+                  const v = e.target.value as typeof quickRule;
+                  setQuickRule(v);
+                  if (v === "custom") setShowAddAdvanced(true);
                 }}
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                className="shrink-0 w-fit px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                title="Recurrence"
               >
-                {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
-                <option value="bounties">Bounties</option>
+                <option value="none">No recurrence</option>
+                <option value="daily">Daily</option>
+                <option value="weeklyMonFri">Mon–Fri</option>
+                <option value="weeklyWeekends">Weekends</option>
+                <option value="every2d">Every 2 days</option>
+                <option value="custom">Custom…</option>
               </select>
-            ) : (
-              <select
-                value={String(dayChoice)}
-                onChange={(e)=>setDayChoice(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              >
-                {listColumns.map(c => (<option key={c.id} value={c.id}>{c.name}</option>))}
-              </select>
-            )}
 
-            {/* Recurrence select with Custom… */}
-            <select
-              value={quickRule}
-              onChange={(e) => {
-                const v = e.target.value as typeof quickRule;
-                setQuickRule(v);
-                if (v === "custom") setShowAddAdvanced(true);
-              }}
-              className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-              title="Recurrence"
-            >
-              <option value="none">No recurrence</option>
-              <option value="daily">Daily</option>
-              <option value="weeklyMonFri">Mon–Fri</option>
-              <option value="weeklyWeekends">Weekends</option>
-              <option value="every2d">Every 2 days</option>
-              <option value="custom">Custom…</option>
-            </select>
-
-            {quickRule === "custom" && addCustomRule.type !== "none" && (
-              <span className="text-xs text-neutral-400">({labelOf(addCustomRule)})</span>
-            )}
-
-            <button
-              onClick={() => addTask()}
-              className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium"
-            >
-              Add
-            </button>
+              {quickRule === "custom" && addCustomRule.type !== "none" && (
+                <span className="flex-shrink-0 text-xs text-neutral-400">({labelOf(addCustomRule)})</span>
+              )}
+            </div>
           </div>
         )}
 
@@ -1815,7 +1908,7 @@ export default function App() {
               {/* HORIZONTAL board: single row, side-scroll */}
               <div
                 ref={scrollerRef}
-                className="overflow-x-auto pb-4"
+                className="overflow-x-auto pb-4 w-full"
                 style={{ WebkitOverflowScrolling: "touch" }} // fluid momentum scroll on iOS
               >
                 <div className="flex gap-4 min-w-max">
@@ -1882,7 +1975,7 @@ export default function App() {
             // LISTS board (multiple custom columns) — still a horizontal row
             <div
               ref={scrollerRef}
-              className="overflow-x-auto pb-4"
+              className="overflow-x-auto pb-4 w-full"
               style={{ WebkitOverflowScrolling: "touch" }}
             >
               <div className="flex gap-4 min-w-max">
@@ -2355,7 +2448,7 @@ function DroppableColumn({
   return (
     <div
       ref={ref}
-      className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 min-h-[18rem] w-[18rem] shrink-0"
+      className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 min-h-[288px] w-[288px] shrink-0"
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
     >
@@ -3610,6 +3703,10 @@ function SettingsModal({
           <div className="text-sm font-medium mb-2">Font size</div>
           <div className="flex gap-2 flex-wrap">
             <button
+              className={`px-3 py-2 rounded-xl ${settings.baseFontSize == null ? "bg-emerald-600" : "bg-neutral-800"}`}
+              onClick={() => setSettings({ baseFontSize: null })}
+            >System</button>
+            <button
               className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 14 ? "bg-emerald-600" : "bg-neutral-800"}`}
               onClick={() => setSettings({ baseFontSize: 14 })}
             >Small</button>
@@ -3626,7 +3723,7 @@ function SettingsModal({
               onClick={() => setSettings({ baseFontSize: 20 })}
             >X-Large</button>
           </div>
-          <div className="text-xs text-neutral-400 mt-2">Scales the entire UI. You can fine-tune later.</div>
+          <div className="text-xs text-neutral-400 mt-2">Scales the entire UI. Defaults to the OS reading size.</div>
         </section>
 
         {/* Streaks */}
@@ -3827,7 +3924,7 @@ function SettingsModal({
                 <div className="text-xs text-neutral-400">Board ID</div>
                 <div className="flex gap-2 items-center">
                   <input readOnly value={manageBoard.nostr.boardId}
-                         className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                         className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
                   <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ try { await navigator.clipboard?.writeText(manageBoard.nostr!.boardId); } catch {} }}>Copy</button>
                 </div>
                   {showAdvanced && (

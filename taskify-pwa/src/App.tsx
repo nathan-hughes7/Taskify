@@ -725,6 +725,8 @@ export default function App() {
   const completedTabRef = useRef<HTMLButtonElement>(null);
   // board selector target for coin animation
   const boardSelectorRef = useRef<HTMLSelectElement>(null);
+  const boardDropContainerRef = useRef<HTMLDivElement>(null);
+  const boardDropListRef = useRef<HTMLDivElement>(null);
   function burst() {
     const el = confettiRef.current;
     if (!el) return;
@@ -1696,6 +1698,7 @@ export default function App() {
             {/* Board switcher */}
             <div className="flex items-center gap-2">
               <div
+                ref={boardDropContainerRef}
                 className="relative"
                 onDragOver={e => {
                   if (!draggingTaskId) return;
@@ -1707,11 +1710,18 @@ export default function App() {
                     }, 500);
                   }
                 }}
-                onDragLeave={() => {
+                onDragLeave={e => {
                   if (!draggingTaskId) return;
                   if (boardDropTimer.current) {
                     window.clearTimeout(boardDropTimer.current);
                     boardDropTimer.current = undefined;
+                  }
+                  const rect = boardDropListRef.current?.getBoundingClientRect();
+                  if (boardDropOpen && rect) {
+                    const { clientX: x, clientY: y } = e;
+                    if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                      return;
+                    }
                   }
                   setBoardDropOpen(false);
                 }}
@@ -1731,7 +1741,21 @@ export default function App() {
                   )}
                 </select>
                 {boardDropOpen && (
-                  <div className="absolute left-full ml-2 top-0 w-48 rounded-xl border border-neutral-800 bg-neutral-900 z-50">
+                  <div
+                    ref={boardDropListRef}
+                    className="absolute left-full ml-2 top-0 w-48 rounded-xl border border-neutral-800 bg-neutral-900 z-50"
+                    onDragLeave={e => {
+                      if (!draggingTaskId) return;
+                      const containerRect = boardDropContainerRef.current?.getBoundingClientRect();
+                      if (containerRect) {
+                        const { clientX: x, clientY: y } = e;
+                        if (x >= containerRect.left && x <= containerRect.right && y >= containerRect.top && y <= containerRect.bottom) {
+                          return;
+                        }
+                      }
+                      setBoardDropOpen(false);
+                    }}
+                  >
                     {boards.map(b => (
                       <div
                         key={b.id}

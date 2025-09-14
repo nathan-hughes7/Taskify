@@ -451,9 +451,25 @@ function useSettings() {
   const [settings, setSettingsRaw] = useState<Settings>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}");
-      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true, baseFontSize: null, ...parsed };
+      let baseFontSize =
+        typeof parsed.baseFontSize === "number" ? parsed.baseFontSize : null;
+      if (baseFontSize === 16) baseFontSize = null; // default to system size
+      return {
+        weekStart: 0,
+        newTaskPosition: "bottom",
+        streaksEnabled: true,
+        completedTab: true,
+        ...parsed,
+        baseFontSize,
+      };
     } catch {
-      return { weekStart: 0, newTaskPosition: "bottom", streaksEnabled: true, completedTab: true, baseFontSize: null };
+      return {
+        weekStart: 0,
+        newTaskPosition: "bottom",
+        streaksEnabled: true,
+        completedTab: true,
+        baseFontSize: null,
+      };
     }
   });
   const setSettings = (s: Partial<Settings>) => {
@@ -1745,7 +1761,7 @@ export default function App() {
                 }
               }}
               placeholder="New task…"
-              className="flex-1 min-w-[13.75rem] px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
+              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
             />
             {newImages.length > 0 && (
               <div className="w-full flex gap-2 mt-2">
@@ -1764,7 +1780,7 @@ export default function App() {
                   setDayChoice(v === "bounties" ? "bounties" : (Number(v) as Weekday));
                   setScheduleDate("");
                 }}
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                className="min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               >
                 {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
                 <option value="bounties">Bounties</option>
@@ -1773,7 +1789,7 @@ export default function App() {
               <select
                 value={String(dayChoice)}
                 onChange={(e)=>setDayChoice(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                className="min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               >
                 {listColumns.map(c => (<option key={c.id} value={c.id}>{c.name}</option>))}
               </select>
@@ -1787,7 +1803,7 @@ export default function App() {
                 setQuickRule(v);
                 if (v === "custom") setShowAddAdvanced(true);
               }}
-              className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              className="min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               title="Recurrence"
             >
               <option value="none">No recurrence</option>

@@ -89,6 +89,8 @@ type Settings = {
   streaksEnabled: boolean;
   completedTab: boolean;
   showFullWeekRecurring: boolean;
+  // Add tasks via per-column boxes instead of global add bar
+  inlineAdd: boolean;
   // Base UI font size in pixels; null uses the OS preferred size
   baseFontSize: number | null;
 };
@@ -463,6 +465,7 @@ function useSettings() {
         streaksEnabled: true,
         completedTab: true,
         showFullWeekRecurring: false,
+        inlineAdd: false,
         ...parsed,
         baseFontSize,
       };
@@ -473,6 +476,7 @@ function useSettings() {
         streaksEnabled: true,
         completedTab: true,
         showFullWeekRecurring: false,
+        inlineAdd: false,
         baseFontSize: null,
       };
     }
@@ -688,6 +692,7 @@ export default function App() {
       : (new Date().getDay() as Weekday);
   });
   const [scheduleDate, setScheduleDate] = useState<string>("");
+  const [inlineTitles, setInlineTitles] = useState<Record<string, string>>({});
 
   function handleBoardSelect(e: React.ChangeEvent<HTMLSelectElement>) {
     const val = e.target.value;
@@ -1378,6 +1383,39 @@ export default function App() {
     else newTitleRef.current?.blur();
   }
 
+  function addInlineTask(key: string) {
+    if (!currentBoard) return;
+    const raw = (inlineTitles[key] || "").trim();
+    if (!raw) return;
+
+    let dueISO = isoForWeekday(0);
+    const nextOrder = nextOrderForBoard(currentBoard.id, tasks);
+    const id = crypto.randomUUID();
+    const t: Task = {
+      id,
+      boardId: currentBoard.id,
+      createdBy: nostrPK || undefined,
+      title: raw,
+      dueISO,
+      completed: false,
+      order: nextOrder,
+    };
+    if (currentBoard.kind === "week") {
+      if (key === "bounties") t.column = "bounties";
+      else {
+        t.column = "day";
+        dueISO = isoForWeekday(Number(key) as Weekday);
+        t.dueISO = dueISO;
+      }
+    } else {
+      t.columnId = key;
+    }
+    applyHiddenForFuture(t);
+    setTasks(prev => [...prev, t]);
+    maybePublishTask(t).catch(() => {});
+    setInlineTitles(prev => ({ ...prev, [key]: "" }));
+  }
+
   function completeTask(id: string) {
     setTasks(prev => {
       const cur = prev.find(t => t.id === id);
@@ -2028,7 +2066,7 @@ export default function App() {
         <div ref={flyLayerRef} className="pointer-events-none fixed inset-0 z-[9999]" />
 
         {/* Add bar */}
-        {(view === "board" || !settings.completedTab) && currentBoard && (
+        {(view === "board" || !settings.completedTab) && currentBoard && !settings.inlineAdd && (
           <div className="flex flex-wrap gap-2 items-center mb-4">
             <input
               ref={newTitleRef}
@@ -2130,6 +2168,21 @@ export default function App() {
                       onDropCard={(payload) => moveTask(payload.id, { type: "day", day })}
                       onDropEnd={handleDragEnd}
                       data-day={day}
+                      scrollable={settings.inlineAdd}
+                      footer={settings.inlineAdd ? (
+                        <form
+                          className="mt-2 flex gap-1"
+                          onSubmit={(e) => { e.preventDefault(); addInlineTask(String(day)); }}
+                        >
+                          <input
+                            value={inlineTitles[String(day)] || ""}
+                            onChange={(e) => setInlineTitles(prev => ({ ...prev, [String(day)]: e.target.value }))}
+                            className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                            placeholder="Add task"
+                          />
+                          <button type="submit" className="rounded-xl bg-emerald-600 hover:bg-emerald-500">+</button>
+                        </form>
+                      ) : undefined}
                     >
                         {(byDay.get(day) || []).map((t) => (
                         <Card
@@ -2159,6 +2212,21 @@ export default function App() {
                     onTitleClick={() => { setDayChoice("bounties"); setScheduleDate(""); }}
                     onDropCard={(payload) => moveTask(payload.id, { type: "bounties" })}
                     onDropEnd={handleDragEnd}
+                    scrollable={settings.inlineAdd}
+                    footer={settings.inlineAdd ? (
+                      <form
+                        className="mt-2 flex gap-1"
+                        onSubmit={(e) => { e.preventDefault(); addInlineTask("bounties"); }}
+                      >
+                        <input
+                          value={inlineTitles["bounties"] || ""}
+                          onChange={(e) => setInlineTitles(prev => ({ ...prev, bounties: e.target.value }))}
+                          className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                          placeholder="Add task"
+                        />
+                        <button type="submit" className="rounded-xl bg-emerald-600 hover:bg-emerald-500">+</button>
+                      </form>
+                    ) : undefined}
                   >
                       {bounties.map((t) => (
                         <Card
@@ -2198,6 +2266,21 @@ export default function App() {
                     onTitleClick={() => setDayChoice(col.id)}
                     onDropCard={(payload) => moveTask(payload.id, { type: "list", columnId: col.id })}
                     onDropEnd={handleDragEnd}
+                    scrollable={settings.inlineAdd}
+                    footer={settings.inlineAdd ? (
+                      <form
+                        className="mt-2 flex gap-1"
+                        onSubmit={(e) => { e.preventDefault(); addInlineTask(col.id); }}
+                      >
+                        <input
+                          value={inlineTitles[col.id] || ""}
+                          onChange={(e) => setInlineTitles(prev => ({ ...prev, [col.id]: e.target.value }))}
+                          className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                          placeholder="Add task"
+                        />
+                        <button type="submit" className="rounded-xl bg-emerald-600 hover:bg-emerald-500">+</button>
+                      </form>
+                    ) : undefined}
                   >
                       {(itemsByColumn.get(col.id) || []).map((t) => (
                         <Card
@@ -2242,7 +2325,7 @@ export default function App() {
             ) : (
               <ul className="space-y-2">
                 {completed.map((t) => (
-                  <li key={t.id} className="px-3 py-0.5 rounded-xl bg-neutral-800 border border-neutral-700">
+                  <li key={t.id} className="task px-3 rounded-xl bg-neutral-800 border border-neutral-700">
                     <div className="flex items-start gap-2">
                       <div className="flex-1">
                       <div className="text-sm font-medium leading-[1.15]">
@@ -2317,7 +2400,7 @@ export default function App() {
           ) : (
             <ul className="space-y-2">
               {upcoming.map((t) => (
-                <li key={t.id} className="px-3 py-0.5 rounded-xl bg-neutral-900 border border-neutral-800">
+                <li key={t.id} className="task px-3 rounded-xl bg-neutral-900 border border-neutral-800">
                   <div className="flex items-start gap-2">
                     <div className="flex-1">
                       <div className="text-sm font-medium leading-[1.15]">{renderTitleWithLink(t.title, t.note)}</div>
@@ -2633,6 +2716,8 @@ function DroppableColumn({
   onDropEnd,
   onTitleClick,
   children,
+  footer,
+  scrollable,
   ...props
 }: {
   title: string;
@@ -2640,6 +2725,8 @@ function DroppableColumn({
   onDropEnd?: () => void;
   onTitleClick?: () => void;
   children: React.ReactNode;
+  footer?: React.ReactNode;
+  scrollable?: boolean;
 } & React.HTMLAttributes<HTMLDivElement>) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -2663,7 +2750,7 @@ function DroppableColumn({
   return (
     <div
       ref={ref}
-      className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 min-h-[288px] w-[288px] shrink-0"
+      className={`rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 w-[288px] shrink-0 ${scrollable ? 'h-96 flex flex-col' : 'min-h-[288px]'}`}
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
     >
@@ -2683,7 +2770,8 @@ function DroppableColumn({
       >
         {title}
       </div>
-      <div className="space-y-2">{children}</div>
+      <div className={`space-y-2 ${scrollable ? 'flex-1 overflow-y-auto pr-1' : ''}`}>{children}</div>
+      {footer}
     </div>
   );
 }
@@ -2737,7 +2825,7 @@ function Card({
   return (
     <div
       ref={cardRef}
-      className="group relative px-2 py-0.5 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
+      className="task group relative px-2 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
       // Allow horizontal swiping across columns on mobile
       style={{ touchAction: "auto" }}
       draggable
@@ -3986,6 +4074,15 @@ function SettingsModal({
           <div className="flex gap-2">
             <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'top' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'top' })}>Top</button>
             <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'bottom' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'bottom' })}>Bottom</button>
+          </div>
+        </section>
+
+        {/* Inline add boxes */}
+        <section>
+          <div className="text-sm font-medium mb-2">Add tasks within lists</div>
+          <div className="flex gap-2">
+            <button className={`px-3 py-2 rounded-xl ${settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: true })}>Inline</button>
+            <button className={`px-3 py-2 rounded-xl ${!settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: false })}>Top bar</button>
           </div>
         </section>
 

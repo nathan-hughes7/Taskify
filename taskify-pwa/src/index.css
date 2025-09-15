@@ -49,6 +49,22 @@ button, input, select, textarea {
               border-color 0.2s ease, opacity 0.2s ease;
 }
 
+/* Compact spacing for buttons, tasks, and textboxes */
+@layer base {
+  button,
+  select {
+    padding: 0.125rem 0.5rem !important;
+  }
+
+  /* Reduce vertical padding for inputs and textareas */
+  input,
+  textarea,
+  .task {
+    padding-top: 0.125rem !important;
+    padding-bottom: 0.125rem !important;
+  }
+}
+
 /* Optional: scrollbar styling (WebKit browsers) */
 ::-webkit-scrollbar {
   width: 8px;

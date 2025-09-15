@@ -102,6 +102,7 @@ const LS_SETTINGS = "taskify_settings_v2";
 const LS_BOARDS = "taskify_boards_v2";
 const LS_NOSTR_RELAYS = "taskify_nostr_relays_v1";
 const LS_NOSTR_SK = "taskify_nostr_sk_v1";
+const LS_TUTORIAL_DONE = "taskify_tutorial_done_v1";
 
 /* ================= Nostr minimal client ================= */
 type NostrEvent = {
@@ -705,6 +706,166 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showWallet, setShowWallet] = useState(false);
   const { receiveToken } = useCashu();
+
+  const [tutorialComplete, setTutorialComplete] = useState(() => {
+    try {
+      return localStorage.getItem(LS_TUTORIAL_DONE) === "done";
+    } catch {
+      return false;
+    }
+  });
+  const [tutorialStep, setTutorialStep] = useState<number | null>(null);
+
+  const markTutorialDone = useCallback(() => {
+    setTutorialStep(null);
+    setTutorialComplete(true);
+    try {
+      localStorage.setItem(LS_TUTORIAL_DONE, "done");
+    } catch {}
+  }, []);
+
+  const handleCopyNsec = useCallback(async () => {
+    try {
+      const sk = localStorage.getItem(LS_NOSTR_SK) || "";
+      if (!sk) {
+        alert("No private key found yet. You can generate one from Settings → Nostr.");
+        return;
+      }
+      let nsec = "";
+      try {
+        nsec = typeof (nip19 as any)?.nsecEncode === "function" ? (nip19 as any).nsecEncode(sk) : sk;
+      } catch {
+        nsec = sk;
+      }
+      await navigator.clipboard?.writeText(nsec);
+      showToast("nsec copied");
+    } catch {
+      alert("Unable to copy your key. You can copy it later from Settings → Nostr.");
+    }
+  }, [showToast]);
+
+  const tutorialSteps = useMemo(
+    () => [
+      {
+        title: "Welcome to Taskify",
+        body: (
+          <div className="space-y-3 text-sm text-neutral-200">
+            <p>
+              Taskify keeps your plans organized on boards. The default Week board groups tasks by day plus a Bounties
+              lane for reward-backed work.
+            </p>
+            <ul className="list-disc pl-5 space-y-1 text-neutral-300">
+              <li>Use the board switcher in the header to focus on different projects.</li>
+              <li>Add more boards from Settings → Boards &amp; Lists, or paste a Board ID there to join a shared space.</li>
+              <li>Open Manage board to copy its Board ID for teammates and tap the refresh icon to pull in shared updates.</li>
+            </ul>
+            <p className="text-neutral-400">You can skip this tutorial at any time.</p>
+          </div>
+        ),
+      },
+      {
+        title: "Capture and organize tasks",
+        body: (
+          <div className="space-y-3 text-sm text-neutral-200">
+            <p>
+              Use the New Task bar to add items instantly, attach notes or images, and schedule them for specific days.
+            </p>
+            <ul className="list-disc pl-5 space-y-1 text-neutral-300">
+              <li>Drag tasks to reorder them, move them between days and lists, or drop them on the Upcoming drawer.</li>
+              <li>Upcoming keeps tasks hidden until you need them—future due dates pop onto the board at the start of that week.</li>
+              <li>Open a task to set recurrence, manage subtasks, track streaks on repeats, or attach optional bounties.</li>
+              <li>Turn streak tracking on or off later from Settings → Streaks.</li>
+            </ul>
+          </div>
+        ),
+      },
+      {
+        title: "Shape your workspace",
+        body: (
+          <div className="space-y-3 text-sm text-neutral-200">
+            <p>Dial in how Taskify feels so it matches the way you work.</p>
+            <ul className="list-disc pl-5 space-y-1 text-neutral-300">
+              <li>Choose between inline add boxes inside each list or the top New Task bar from Settings → Add tasks within lists.</li>
+              <li>Adjust week start, default task position, and other layout options anytime from Settings.</li>
+            </ul>
+          </div>
+        ),
+      },
+      {
+        title: "Lightning ecash tools",
+        body: (
+          <div className="space-y-3 text-sm text-neutral-200">
+            <p>The 💰 button opens your built-in Cashu wallet. Even without tokens yet, it&apos;s ready for ecash.</p>
+            <ul className="list-disc pl-5 space-y-1 text-neutral-300">
+              <li>Receive to accept new ecash from a mint and store it securely on this device.</li>
+              <li>Send to share tokens or fund task bounties when you&apos;re coordinating with others.</li>
+              <li>History keeps track of every ecash transfer so you know where tokens went.</li>
+            </ul>
+            <p className="text-neutral-400">Bounties on tasks will show any ecash rewards once you add them.</p>
+          </div>
+        ),
+      },
+      {
+        title: "Back up your nsec",
+        body: (
+          <div className="space-y-3 text-sm text-neutral-200">
+            <p>
+              Your Nostr private key (nsec) lives only on this device. Back it up so you can recover tasks, boards, and
+              ecash access.
+            </p>
+            <p>Copy it now or later from Settings → Nostr and store it in a safe password manager.</p>
+            <div>
+              <button
+                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm"
+                onClick={handleCopyNsec}
+              >
+                Copy my nsec
+              </button>
+            </div>
+            <p className="text-neutral-400">Skipping is okay—you can always copy it from Settings when you&apos;re ready.</p>
+          </div>
+        ),
+      },
+    ],
+    [handleCopyNsec]
+  );
+
+  useEffect(() => {
+    if (tutorialComplete || tutorialStep !== null) return;
+    const hasTasks = tasks.length > 0;
+    const hasCustomBoards = boards.some((b) => b.id !== "week-default" || b.kind !== "week");
+    let hasHistory = false;
+    try {
+      const raw = localStorage.getItem("cashuHistory");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) hasHistory = true;
+      }
+    } catch {}
+    if (!hasTasks && !hasCustomBoards && !hasHistory) {
+      setTutorialStep(0);
+    }
+  }, [boards, tasks, tutorialComplete, tutorialStep]);
+
+  const handleSkipTutorial = useCallback(() => {
+    markTutorialDone();
+  }, [markTutorialDone]);
+
+  const handleNextTutorial = useCallback(() => {
+    if (tutorialStep === null) return;
+    if (tutorialStep >= tutorialSteps.length - 1) {
+      markTutorialDone();
+    } else {
+      setTutorialStep(tutorialStep + 1);
+    }
+  }, [markTutorialDone, tutorialStep, tutorialSteps.length]);
+
+  const handlePrevTutorial = useCallback(() => {
+    setTutorialStep((prev) => {
+      if (prev === null || prev <= 0) return prev;
+      return prev - 1;
+    });
+  }, []);
 
   useEffect(() => {
     if (!settings.completedTab) setView("board");
@@ -2073,6 +2234,9 @@ export default function App() {
   // horizontal scroller ref to enable iOS momentum scrolling
   const scrollerRef = useRef<HTMLDivElement>(null);
 
+  const currentTutorial = tutorialStep != null ? tutorialSteps[tutorialStep] : null;
+  const totalTutorialSteps = tutorialSteps.length;
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
       <div className="max-w-7xl mx-auto">
@@ -2693,6 +2857,45 @@ export default function App() {
             setShowAddAdvanced(false);
           }}
         />
+      )}
+
+      {tutorialStep !== null && currentTutorial && (
+        <Modal
+          onClose={handleSkipTutorial}
+          title={currentTutorial.title}
+          showClose={false}
+        >
+          <div className="space-y-4">
+            <div className="text-xs uppercase tracking-wide text-neutral-400">
+              Step {tutorialStep + 1} of {totalTutorialSteps}
+            </div>
+            {currentTutorial.body}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+              <button
+                className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-sm"
+                onClick={handleSkipTutorial}
+              >
+                Skip tutorial
+              </button>
+              <div className="flex gap-2">
+                {tutorialStep > 0 && (
+                  <button
+                    className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-sm"
+                    onClick={handlePrevTutorial}
+                  >
+                    Back
+                  </button>
+                )}
+                <button
+                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm"
+                  onClick={handleNextTutorial}
+                >
+                  {tutorialStep === totalTutorialSteps - 1 ? "Finish" : "Next"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* Settings (Week start + Manage Boards & Columns) */}

@@ -2325,7 +2325,7 @@ export default function App() {
             ) : (
               <ul className="space-y-2">
                 {completed.map((t) => (
-                  <li key={t.id} className="px-3 py-0.5 rounded-xl bg-neutral-800 border border-neutral-700">
+                  <li key={t.id} className="task px-3 rounded-xl bg-neutral-800 border border-neutral-700">
                     <div className="flex items-start gap-2">
                       <div className="flex-1">
                       <div className="text-sm font-medium leading-[1.15]">
@@ -2400,7 +2400,7 @@ export default function App() {
           ) : (
             <ul className="space-y-2">
               {upcoming.map((t) => (
-                <li key={t.id} className="px-3 py-0.5 rounded-xl bg-neutral-900 border border-neutral-800">
+                <li key={t.id} className="task px-3 rounded-xl bg-neutral-900 border border-neutral-800">
                   <div className="flex items-start gap-2">
                     <div className="flex-1">
                       <div className="text-sm font-medium leading-[1.15]">{renderTitleWithLink(t.title, t.note)}</div>
@@ -2825,7 +2825,7 @@ function Card({
   return (
     <div
       ref={cardRef}
-      className="group relative px-2 py-0.5 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
+      className="task group relative px-2 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
       // Allow horizontal swiping across columns on mobile
       style={{ touchAction: "auto" }}
       draggable

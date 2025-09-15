@@ -93,6 +93,7 @@ type Settings = {
   inlineAdd: boolean;
   // Base UI font size in pixels; null uses the OS preferred size
   baseFontSize: number | null;
+  theme: "system" | "light" | "dark";
 };
 
 const R_NONE: Recurrence = { type: "none" };
@@ -468,6 +469,7 @@ function useSettings() {
         inlineAdd: false,
         ...parsed,
         baseFontSize,
+        theme: typeof parsed.theme === "string" ? parsed.theme : "system",
       };
     } catch {
       return {
@@ -478,6 +480,7 @@ function useSettings() {
         showFullWeekRecurring: false,
         inlineAdd: false,
         baseFontSize: null,
+        theme: "system",
       };
     }
   });
@@ -603,6 +606,31 @@ export default function App() {
       }
     } catch {}
   }, [settings.baseFontSize]);
+
+  // Apply theme to document
+  useEffect(() => {
+    try {
+      const apply = () => {
+        let theme = settings.theme;
+        if (theme === "system") {
+          theme = window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        }
+        const root = document.documentElement;
+        root.classList.remove("light", "dark");
+        root.classList.add(theme);
+        const meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", theme === "dark" ? "#0a0a0a" : "#fafafa");
+      };
+      apply();
+      if (settings.theme === "system") {
+        const mql = window.matchMedia("(prefers-color-scheme: dark)");
+        mql.addEventListener("change", apply);
+        return () => mql.removeEventListener("change", apply);
+      }
+    } catch {}
+  }, [settings.theme]);
 
   // Nostr pool + merge indexes
   const pool = useMemo(() => createNostrPool(), []);
@@ -4083,6 +4111,16 @@ function SettingsModal({
           <div className="flex gap-2">
             <button className={`px-3 py-2 rounded-xl ${settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: true })}>Inline</button>
             <button className={`px-3 py-2 rounded-xl ${!settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: false })}>Top bar</button>
+          </div>
+        </section>
+
+        {/* Theme */}
+        <section>
+          <div className="text-sm font-medium mb-2">Theme</div>
+          <div className="flex gap-2">
+            <button className={`px-3 py-2 rounded-xl ${settings.theme === "system" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "system" })}>System</button>
+            <button className={`px-3 py-2 rounded-xl ${settings.theme === "light" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "light" })}>Light</button>
+            <button className={`px-3 py-2 rounded-xl ${settings.theme === "dark" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "dark" })}>Dark</button>
           </div>
         </section>
 

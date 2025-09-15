@@ -2750,7 +2750,7 @@ function DroppableColumn({
   return (
     <div
       ref={ref}
-      className={`rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 w-[288px] shrink-0 ${scrollable ? 'h-[calc(100vh-12rem)] flex flex-col' : 'min-h-[288px]'}`}
+      className={`rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 w-[288px] shrink-0 ${scrollable ? 'h-[calc(100vh-13rem)] flex flex-col' : 'min-h-[288px]'}`}
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
     >

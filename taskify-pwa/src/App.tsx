@@ -1913,8 +1913,8 @@ export default function App() {
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen flex flex-col bg-neutral-950 text-neutral-100 p-4">
+      <div className="max-w-7xl mx-auto flex-1 flex flex-col">
         {/* Header */}
         <header className="mb-4">
           <div className="flex items-center mb-4">
@@ -2148,18 +2148,19 @@ export default function App() {
         )}
 
         {/* Board/Completed */}
+        <div className="flex-1 overflow-hidden min-h-0">
         {view === "board" || !settings.completedTab ? (
           !currentBoard ? (
-            <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-6 text-center text-sm text-neutral-400">No boards. Open Settings to create one.</div>
+            <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-6 text-center text-sm text-neutral-400 h-full">No boards. Open Settings to create one.</div>
           ) : currentBoard.kind === "week" ? (
             <>
               {/* HORIZONTAL board: single row, side-scroll */}
               <div
                 ref={scrollerRef}
-                className="overflow-x-auto pb-4 w-full"
+                className="overflow-x-auto pb-4 w-full h-full"
                 style={{ WebkitOverflowScrolling: "touch" }} // fluid momentum scroll on iOS
               >
-                <div className="flex gap-4 min-w-max">
+                <div className="flex gap-4 min-w-max h-full">
                   {Array.from({ length: 7 }, (_, i) => i as Weekday).map((day) => (
                     <DroppableColumn
                       key={day}
@@ -2255,10 +2256,10 @@ export default function App() {
             // LISTS board (multiple custom columns) — still a horizontal row
             <div
               ref={scrollerRef}
-              className="overflow-x-auto pb-4 w-full"
+              className="overflow-x-auto pb-4 w-full h-full"
               style={{ WebkitOverflowScrolling: "touch" }}
             >
-              <div className="flex gap-4 min-w-max">
+              <div className="flex gap-4 min-w-max h-full">
                 {listColumns.map(col => (
                   <DroppableColumn
                     key={col.id}
@@ -2308,7 +2309,7 @@ export default function App() {
           )
         ) : (
           // Completed view
-          <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-4">
+          <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-4 h-full overflow-y-auto">
             <div className="flex items-center gap-2 mb-3">
               <div className="text-lg font-semibold">Completed</div>
               <div className="ml-auto">
@@ -2373,6 +2374,7 @@ export default function App() {
             )}
           </div>
         )}
+        </div>
       </div>
 
       {/* Floating Upcoming Drawer Button */}
@@ -2750,7 +2752,7 @@ function DroppableColumn({
   return (
     <div
       ref={ref}
-      className={`rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 w-[288px] shrink-0 ${scrollable ? 'h-96 flex flex-col' : 'min-h-[288px]'}`}
+      className={`rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 w-[288px] shrink-0 ${scrollable ? 'h-full flex flex-col' : 'min-h-[288px]'}`}
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
     >

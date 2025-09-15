@@ -93,6 +93,7 @@ type Settings = {
   inlineAdd: boolean;
   // Base UI font size in pixels; null uses the OS preferred size
   baseFontSize: number | null;
+  theme: "system" | "light" | "dark";
 };
 
 const R_NONE: Recurrence = { type: "none" };
@@ -101,6 +102,7 @@ const LS_SETTINGS = "taskify_settings_v2";
 const LS_BOARDS = "taskify_boards_v2";
 const LS_NOSTR_RELAYS = "taskify_nostr_relays_v1";
 const LS_NOSTR_SK = "taskify_nostr_sk_v1";
+const LS_TUTORIAL_DONE = "taskify_tutorial_done_v1";
 
 /* ================= Nostr minimal client ================= */
 type NostrEvent = {
@@ -468,6 +470,7 @@ function useSettings() {
         inlineAdd: false,
         ...parsed,
         baseFontSize,
+        theme: typeof parsed.theme === "string" ? parsed.theme : "dark",
       };
     } catch {
       return {
@@ -478,6 +481,7 @@ function useSettings() {
         showFullWeekRecurring: false,
         inlineAdd: false,
         baseFontSize: null,
+        theme: "dark",
       };
     }
   });
@@ -604,6 +608,31 @@ export default function App() {
     } catch {}
   }, [settings.baseFontSize]);
 
+  // Apply theme to document
+  useEffect(() => {
+    try {
+      const apply = () => {
+        let theme = settings.theme;
+        if (theme === "system") {
+          theme = window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        }
+        const root = document.documentElement;
+        root.classList.remove("light", "dark");
+        root.classList.add(theme);
+        const meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", theme === "dark" ? "#0a0a0a" : "#fafafa");
+      };
+      apply();
+      if (settings.theme === "system") {
+        const mql = window.matchMedia("(prefers-color-scheme: dark)");
+        mql.addEventListener("change", apply);
+        return () => mql.removeEventListener("change", apply);
+      }
+    } catch {}
+  }, [settings.theme]);
+
   // Nostr pool + merge indexes
   const pool = useMemo(() => createNostrPool(), []);
   // In-app Nostr key (secp256k1/Schnorr) for signing
@@ -677,6 +706,175 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showWallet, setShowWallet] = useState(false);
   const { receiveToken } = useCashu();
+
+  const [tutorialComplete, setTutorialComplete] = useState(() => {
+    try {
+      return localStorage.getItem(LS_TUTORIAL_DONE) === "done";
+    } catch {
+      return false;
+    }
+  });
+  const [tutorialStep, setTutorialStep] = useState<number | null>(null);
+
+  const markTutorialDone = useCallback(() => {
+    setTutorialStep(null);
+    setTutorialComplete(true);
+    try {
+      localStorage.setItem(LS_TUTORIAL_DONE, "done");
+    } catch {}
+  }, []);
+
+  const handleCopyNsec = useCallback(async () => {
+    try {
+      const sk = localStorage.getItem(LS_NOSTR_SK) || "";
+      if (!sk) {
+        alert("No private key found yet. You can generate one from Settings → Nostr.");
+        return;
+      }
+      let nsec = "";
+      try {
+        nsec = typeof (nip19 as any)?.nsecEncode === "function" ? (nip19 as any).nsecEncode(sk) : sk;
+      } catch {
+        nsec = sk;
+      }
+      await navigator.clipboard?.writeText(nsec);
+      showToast("nsec copied");
+    } catch {
+      alert("Unable to copy your key. You can copy it later from Settings → Nostr.");
+    }
+  }, [showToast]);
+
+  const tutorialSteps = useMemo(
+    () => [
+      {
+        title: "Welcome to Taskify",
+        body: (
+          <div className="space-y-3 text-sm text-neutral-200">
+            <p>
+              Taskify keeps your plans organized on boards. The default Week board groups tasks by day plus a Bounties
+              lane for reward-backed work.
+            </p>
+            <ul className="list-disc pl-5 space-y-1 text-neutral-300">
+              <li>Use the board switcher in the header to focus on different projects.</li>
+              <li>Add more boards from Settings → Boards &amp; Lists, or paste a Board ID there to join a shared space.</li>
+              <li>Open Manage board to copy its Board ID for teammates and tap the refresh icon to pull in shared updates.</li>
+            </ul>
+            <p className="text-neutral-400">You can skip this tutorial at any time.</p>
+          </div>
+        ),
+      },
+      {
+        title: "Capture and organize tasks",
+        body: (
+          <div className="space-y-3 text-sm text-neutral-200">
+            <p>
+              Use the New Task bar to add items instantly, attach notes or images, and schedule them for specific days.
+            </p>
+            <ul className="list-disc pl-5 space-y-1 text-neutral-300">
+              <li>Drag tasks to reorder them, move them between days and lists, or drop them on the Upcoming drawer.</li>
+              <li>Upcoming keeps tasks hidden until you need them—future due dates pop onto the board at the start of that week.</li>
+              <li>Open a task to set recurrence, manage subtasks, track streaks on repeats, or attach optional bounties.</li>
+              <li>Turn streak tracking on or off later from Settings → Streaks.</li>
+            </ul>
+          </div>
+        ),
+      },
+      {
+        title: "Shape your workspace",
+        body: (
+          <div className="space-y-3 text-sm text-neutral-200">
+            <p>Dial in how Taskify feels so it matches the way you work.</p>
+            <ul className="list-disc pl-5 space-y-1 text-neutral-300">
+              <li>Choose between inline add boxes inside each list or the top New Task bar from Settings → Add tasks within lists.</li>
+              <li>Adjust week start, default task position, and other layout options anytime from Settings.</li>
+            </ul>
+          </div>
+        ),
+      },
+      {
+        title: "Lightning ecash tools",
+        body: (
+          <div className="space-y-3 text-sm text-neutral-200">
+            <p>The 💰 button opens your built-in Cashu wallet. Even without tokens yet, it&apos;s ready for ecash.</p>
+            <ul className="list-disc pl-5 space-y-1 text-neutral-300">
+              <li>Receive to accept new ecash from a mint and store it securely on this device.</li>
+              <li>Send to share tokens or fund task bounties when you&apos;re coordinating with others.</li>
+              <li>History keeps track of every ecash transfer so you know where tokens went.</li>
+            </ul>
+            <p className="text-neutral-400">Bounties on tasks will show any ecash rewards once you add them.</p>
+          </div>
+        ),
+      },
+      {
+        title: "Back up your nsec",
+        body: (
+          <div className="space-y-3 text-sm text-neutral-200">
+            <p>
+              Your Nostr private key (nsec) lives only on this device. Back it up so you can recover tasks, boards, and
+              ecash access.
+            </p>
+            <p>Copy it now or later from Settings → Nostr and store it in a safe password manager.</p>
+            <div>
+              <button
+                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm"
+                onClick={handleCopyNsec}
+              >
+                Copy my nsec
+              </button>
+            </div>
+            <p className="text-neutral-400">Skipping is okay—you can always copy it from Settings when you&apos;re ready.</p>
+          </div>
+        ),
+      },
+    ],
+    [handleCopyNsec]
+  );
+
+  useEffect(() => {
+    if (tutorialComplete || tutorialStep !== null) return;
+    const hasTasks = tasks.length > 0;
+    const hasCustomBoards = boards.some((b) => b.id !== "week-default" || b.kind !== "week");
+    let hasHistory = false;
+    try {
+      const raw = localStorage.getItem("cashuHistory");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) hasHistory = true;
+      }
+    } catch {}
+    if (!hasTasks && !hasCustomBoards && !hasHistory) {
+      setTutorialStep(0);
+    }
+  }, [boards, tasks, tutorialComplete, tutorialStep]);
+
+  const handleSkipTutorial = useCallback(() => {
+    markTutorialDone();
+  }, [markTutorialDone]);
+
+  const handleNextTutorial = useCallback(() => {
+    if (tutorialStep === null) return;
+    if (tutorialStep >= tutorialSteps.length - 1) {
+      markTutorialDone();
+    } else {
+      setTutorialStep(tutorialStep + 1);
+    }
+  }, [markTutorialDone, tutorialStep, tutorialSteps.length]);
+
+  const handlePrevTutorial = useCallback(() => {
+    setTutorialStep((prev) => {
+      if (prev === null || prev <= 0) return prev;
+      return prev - 1;
+    });
+  }, []);
+
+  const handleRestartTutorial = useCallback(() => {
+    try {
+      localStorage.removeItem(LS_TUTORIAL_DONE);
+    } catch {}
+    setTutorialComplete(false);
+    setTutorialStep(0);
+    setShowSettings(false);
+  }, []);
 
   useEffect(() => {
     if (!settings.completedTab) setView("board");
@@ -760,6 +958,20 @@ export default function App() {
   const walletButtonRef = useRef<HTMLButtonElement>(null);
   const boardDropContainerRef = useRef<HTMLDivElement>(null);
   const boardDropListRef = useRef<HTMLDivElement>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  const upcomingButtonRef = useRef<HTMLButtonElement>(null);
+  const columnRefs = useRef(new Map<string, HTMLDivElement>());
+  const inlineInputRefs = useRef(new Map<string, HTMLInputElement>());
+
+  const setColumnRef = useCallback((key: string, el: HTMLDivElement | null) => {
+    if (el) columnRefs.current.set(key, el);
+    else columnRefs.current.delete(key);
+  }, []);
+
+  const setInlineInputRef = useCallback((key: string, el: HTMLInputElement | null) => {
+    if (el) inlineInputRefs.current.set(key, el);
+    else inlineInputRefs.current.delete(key);
+  }, []);
   function burst() {
     const el = confettiRef.current;
     if (!el) return;
@@ -881,6 +1093,119 @@ export default function App() {
           try { layer.removeChild(coin); } catch {}
         }, 800);
       }, i * 140);
+    }
+  }
+
+  function flyNewTask(
+    from: DOMRect | null,
+    dest:
+      | { type: "column"; key: string; label: string }
+      | { type: "upcoming"; label: string }
+  ) {
+    const layer = flyLayerRef.current;
+    if (!layer) return;
+    if (typeof window === "undefined") return;
+    try {
+      if (
+        typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ) {
+        return;
+      }
+    } catch {}
+
+    requestAnimationFrame(() => {
+      const targetEl =
+        dest.type === "column"
+          ? columnRefs.current.get(dest.key) || null
+          : upcomingButtonRef.current;
+      if (!targetEl) return;
+
+      const targetRect = targetEl.getBoundingClientRect();
+      const startRect = from ?? targetRect;
+      const startX = startRect.left + startRect.width / 2;
+      const startY = startRect.top + startRect.height / 2;
+      const endX = targetRect.left + targetRect.width / 2;
+      const endY =
+        dest.type === "column"
+          ? targetRect.top + Math.min(targetRect.height / 2, 56)
+          : targetRect.top + targetRect.height / 2;
+
+      const card = document.createElement("div");
+      const text = (dest.label || "Task").trim();
+      const truncated = text.length > 60 ? `${text.slice(0, 57)}…` : text || "Task";
+      const widthSource = from ? from.width : startRect.width;
+      const cardWidth = Math.max(Math.min(widthSource * 0.55, 280), 150);
+      card.className = `fly-task-card ${
+        dest.type === "column" ? "fly-task-card--board" : "fly-task-card--upcoming"
+      }`;
+      card.style.position = "fixed";
+      card.style.left = `${startX}px`;
+      card.style.top = `${startY}px`;
+      card.style.width = `${cardWidth}px`;
+      card.style.transform = "translate(-50%, -50%) scale(0.92)";
+      card.style.opacity = "0.98";
+      card.style.pointerEvents = "none";
+      card.style.zIndex = "1000";
+      card.style.boxShadow =
+        dest.type === "column"
+          ? "0 18px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(63,63,70,0.45), 0 12px 26px rgba(16,185,129,0.2)"
+          : "0 18px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(63,63,70,0.45), 0 12px 26px rgba(59,130,246,0.2)";
+      card.style.willChange = "transform, left, top, opacity";
+
+      const body = document.createElement("div");
+      body.className = "fly-task-card__body";
+
+      const titleEl = document.createElement("div");
+      titleEl.className = "fly-task-card__title";
+      titleEl.textContent = truncated;
+      body.appendChild(titleEl);
+
+      card.appendChild(body);
+      layer.appendChild(card);
+
+      const pulseClass =
+        dest.type === "column" ? "fly-target-pulse-board" : "fly-target-pulse-upcoming";
+      targetEl.classList.add(pulseClass);
+      window.setTimeout(() => {
+        try {
+          targetEl.classList.remove(pulseClass);
+        } catch {}
+      }, 650);
+
+      requestAnimationFrame(() => {
+        card.style.left = `${endX}px`;
+        card.style.top = `${endY}px`;
+        card.style.transform = "translate(-50%, -50%) scale(0.75)";
+        card.style.opacity = "0";
+        window.setTimeout(() => {
+          try {
+            layer.removeChild(card);
+          } catch {}
+        }, 700);
+      });
+    });
+  }
+
+  function animateTaskArrival(from: DOMRect | null, task: Task, board: Board) {
+    if (!board || task.completed) return;
+    const labelSource = task.title || (task.images?.length ? "Image" : "");
+    const label = labelSource.trim() || "Task";
+    if (!isVisibleNow(task)) {
+      flyNewTask(from, { type: "upcoming", label });
+      return;
+    }
+
+    if (board.kind === "week") {
+      const due = new Date(task.dueISO);
+      if (Number.isNaN(due.getTime())) return;
+      const key = task.column === "bounties"
+        ? "week-bounties"
+        : `week-day-${due.getDay()}`;
+      flyNewTask(from, { type: "column", key, label });
+    } else if (board.kind === "lists" && task.columnId) {
+      flyNewTask(from, { type: "column", key: `list-${task.columnId}`, label });
     }
   }
 
@@ -1300,6 +1625,8 @@ export default function App() {
   function addTask(keepKeyboard = false) {
     if (!currentBoard) return;
 
+    const originRect = newTitleRef.current?.getBoundingClientRect() || null;
+
     const raw = newTitle.trim();
     if (raw) {
       try {
@@ -1315,6 +1642,7 @@ export default function App() {
             order: typeof parsed.order === "number" ? parsed.order : nextOrder,
           };
           applyHiddenForFuture(imported);
+          animateTaskArrival(originRect, imported, currentBoard);
           setTasks(prev => {
             const out = [...prev, imported];
             return settings.showFullWeekRecurring && imported.recurrence ? ensureWeekRecurrences(out, [imported]) : out;
@@ -1368,6 +1696,7 @@ export default function App() {
       t.columnId = selectedColId || firstCol?.id;
     }
     applyHiddenForFuture(t);
+    animateTaskArrival(originRect, t, currentBoard);
     setTasks(prev => {
       const out = [...prev, t];
       return settings.showFullWeekRecurring && recurrence ? ensureWeekRecurrences(out, [t]) : out;
@@ -1388,6 +1717,7 @@ export default function App() {
     const raw = (inlineTitles[key] || "").trim();
     if (!raw) return;
 
+    const originRect = inlineInputRefs.current.get(key)?.getBoundingClientRect() || null;
     let dueISO = isoForWeekday(0);
     const nextOrder = nextOrderForBoard(currentBoard.id, tasks);
     const id = crypto.randomUUID();
@@ -1411,6 +1741,7 @@ export default function App() {
       t.columnId = key;
     }
     applyHiddenForFuture(t);
+    animateTaskArrival(originRect, t, currentBoard);
     setTasks(prev => [...prev, t]);
     maybePublishTask(t).catch(() => {});
     setInlineTitles(prev => ({ ...prev, [key]: "" }));
@@ -1912,6 +2243,9 @@ export default function App() {
   // horizontal scroller ref to enable iOS momentum scrolling
   const scrollerRef = useRef<HTMLDivElement>(null);
 
+  const currentTutorial = tutorialStep != null ? tutorialSteps[tutorialStep] : null;
+  const totalTutorialSteps = tutorialSteps.length;
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
       <div className="max-w-7xl mx-auto">
@@ -1951,7 +2285,7 @@ export default function App() {
                 onClick={() => setShowWallet(true)}
                 title="Wallet"
               >
-                💰
+                <span className="wallet-icon">💰</span>
               </button>
               {/* Settings */}
               <button
@@ -2083,6 +2417,7 @@ export default function App() {
               className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
             />
             <button
+              ref={addButtonRef}
               onClick={() => addTask()}
               className="shrink-0 px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium"
             >
@@ -2162,6 +2497,7 @@ export default function App() {
                 <div className="flex gap-4 min-w-max">
                   {Array.from({ length: 7 }, (_, i) => i as Weekday).map((day) => (
                     <DroppableColumn
+                      ref={el => setColumnRef(`week-day-${day}`, el)}
                       key={day}
                       title={WD_SHORT[day]}
                       onTitleClick={() => { setDayChoice(day); setScheduleDate(""); }}
@@ -2175,6 +2511,7 @@ export default function App() {
                           onSubmit={(e) => { e.preventDefault(); addInlineTask(String(day)); }}
                         >
                           <input
+                            ref={el => setInlineInputRef(String(day), el)}
                             value={inlineTitles[String(day)] || ""}
                             onChange={(e) => setInlineTitles(prev => ({ ...prev, [String(day)]: e.target.value }))}
                             className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
@@ -2208,6 +2545,7 @@ export default function App() {
 
                   {/* Bounties */}
                   <DroppableColumn
+                    ref={el => setColumnRef("week-bounties", el)}
                     title="Bounties"
                     onTitleClick={() => { setDayChoice("bounties"); setScheduleDate(""); }}
                     onDropCard={(payload) => moveTask(payload.id, { type: "bounties" })}
@@ -2219,6 +2557,7 @@ export default function App() {
                         onSubmit={(e) => { e.preventDefault(); addInlineTask("bounties"); }}
                       >
                         <input
+                          ref={el => setInlineInputRef("bounties", el)}
                           value={inlineTitles["bounties"] || ""}
                           onChange={(e) => setInlineTitles(prev => ({ ...prev, bounties: e.target.value }))}
                           className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
@@ -2261,6 +2600,7 @@ export default function App() {
               <div className="flex gap-4 min-w-max">
                 {listColumns.map(col => (
                   <DroppableColumn
+                    ref={el => setColumnRef(`list-${col.id}`, el)}
                     key={col.id}
                     title={col.name}
                     onTitleClick={() => setDayChoice(col.id)}
@@ -2273,6 +2613,7 @@ export default function App() {
                         onSubmit={(e) => { e.preventDefault(); addInlineTask(col.id); }}
                       >
                         <input
+                          ref={el => setInlineInputRef(col.id, el)}
                           value={inlineTitles[col.id] || ""}
                           onChange={(e) => setInlineTitles(prev => ({ ...prev, [col.id]: e.target.value }))}
                           className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
@@ -2377,6 +2718,7 @@ export default function App() {
 
       {/* Floating Upcoming Drawer Button */}
       <button
+        ref={upcomingButtonRef}
         className={`fixed ${settings.inlineAdd ? 'top-36' : 'bottom-4'} right-4 px-3 py-2 rounded-full bg-neutral-800 border border-neutral-700 shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
         onClick={() => setShowUpcoming(true)}
         title="Upcoming (hidden) tasks"
@@ -2526,6 +2868,45 @@ export default function App() {
         />
       )}
 
+      {tutorialStep !== null && currentTutorial && (
+        <Modal
+          onClose={handleSkipTutorial}
+          title={currentTutorial.title}
+          showClose={false}
+        >
+          <div className="space-y-4">
+            <div className="text-xs uppercase tracking-wide text-neutral-400">
+              Step {tutorialStep + 1} of {totalTutorialSteps}
+            </div>
+            {currentTutorial.body}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+              <button
+                className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-sm"
+                onClick={handleSkipTutorial}
+              >
+                Skip tutorial
+              </button>
+              <div className="flex gap-2">
+                {tutorialStep > 0 && (
+                  <button
+                    className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-sm"
+                    onClick={handlePrevTutorial}
+                  >
+                    Back
+                  </button>
+                )}
+                <button
+                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm"
+                  onClick={handleNextTutorial}
+                >
+                  {tutorialStep === totalTutorialSteps - 1 ? "Finish" : "Next"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* Settings (Week start + Manage Boards & Columns) */}
       {showSettings && (
         <SettingsModal
@@ -2540,6 +2921,7 @@ export default function App() {
           pubkeyHex={nostrPK}
           onGenerateKey={rotateNostrKey}
           onSetKey={setCustomNostrKey}
+          onRestartTutorial={handleRestartTutorial}
           onShareBoard={(boardId, relayCsv) => {
             const r = (relayCsv || "").split(",").map(s=>s.trim()).filter(Boolean);
             const relays = r.length ? r : defaultRelays;
@@ -2710,16 +3092,7 @@ function TaskMedia({ task }: { task: Task }) {
 }
 
 // Column container (fixed width for consistent horizontal scroll)
-function DroppableColumn({
-  title,
-  onDropCard,
-  onDropEnd,
-  onTitleClick,
-  children,
-  footer,
-  scrollable,
-  ...props
-}: {
+const DroppableColumn = React.forwardRef<HTMLDivElement, {
   title: string;
   onDropCard: (payload: { id: string }) => void;
   onDropEnd?: () => void;
@@ -2727,11 +3100,30 @@ function DroppableColumn({
   children: React.ReactNode;
   footer?: React.ReactNode;
   scrollable?: boolean;
-} & React.HTMLAttributes<HTMLDivElement>) {
-  const ref = useRef<HTMLDivElement>(null);
+} & React.HTMLAttributes<HTMLDivElement>>((
+  {
+    title,
+    onDropCard,
+    onDropEnd,
+    onTitleClick,
+    children,
+    footer,
+    scrollable,
+    ...props
+  },
+  forwardedRef
+) => {
+  const innerRef = useRef<HTMLDivElement | null>(null);
+  const setRef = useCallback((el: HTMLDivElement | null) => {
+    innerRef.current = el;
+    if (!forwardedRef) return;
+    if (typeof forwardedRef === "function") forwardedRef(el);
+    else (forwardedRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+  }, [forwardedRef]);
 
   useEffect(() => {
-    const el = ref.current!;
+    const el = innerRef.current;
+    if (!el) return;
     const onDragOver = (e: DragEvent) => e.preventDefault();
     const onDrop = (e: DragEvent) => {
       e.preventDefault();
@@ -2749,7 +3141,8 @@ function DroppableColumn({
 
   return (
     <div
-      ref={ref}
+      ref={setRef}
+      data-column-title={title}
       className={`rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 w-[288px] shrink-0 ${scrollable ? 'h-[calc(100vh-13rem)] flex flex-col' : 'min-h-[288px]'}`}
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
@@ -2774,7 +3167,7 @@ function DroppableColumn({
       {footer}
     </div>
   );
-}
+});
 
 function Card({
   task,
@@ -3687,6 +4080,7 @@ function SettingsModal({
   onJoinBoard,
   onRegenerateBoardId,
   onBoardChanged,
+  onRestartTutorial,
   onClose,
 }: {
   settings: Settings;
@@ -3704,6 +4098,7 @@ function SettingsModal({
   onJoinBoard: (nostrId: string, name?: string, relaysCsv?: string) => void;
   onRegenerateBoardId: (boardId: string) => void;
   onBoardChanged: (boardId: string) => void;
+  onRestartTutorial: () => void;
   onClose: () => void;
 }) {
   const [newBoardName, setNewBoardName] = useState("");
@@ -4086,6 +4481,16 @@ function SettingsModal({
           </div>
         </section>
 
+        {/* Theme */}
+        <section>
+          <div className="text-sm font-medium mb-2">Theme</div>
+          <div className="flex gap-2">
+            <button className={`px-3 py-2 rounded-xl ${settings.theme === "system" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "system" })}>System</button>
+            <button className={`px-3 py-2 rounded-xl ${settings.theme === "light" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "light" })}>Light</button>
+            <button className={`px-3 py-2 rounded-xl ${settings.theme === "dark" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "dark" })}>Dark</button>
+          </div>
+        </section>
+
         {/* Font size */}
         <section>
           <div className="text-sm font-medium mb-2">Font size</div>
@@ -4281,6 +4686,20 @@ function SettingsModal({
               <input type="file" accept="application/json" className="hidden" onChange={restoreFromBackup} />
             </label>
           </div>
+        </section>
+
+        {/* Tutorial */}
+        <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+          <div className="text-sm font-medium mb-2">Tutorial</div>
+          <div className="text-xs text-neutral-400 mb-3">
+            Replay the guided tour to refresh how Taskify works.
+          </div>
+          <button
+            className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700"
+            onClick={onRestartTutorial}
+          >
+            View tutorial again
+          </button>
         </section>
 
         {/* Development donation */}

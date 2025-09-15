@@ -24,16 +24,42 @@
   font-size: 18px;
   -webkit-text-size-adjust: 100%;
 }
-html, body, #root {
+
+html,
+body,
+#root {
   height: 100%;
-  background-color: #0a0a0a; /* fallback dark background */
-  color: #f5f5f5;            /* fallback text color */
   margin: 0;
   padding: 0;
   overflow-x: hidden;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
     "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+html.light,
+html.dark {
+  background-color: #0a0a0a;
+  color: #f5f5f5;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+html.light {
+  color-scheme: light;
+  /* Invert grayscale while preserving accent colors */
+  filter: invert(1) hue-rotate(180deg);
+}
+
+html.light img,
+html.light picture,
+html.light video,
+html.light canvas,
+html.light svg {
+  /* Revert media so their colors stay true */
+  filter: invert(1) hue-rotate(180deg);
 }
 
 /* Respect iOS safe areas when running as a standalone app */
@@ -78,3 +104,96 @@ button, input, select, textarea {
 ::-webkit-scrollbar-track {
   background: #18181b; /* neutral-900 */
 }
+/* Light theme color adjustments */
+html.light button[class*="bg-emerald"] {
+  filter: brightness(1.15);
+}
+
+html.light button[class*="bg-rose"] {
+  filter: brightness(0.9);
+}
+
+/* Uninvert wallet emoji */
+html.light .wallet-icon {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+@keyframes flyPulseBoard {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+  45% {
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0.28);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+.fly-target-pulse-board {
+  animation: flyPulseBoard 620ms ease;
+}
+
+@keyframes flyPulseUpcoming {
+  0% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+  }
+  45% {
+    box-shadow: 0 0 0 8px rgba(59, 130, 246, 0.28);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+  }
+}
+
+.fly-target-pulse-upcoming {
+  animation: flyPulseUpcoming 620ms ease;
+}
+
+.fly-task-card {
+  position: fixed;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: 0.9rem;
+  background: rgba(38, 38, 38, 0.96);
+  border: 1px solid rgba(63, 63, 70, 0.88);
+  color: rgba(244, 244, 245, 0.95);
+  min-width: 8.5rem;
+  max-width: 18rem;
+  box-sizing: border-box;
+  overflow: hidden;
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  transition:
+    left 560ms cubic-bezier(.16,.72,.3,1),
+    top 560ms cubic-bezier(.16,.72,.3,1),
+    transform 560ms cubic-bezier(.16,.72,.3,1),
+    opacity 220ms ease 420ms;
+  will-change: transform, left, top, opacity;
+}
+
+.fly-task-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.fly-task-card__title {
+  font-weight: 600;
+  font-size: 0.78rem;
+  line-height: 1.25;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+

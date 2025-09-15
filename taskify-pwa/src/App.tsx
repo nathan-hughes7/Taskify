@@ -1979,7 +1979,7 @@ export default function App() {
                 onClick={() => setShowWallet(true)}
                 title="Wallet"
               >
-                💰
+                <span className="wallet-icon">💰</span>
               </button>
               {/* Settings */}
               <button

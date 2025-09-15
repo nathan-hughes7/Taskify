@@ -104,3 +104,16 @@ button, input, select, textarea {
 ::-webkit-scrollbar-track {
   background: #18181b; /* neutral-900 */
 }
+/* Light theme color adjustments */
+html.light button[class*="bg-emerald"] {
+  filter: brightness(1.15);
+}
+
+html.light button[class*="bg-rose"] {
+  filter: brightness(0.9);
+}
+
+/* Uninvert wallet emoji */
+html.light .wallet-icon {
+  filter: invert(1) hue-rotate(180deg);
+}

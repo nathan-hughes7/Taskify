@@ -110,7 +110,7 @@ html.light button[class*="bg-emerald"] {
 }
 
 html.light button[class*="bg-rose"] {
-  filter: brightness(0.9);
+  filter: invert(1) hue-rotate(180deg) saturate(1.3) brightness(0.95);
 }
 
 /* Uninvert wallet emoji */

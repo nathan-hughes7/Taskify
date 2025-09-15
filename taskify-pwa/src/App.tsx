@@ -469,7 +469,7 @@ function useSettings() {
         inlineAdd: false,
         ...parsed,
         baseFontSize,
-        theme: typeof parsed.theme === "string" ? parsed.theme : "system",
+        theme: typeof parsed.theme === "string" ? parsed.theme : "dark",
       };
     } catch {
       return {
@@ -480,7 +480,7 @@ function useSettings() {
         showFullWeekRecurring: false,
         inlineAdd: false,
         baseFontSize: null,
-        theme: "system",
+        theme: "dark",
       };
     }
   });

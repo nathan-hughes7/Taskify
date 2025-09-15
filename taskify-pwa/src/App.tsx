@@ -1913,8 +1913,8 @@ export default function App() {
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4 flex flex-col">
+      <div className="max-w-7xl mx-auto flex flex-col flex-1">
         {/* Header */}
         <header className="mb-4">
           <div className="flex items-center mb-4">
@@ -2148,18 +2148,19 @@ export default function App() {
         )}
 
         {/* Board/Completed */}
+        <div className="flex-1 flex flex-col">
         {view === "board" || !settings.completedTab ? (
           !currentBoard ? (
-            <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-6 text-center text-sm text-neutral-400">No boards. Open Settings to create one.</div>
+            <div className="flex-1 rounded-2xl bg-neutral-900/60 border border-neutral-800 p-6 text-center text-sm text-neutral-400">No boards. Open Settings to create one.</div>
           ) : currentBoard.kind === "week" ? (
             <>
               {/* HORIZONTAL board: single row, side-scroll */}
               <div
                 ref={scrollerRef}
-                className="overflow-x-auto pb-4 w-full"
+                className="flex-1 overflow-x-auto pb-4 w-full h-full"
                 style={{ WebkitOverflowScrolling: "touch" }} // fluid momentum scroll on iOS
               >
-                <div className="flex gap-4 min-w-max">
+                <div className="flex gap-4 min-w-max h-full">
                   {Array.from({ length: 7 }, (_, i) => i as Weekday).map((day) => (
                     <DroppableColumn
                       key={day}
@@ -2168,7 +2169,6 @@ export default function App() {
                       onDropCard={(payload) => moveTask(payload.id, { type: "day", day })}
                       onDropEnd={handleDragEnd}
                       data-day={day}
-                      scrollable={settings.inlineAdd}
                       footer={settings.inlineAdd ? (
                         <form
                           className="mt-2 flex gap-1"
@@ -2212,7 +2212,6 @@ export default function App() {
                     onTitleClick={() => { setDayChoice("bounties"); setScheduleDate(""); }}
                     onDropCard={(payload) => moveTask(payload.id, { type: "bounties" })}
                     onDropEnd={handleDragEnd}
-                    scrollable={settings.inlineAdd}
                     footer={settings.inlineAdd ? (
                       <form
                         className="mt-2 flex gap-1"
@@ -2255,10 +2254,10 @@ export default function App() {
             // LISTS board (multiple custom columns) — still a horizontal row
             <div
               ref={scrollerRef}
-              className="overflow-x-auto pb-4 w-full"
+              className="flex-1 overflow-x-auto pb-4 w-full h-full"
               style={{ WebkitOverflowScrolling: "touch" }}
             >
-              <div className="flex gap-4 min-w-max">
+              <div className="flex gap-4 min-w-max h-full">
                 {listColumns.map(col => (
                   <DroppableColumn
                     key={col.id}
@@ -2266,7 +2265,6 @@ export default function App() {
                     onTitleClick={() => setDayChoice(col.id)}
                     onDropCard={(payload) => moveTask(payload.id, { type: "list", columnId: col.id })}
                     onDropEnd={handleDragEnd}
-                    scrollable={settings.inlineAdd}
                     footer={settings.inlineAdd ? (
                       <form
                         className="mt-2 flex gap-1"
@@ -2308,7 +2306,7 @@ export default function App() {
           )
         ) : (
           // Completed view
-          <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-4">
+          <div className="flex-1 rounded-2xl bg-neutral-900/60 border border-neutral-800 p-4 overflow-y-auto">
             <div className="flex items-center gap-2 mb-3">
               <div className="text-lg font-semibold">Completed</div>
               <div className="ml-auto">
@@ -2579,6 +2577,7 @@ export default function App() {
         <CashuWalletModal open={showWallet} onClose={() => setShowWallet(false)} />
       )}
     </div>
+  </div>
   );
 }
 
@@ -2717,7 +2716,6 @@ function DroppableColumn({
   onTitleClick,
   children,
   footer,
-  scrollable,
   ...props
 }: {
   title: string;
@@ -2726,7 +2724,6 @@ function DroppableColumn({
   onTitleClick?: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;
-  scrollable?: boolean;
 } & React.HTMLAttributes<HTMLDivElement>) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -2750,7 +2747,7 @@ function DroppableColumn({
   return (
     <div
       ref={ref}
-      className={`rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 w-[288px] shrink-0 ${scrollable ? 'h-96 flex flex-col' : 'min-h-[288px]'}`}
+      className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 min-w-[288px] flex-1 shrink-0 flex flex-col h-full"
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
     >
@@ -2770,7 +2767,7 @@ function DroppableColumn({
       >
         {title}
       </div>
-      <div className={`space-y-2 ${scrollable ? 'flex-1 overflow-y-auto pr-1' : ''}`}>{children}</div>
+      <div className="space-y-2 flex-1 overflow-y-auto pr-1">{children}</div>
       {footer}
     </div>
   );

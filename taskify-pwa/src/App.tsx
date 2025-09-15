@@ -788,6 +788,20 @@ export default function App() {
   const walletButtonRef = useRef<HTMLButtonElement>(null);
   const boardDropContainerRef = useRef<HTMLDivElement>(null);
   const boardDropListRef = useRef<HTMLDivElement>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  const upcomingButtonRef = useRef<HTMLButtonElement>(null);
+  const columnRefs = useRef(new Map<string, HTMLDivElement>());
+  const inlineInputRefs = useRef(new Map<string, HTMLInputElement>());
+
+  const setColumnRef = useCallback((key: string, el: HTMLDivElement | null) => {
+    if (el) columnRefs.current.set(key, el);
+    else columnRefs.current.delete(key);
+  }, []);
+
+  const setInlineInputRef = useCallback((key: string, el: HTMLInputElement | null) => {
+    if (el) inlineInputRefs.current.set(key, el);
+    else inlineInputRefs.current.delete(key);
+  }, []);
   function burst() {
     const el = confettiRef.current;
     if (!el) return;
@@ -909,6 +923,119 @@ export default function App() {
           try { layer.removeChild(coin); } catch {}
         }, 800);
       }, i * 140);
+    }
+  }
+
+  function flyNewTask(
+    from: DOMRect | null,
+    dest:
+      | { type: "column"; key: string; label: string }
+      | { type: "upcoming"; label: string }
+  ) {
+    const layer = flyLayerRef.current;
+    if (!layer) return;
+    if (typeof window === "undefined") return;
+    try {
+      if (
+        typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ) {
+        return;
+      }
+    } catch {}
+
+    requestAnimationFrame(() => {
+      const targetEl =
+        dest.type === "column"
+          ? columnRefs.current.get(dest.key) || null
+          : upcomingButtonRef.current;
+      if (!targetEl) return;
+
+      const targetRect = targetEl.getBoundingClientRect();
+      const startRect = from ?? targetRect;
+      const startX = startRect.left + startRect.width / 2;
+      const startY = startRect.top + startRect.height / 2;
+      const endX = targetRect.left + targetRect.width / 2;
+      const endY =
+        dest.type === "column"
+          ? targetRect.top + Math.min(targetRect.height / 2, 56)
+          : targetRect.top + targetRect.height / 2;
+
+      const card = document.createElement("div");
+      const text = (dest.label || "Task").trim();
+      const truncated = text.length > 60 ? `${text.slice(0, 57)}…` : text || "Task";
+      const widthSource = from ? from.width : startRect.width;
+      const cardWidth = Math.max(Math.min(widthSource * 0.55, 280), 150);
+      card.className = `fly-task-card ${
+        dest.type === "column" ? "fly-task-card--board" : "fly-task-card--upcoming"
+      }`;
+      card.style.position = "fixed";
+      card.style.left = `${startX}px`;
+      card.style.top = `${startY}px`;
+      card.style.width = `${cardWidth}px`;
+      card.style.transform = "translate(-50%, -50%) scale(0.92)";
+      card.style.opacity = "0.98";
+      card.style.pointerEvents = "none";
+      card.style.zIndex = "1000";
+      card.style.boxShadow =
+        dest.type === "column"
+          ? "0 18px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(63,63,70,0.45), 0 12px 26px rgba(16,185,129,0.2)"
+          : "0 18px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(63,63,70,0.45), 0 12px 26px rgba(59,130,246,0.2)";
+      card.style.willChange = "transform, left, top, opacity";
+
+      const body = document.createElement("div");
+      body.className = "fly-task-card__body";
+
+      const titleEl = document.createElement("div");
+      titleEl.className = "fly-task-card__title";
+      titleEl.textContent = truncated;
+      body.appendChild(titleEl);
+
+      card.appendChild(body);
+      layer.appendChild(card);
+
+      const pulseClass =
+        dest.type === "column" ? "fly-target-pulse-board" : "fly-target-pulse-upcoming";
+      targetEl.classList.add(pulseClass);
+      window.setTimeout(() => {
+        try {
+          targetEl.classList.remove(pulseClass);
+        } catch {}
+      }, 650);
+
+      requestAnimationFrame(() => {
+        card.style.left = `${endX}px`;
+        card.style.top = `${endY}px`;
+        card.style.transform = "translate(-50%, -50%) scale(0.75)";
+        card.style.opacity = "0";
+        window.setTimeout(() => {
+          try {
+            layer.removeChild(card);
+          } catch {}
+        }, 700);
+      });
+    });
+  }
+
+  function animateTaskArrival(from: DOMRect | null, task: Task, board: Board) {
+    if (!board || task.completed) return;
+    const labelSource = task.title || (task.images?.length ? "Image" : "");
+    const label = labelSource.trim() || "Task";
+    if (!isVisibleNow(task)) {
+      flyNewTask(from, { type: "upcoming", label });
+      return;
+    }
+
+    if (board.kind === "week") {
+      const due = new Date(task.dueISO);
+      if (Number.isNaN(due.getTime())) return;
+      const key = task.column === "bounties"
+        ? "week-bounties"
+        : `week-day-${due.getDay()}`;
+      flyNewTask(from, { type: "column", key, label });
+    } else if (board.kind === "lists" && task.columnId) {
+      flyNewTask(from, { type: "column", key: `list-${task.columnId}`, label });
     }
   }
 
@@ -1328,6 +1455,8 @@ export default function App() {
   function addTask(keepKeyboard = false) {
     if (!currentBoard) return;
 
+    const originRect = newTitleRef.current?.getBoundingClientRect() || null;
+
     const raw = newTitle.trim();
     if (raw) {
       try {
@@ -1343,6 +1472,7 @@ export default function App() {
             order: typeof parsed.order === "number" ? parsed.order : nextOrder,
           };
           applyHiddenForFuture(imported);
+          animateTaskArrival(originRect, imported, currentBoard);
           setTasks(prev => {
             const out = [...prev, imported];
             return settings.showFullWeekRecurring && imported.recurrence ? ensureWeekRecurrences(out, [imported]) : out;
@@ -1396,6 +1526,7 @@ export default function App() {
       t.columnId = selectedColId || firstCol?.id;
     }
     applyHiddenForFuture(t);
+    animateTaskArrival(originRect, t, currentBoard);
     setTasks(prev => {
       const out = [...prev, t];
       return settings.showFullWeekRecurring && recurrence ? ensureWeekRecurrences(out, [t]) : out;
@@ -1416,6 +1547,7 @@ export default function App() {
     const raw = (inlineTitles[key] || "").trim();
     if (!raw) return;
 
+    const originRect = inlineInputRefs.current.get(key)?.getBoundingClientRect() || null;
     let dueISO = isoForWeekday(0);
     const nextOrder = nextOrderForBoard(currentBoard.id, tasks);
     const id = crypto.randomUUID();
@@ -1439,6 +1571,7 @@ export default function App() {
       t.columnId = key;
     }
     applyHiddenForFuture(t);
+    animateTaskArrival(originRect, t, currentBoard);
     setTasks(prev => [...prev, t]);
     maybePublishTask(t).catch(() => {});
     setInlineTitles(prev => ({ ...prev, [key]: "" }));
@@ -2111,6 +2244,7 @@ export default function App() {
               className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
             />
             <button
+              ref={addButtonRef}
               onClick={() => addTask()}
               className="shrink-0 px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium"
             >
@@ -2190,6 +2324,7 @@ export default function App() {
                 <div className="flex gap-4 min-w-max">
                   {Array.from({ length: 7 }, (_, i) => i as Weekday).map((day) => (
                     <DroppableColumn
+                      ref={el => setColumnRef(`week-day-${day}`, el)}
                       key={day}
                       title={WD_SHORT[day]}
                       onTitleClick={() => { setDayChoice(day); setScheduleDate(""); }}
@@ -2203,6 +2338,7 @@ export default function App() {
                           onSubmit={(e) => { e.preventDefault(); addInlineTask(String(day)); }}
                         >
                           <input
+                            ref={el => setInlineInputRef(String(day), el)}
                             value={inlineTitles[String(day)] || ""}
                             onChange={(e) => setInlineTitles(prev => ({ ...prev, [String(day)]: e.target.value }))}
                             className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
@@ -2236,6 +2372,7 @@ export default function App() {
 
                   {/* Bounties */}
                   <DroppableColumn
+                    ref={el => setColumnRef("week-bounties", el)}
                     title="Bounties"
                     onTitleClick={() => { setDayChoice("bounties"); setScheduleDate(""); }}
                     onDropCard={(payload) => moveTask(payload.id, { type: "bounties" })}
@@ -2247,6 +2384,7 @@ export default function App() {
                         onSubmit={(e) => { e.preventDefault(); addInlineTask("bounties"); }}
                       >
                         <input
+                          ref={el => setInlineInputRef("bounties", el)}
                           value={inlineTitles["bounties"] || ""}
                           onChange={(e) => setInlineTitles(prev => ({ ...prev, bounties: e.target.value }))}
                           className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
@@ -2289,6 +2427,7 @@ export default function App() {
               <div className="flex gap-4 min-w-max">
                 {listColumns.map(col => (
                   <DroppableColumn
+                    ref={el => setColumnRef(`list-${col.id}`, el)}
                     key={col.id}
                     title={col.name}
                     onTitleClick={() => setDayChoice(col.id)}
@@ -2301,6 +2440,7 @@ export default function App() {
                         onSubmit={(e) => { e.preventDefault(); addInlineTask(col.id); }}
                       >
                         <input
+                          ref={el => setInlineInputRef(col.id, el)}
                           value={inlineTitles[col.id] || ""}
                           onChange={(e) => setInlineTitles(prev => ({ ...prev, [col.id]: e.target.value }))}
                           className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
@@ -2405,6 +2545,7 @@ export default function App() {
 
       {/* Floating Upcoming Drawer Button */}
       <button
+        ref={upcomingButtonRef}
         className={`fixed ${settings.inlineAdd ? 'top-36' : 'bottom-4'} right-4 px-3 py-2 rounded-full bg-neutral-800 border border-neutral-700 shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
         onClick={() => setShowUpcoming(true)}
         title="Upcoming (hidden) tasks"
@@ -2738,16 +2879,7 @@ function TaskMedia({ task }: { task: Task }) {
 }
 
 // Column container (fixed width for consistent horizontal scroll)
-function DroppableColumn({
-  title,
-  onDropCard,
-  onDropEnd,
-  onTitleClick,
-  children,
-  footer,
-  scrollable,
-  ...props
-}: {
+const DroppableColumn = React.forwardRef<HTMLDivElement, {
   title: string;
   onDropCard: (payload: { id: string }) => void;
   onDropEnd?: () => void;
@@ -2755,11 +2887,30 @@ function DroppableColumn({
   children: React.ReactNode;
   footer?: React.ReactNode;
   scrollable?: boolean;
-} & React.HTMLAttributes<HTMLDivElement>) {
-  const ref = useRef<HTMLDivElement>(null);
+} & React.HTMLAttributes<HTMLDivElement>>((
+  {
+    title,
+    onDropCard,
+    onDropEnd,
+    onTitleClick,
+    children,
+    footer,
+    scrollable,
+    ...props
+  },
+  forwardedRef
+) => {
+  const innerRef = useRef<HTMLDivElement | null>(null);
+  const setRef = useCallback((el: HTMLDivElement | null) => {
+    innerRef.current = el;
+    if (!forwardedRef) return;
+    if (typeof forwardedRef === "function") forwardedRef(el);
+    else (forwardedRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+  }, [forwardedRef]);
 
   useEffect(() => {
-    const el = ref.current!;
+    const el = innerRef.current;
+    if (!el) return;
     const onDragOver = (e: DragEvent) => e.preventDefault();
     const onDrop = (e: DragEvent) => {
       e.preventDefault();
@@ -2777,7 +2928,8 @@ function DroppableColumn({
 
   return (
     <div
-      ref={ref}
+      ref={setRef}
+      data-column-title={title}
       className={`rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 w-[288px] shrink-0 ${scrollable ? 'h-[calc(100vh-13rem)] flex flex-col' : 'min-h-[288px]'}`}
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
@@ -2802,7 +2954,7 @@ function DroppableColumn({
       {footer}
     </div>
   );
-}
+});
 
 function Card({
   task,

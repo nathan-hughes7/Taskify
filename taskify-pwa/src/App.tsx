@@ -3629,6 +3629,12 @@ function SettingsModal({
   const [newBoardRelay, setNewBoardRelay] = useState("");
   const [newOverrideRelay, setNewOverrideRelay] = useState("");
   // Mint selector moved to Wallet modal; no need to read here.
+  const { show: showToast } = useToast();
+  const { mintUrl, payInvoice } = useCashu();
+  const [donateAmt, setDonateAmt] = useState("");
+  const [donateComment, setDonateComment] = useState("");
+  const [donateState, setDonateState] = useState<"idle" | "sending" | "done" | "error">("idle");
+  const [donateMsg, setDonateMsg] = useState("");
 
   function parseCsv(csv: string): string[] {
     return csv.split(",").map(s => s.trim()).filter(Boolean);
@@ -3688,6 +3694,61 @@ function SettingsModal({
       }
     });
     e.target.value = "";
+  }
+
+  async function handleDonate() {
+    setDonateState("sending");
+    setDonateMsg("");
+    try {
+      const amtSat = Math.max(0, Math.floor(Number(donateAmt) || 0));
+      if (!amtSat) throw new Error("Enter amount in sats");
+      if (!mintUrl) throw new Error("Set a Cashu mint in Wallet first");
+
+      const lnAddress = "dev@solife.me";
+      const [name, domain] = lnAddress.split("@");
+      const infoRes = await fetch(`https://${domain}/.well-known/lnurlp/${name}`);
+      if (!infoRes.ok) throw new Error("Unable to fetch LNURL pay info");
+      const info = await infoRes.json();
+
+      const minSat = Math.ceil((info?.minSendable || 0) / 1000);
+      const maxSat = Math.floor((info?.maxSendable || Infinity) / 1000);
+      if (amtSat < minSat) throw new Error(`Minimum is ${minSat} sats`);
+      if (amtSat > maxSat) throw new Error(`Maximum is ${maxSat} sats`);
+
+      const commentAllowed: number = Number(info?.commentAllowed || 0) || 0;
+      const comment = (donateComment || "").trim();
+      if (comment && commentAllowed > 0 && comment.length > commentAllowed) {
+        throw new Error(`Comment too long (max ${commentAllowed} chars)`);
+      }
+
+      const params = new URLSearchParams({ amount: String(amtSat * 1000) });
+      if (comment) params.set("comment", comment);
+      const invRes = await fetch(`${info.callback}?${params.toString()}`);
+      if (!invRes.ok) throw new Error("Failed to get invoice");
+      const inv = await invRes.json();
+      if (inv?.status === "ERROR") throw new Error(inv?.reason || "Invoice error");
+
+      await payInvoice(inv.pr);
+
+      try {
+        const saved = localStorage.getItem("cashuHistory");
+        const list = saved ? JSON.parse(saved) : [];
+        const entry = {
+          id: `donate-${Date.now()}`,
+          summary: `Donated ${amtSat} sats to ${lnAddress}`,
+          detail: comment ? `comment: ${comment}` : undefined,
+        };
+        localStorage.setItem("cashuHistory", JSON.stringify([entry, ...list]));
+      } catch {}
+
+      setDonateState("done");
+      setDonateMsg("Thank you for your support! - The Solife team");
+      setDonateAmt("");
+      setDonateComment("");
+    } catch (e: any) {
+      setDonateState("error");
+      setDonateMsg(e?.message || String(e));
+    }
   }
 
   function addBoard() {
@@ -4122,6 +4183,52 @@ function SettingsModal({
               Restore from backup
               <input type="file" accept="application/json" className="hidden" onChange={restoreFromBackup} />
             </label>
+          </div>
+        </section>
+
+        {/* Development donation */}
+        <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+          <div className="text-sm font-medium mb-2">Support development</div>
+          <div className="text-xs text-neutral-400 mb-3">Donate from your internal wallet to dev@solife.me</div>
+          <div className="flex gap-2 mb-2">
+            <input
+              className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              placeholder="Amount (sats)"
+              value={donateAmt}
+              onChange={(e)=>setDonateAmt(e.target.value)}
+              inputMode="numeric"
+            />
+            <button
+              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+              onClick={handleDonate}
+              disabled={!mintUrl || donateState === 'sending'}
+            >Donate Now</button>
+          </div>
+          <input
+            className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+            placeholder="Comment (optional)"
+            value={donateComment}
+            onChange={(e)=>setDonateComment(e.target.value)}
+          />
+          <div className="mt-2 text-xs">
+            {donateState === 'sending' && <span>Sending…</span>}
+            {donateState === 'done' && <span className="text-emerald-400">{donateMsg}</span>}
+            {donateState === 'error' && <span className="text-rose-400">{donateMsg}</span>}
+          </div>
+        </section>
+
+        {/* Feedback / Feature requests */}
+        <section>
+          <div className="text-xs text-neutral-400">
+            Please submit any feedback or feature requests to{' '}
+            <button
+              className="underline text-emerald-400"
+              onClick={async ()=>{ try { await navigator.clipboard?.writeText('dev@solife.me'); showToast('Copied dev@solife.me'); } catch {} }}
+            >dev@solife.me</button>{' '}or Board ID{' '}
+            <button
+              className="underline text-emerald-400"
+              onClick={async ()=>{ try { await navigator.clipboard?.writeText('c3db0d84-ee89-43df-a31e-edb4c75be32b'); showToast('Copied Board ID'); } catch {} }}
+            >c3db0d84-ee89-43df-a31e-edb4c75be32b</button>
           </div>
         </section>
 

@@ -1912,9 +1912,15 @@ export default function App() {
   // horizontal scroller ref to enable iOS momentum scrolling
   const scrollerRef = useRef<HTMLDivElement>(null);
 
+  // prevent body scrolling when using inline add view
+  useEffect(() => {
+    document.body.style.overflowY = settings.inlineAdd ? "hidden" : "";
+    return () => { document.body.style.overflowY = ""; };
+  }, [settings.inlineAdd]);
+
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
-      <div className="max-w-7xl mx-auto">
+    <div className={`${settings.inlineAdd ? "h-screen overflow-hidden" : "min-h-screen"} bg-neutral-950 text-neutral-100 p-4`}>
+      <div className={`max-w-7xl mx-auto ${settings.inlineAdd ? "h-full flex flex-col" : ""}`}>
         {/* Header */}
         <header className="mb-4">
           <div className="flex items-center mb-4">

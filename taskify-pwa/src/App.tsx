@@ -2377,7 +2377,7 @@ export default function App() {
 
       {/* Floating Upcoming Drawer Button */}
       <button
-        className={`fixed bottom-4 right-4 px-3 py-2 rounded-full bg-neutral-800 border border-neutral-700 shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
+        className={`fixed ${settings.inlineAdd ? 'top-28' : 'bottom-4'} right-4 px-3 py-2 rounded-full bg-neutral-800 border border-neutral-700 shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
         onClick={() => setShowUpcoming(true)}
         title="Upcoming (hidden) tasks"
         onDragOver={(e) => { e.preventDefault(); setUpcomingHover(true); }}
@@ -2750,7 +2750,7 @@ function DroppableColumn({
   return (
     <div
       ref={ref}
-      className={`rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 w-[288px] shrink-0 ${scrollable ? 'h-96 flex flex-col' : 'min-h-[288px]'}`}
+      className={`rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 w-[288px] shrink-0 ${scrollable ? 'h-[calc(100vh-11rem)] flex flex-col' : 'min-h-[288px]'}`}
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
     >

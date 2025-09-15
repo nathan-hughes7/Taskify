@@ -19,8 +19,9 @@
 
 /* Ensure app fills screen */
 :root {
-  /* Use the OS preferred reading size (Dynamic Type on iOS) */
+  /* Larger default reading size */
   font: -apple-system-body;
+  font-size: 18px;
   -webkit-text-size-adjust: 100%;
 }
 html, body, #root {

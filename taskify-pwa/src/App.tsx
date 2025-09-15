@@ -458,7 +458,7 @@ function useSettings() {
       const parsed = JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}");
       let baseFontSize =
         typeof parsed.baseFontSize === "number" ? parsed.baseFontSize : null;
-      if (baseFontSize === 16) baseFontSize = null; // default to system size
+      if (baseFontSize === 18) baseFontSize = null; // default to system size
       return {
         weekStart: 0,
         newTaskPosition: "bottom",
@@ -591,7 +591,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.showFullWeekRecurring, settings.weekStart]);
 
-  // Apply font size setting to root; fall back to OS preferred size
+  // Apply font size setting to root; fall back to default size
   useEffect(() => {
     try {
       const base = settings.baseFontSize;
@@ -4095,23 +4095,23 @@ function SettingsModal({
               onClick={() => setSettings({ baseFontSize: null })}
             >System</button>
             <button
-              className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 14 ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ baseFontSize: 14 })}
-            >Small</button>
-            <button
               className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 16 ? "bg-emerald-600" : "bg-neutral-800"}`}
               onClick={() => setSettings({ baseFontSize: 16 })}
-            >Default</button>
+            >Small</button>
             <button
               className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 18 ? "bg-emerald-600" : "bg-neutral-800"}`}
               onClick={() => setSettings({ baseFontSize: 18 })}
-            >Large</button>
+            >Default</button>
             <button
               className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 20 ? "bg-emerald-600" : "bg-neutral-800"}`}
               onClick={() => setSettings({ baseFontSize: 20 })}
+            >Large</button>
+            <button
+              className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 22 ? "bg-emerald-600" : "bg-neutral-800"}`}
+              onClick={() => setSettings({ baseFontSize: 22 })}
             >X-Large</button>
           </div>
-          <div className="text-xs text-neutral-400 mt-2">Scales the entire UI. Defaults to the OS reading size.</div>
+          <div className="text-xs text-neutral-400 mt-2">Scales the entire UI. Defaults to a larger reading size.</div>
         </section>
 
         {/* Streaks */}

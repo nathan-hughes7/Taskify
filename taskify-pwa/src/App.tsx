@@ -2408,7 +2408,7 @@ export default function App() {
               {/* Refresh (if shared) */}
               {currentBoard?.nostr?.boardId && (
                 <button
-                  className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                  className="ios-icon-button bg-neutral-900 border border-neutral-800 hover:bg-neutral-800"
                   onClick={() => setNostrRefresh(n => n + 1)}
                   title="Refresh shared board"
                 >
@@ -2429,18 +2429,9 @@ export default function App() {
                   </svg>
                 </button>
               )}
-              {/* Wallet */}
-              <button
-                ref={walletButtonRef}
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                onClick={() => setShowWallet(true)}
-                title="Wallet"
-              >
-                <span className="wallet-icon">💰</span>
-              </button>
               {/* Settings */}
               <button
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                className="ios-icon-button bg-neutral-900 border border-neutral-800 hover:bg-neutral-800"
                 onClick={() => setShowSettings(true)}
                 title="Settings"
               >
@@ -2479,13 +2470,13 @@ export default function App() {
                   scheduleBoardDropClose();
                 }}
               >
-                <select
-                  ref={boardSelectorRef}
-                  value={currentBoardId}
-                  onChange={handleBoardSelect}
-                  className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                  title="Boards"
-                >
+              <select
+                ref={boardSelectorRef}
+                value={currentBoardId}
+                onChange={handleBoardSelect}
+                className="ios-field"
+                title="Boards"
+              >
                   {visibleBoards.length === 0 ? (
                     <option value="">No boards</option>
                   ) : (
@@ -2532,15 +2523,45 @@ export default function App() {
                   )}
               </div>
             </div>
-            <div className="ml-auto flex-shrink-0">
+            <div className="ml-auto flex items-center gap-3 flex-shrink-0">
+              {/* Wallet */}
+              <button
+                ref={walletButtonRef}
+                className="ios-icon-button bg-neutral-900 border border-neutral-800 hover:bg-neutral-800"
+                onClick={() => setShowWallet(true)}
+                title="Wallet"
+              >
+                <span className="wallet-icon text-xl">💰</span>
+              </button>
               {settings.completedTab ? (
-                <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden flex">
-                  <button className={`px-3 py-2 flex-1 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
-                  <button ref={completedTabRef} className={`px-3 py-2 flex-1 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
-                </div>
+                <button
+                  ref={completedTabRef}
+                  className={`ios-icon-button border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 ${
+                    view === "completed"
+                      ? "bg-emerald-600 border-emerald-500 hover:bg-emerald-500"
+                      : "bg-neutral-900 border-neutral-800 hover:bg-neutral-800"
+                  }`}
+                  onClick={() => setView((prev) => (prev === "completed" ? "board" : "completed"))}
+                  aria-pressed={view === "completed"}
+                  aria-label={view === "completed" ? "Show board" : "Show completed tasks"}
+                  title={view === "completed" ? "Show board" : "Show completed tasks"}
+                >
+                  <svg
+                    aria-hidden
+                    viewBox="0 0 20 20"
+                    className="h-5 w-5 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polyline points="4 11 8 15 16 6" />
+                  </svg>
+                </button>
               ) : (
                 <button
-                  className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 disabled:opacity-50"
+                  className="ios-pill-button bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 disabled:opacity-50"
                   onClick={clearCompleted}
                   disabled={completed.length === 0}
                 >
@@ -2569,12 +2590,12 @@ export default function App() {
                 }
               }}
               placeholder="New task…"
-              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
+              className="ios-field flex-1 min-w-0"
             />
             <button
               ref={addButtonRef}
               onClick={() => addTask()}
-              className="shrink-0 px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium"
+              className="ios-pill-button shrink-0 bg-emerald-600 hover:bg-emerald-500 text-white"
             >
               Add
             </button>
@@ -2596,7 +2617,7 @@ export default function App() {
                     setDayChoice(v === "bounties" ? "bounties" : (Number(v) as Weekday));
                     setScheduleDate("");
                   }}
-                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
+                  className="ios-field flex-1 min-w-0 truncate"
                 >
                   {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
                   <option value="bounties">Bounties</option>
@@ -2605,7 +2626,7 @@ export default function App() {
                 <select
                   value={String(dayChoice)}
                   onChange={(e)=>setDayChoice(e.target.value)}
-                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
+                  className="ios-field flex-1 min-w-0 truncate"
                 >
                   {listColumns.map(c => (<option key={c.id} value={c.id}>{c.name}</option>))}
                 </select>
@@ -2619,7 +2640,7 @@ export default function App() {
                   setQuickRule(v);
                   if (v === "custom") setShowAddAdvanced(true);
                 }}
-                className="shrink-0 w-fit px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                className="ios-field shrink-0 w-fit"
                 title="Recurrence"
               >
                 <option value="none">No recurrence</option>
@@ -2662,17 +2683,23 @@ export default function App() {
                       scrollable={settings.inlineAdd}
                       footer={settings.inlineAdd ? (
                         <form
-                          className="mt-2 flex gap-1"
+                          className="mt-2 flex items-center gap-2"
                           onSubmit={(e) => { e.preventDefault(); addInlineTask(String(day)); }}
                         >
                           <input
                             ref={el => setInlineInputRef(String(day), el)}
                             value={inlineTitles[String(day)] || ""}
                             onChange={(e) => setInlineTitles(prev => ({ ...prev, [String(day)]: e.target.value }))}
-                            className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                            className="ios-field flex-1 min-w-0"
                             placeholder="Add task"
                           />
-                          <button type="submit" className="rounded-xl bg-emerald-600 hover:bg-emerald-500">+</button>
+                          <button
+                            type="submit"
+                            className="ios-icon-button bg-emerald-600 hover:bg-emerald-500 text-white"
+                            aria-label="Add task"
+                          >
+                            +
+                          </button>
                         </form>
                       ) : undefined}
                     >
@@ -2708,17 +2735,23 @@ export default function App() {
                     scrollable={settings.inlineAdd}
                     footer={settings.inlineAdd ? (
                       <form
-                        className="mt-2 flex gap-1"
+                        className="mt-2 flex items-center gap-2"
                         onSubmit={(e) => { e.preventDefault(); addInlineTask("bounties"); }}
                       >
                         <input
                           ref={el => setInlineInputRef("bounties", el)}
                           value={inlineTitles["bounties"] || ""}
                           onChange={(e) => setInlineTitles(prev => ({ ...prev, bounties: e.target.value }))}
-                          className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                          className="ios-field flex-1 min-w-0"
                           placeholder="Add task"
                         />
-                        <button type="submit" className="rounded-xl bg-emerald-600 hover:bg-emerald-500">+</button>
+                        <button
+                          type="submit"
+                          className="ios-icon-button bg-emerald-600 hover:bg-emerald-500 text-white"
+                          aria-label="Add task"
+                        >
+                          +
+                        </button>
                       </form>
                     ) : undefined}
                   >
@@ -2764,17 +2797,23 @@ export default function App() {
                     scrollable={settings.inlineAdd}
                     footer={settings.inlineAdd ? (
                       <form
-                        className="mt-2 flex gap-1"
+                        className="mt-2 flex items-center gap-2"
                         onSubmit={(e) => { e.preventDefault(); addInlineTask(col.id); }}
                       >
                         <input
                           ref={el => setInlineInputRef(col.id, el)}
                           value={inlineTitles[col.id] || ""}
                           onChange={(e) => setInlineTitles(prev => ({ ...prev, [col.id]: e.target.value }))}
-                          className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                          className="ios-field flex-1 min-w-0"
                           placeholder="Add task"
                         />
-                        <button type="submit" className="rounded-xl bg-emerald-600 hover:bg-emerald-500">+</button>
+                        <button
+                          type="submit"
+                          className="ios-icon-button bg-emerald-600 hover:bg-emerald-500 text-white"
+                          aria-label="Add task"
+                        >
+                          +
+                        </button>
                       </form>
                     ) : undefined}
                   >
@@ -2805,11 +2844,11 @@ export default function App() {
         ) : (
           // Completed view
           <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-4">
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-3 mb-3">
               <div className="text-lg font-semibold">Completed</div>
               <div className="ml-auto">
                 <button
-                  className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600"
+                  className="ios-pill-button bg-rose-600/80 hover:bg-rose-600 text-white"
                   onClick={clearCompleted}
                 >
                   Clear completed
@@ -2819,9 +2858,9 @@ export default function App() {
             {completed.length === 0 ? (
               <div className="text-neutral-400 text-sm">No completed tasks yet.</div>
             ) : (
-              <ul className="space-y-2">
+              <ul className="space-y-3">
                 {completed.map((t) => (
-                  <li key={t.id} className="task px-3 rounded-xl bg-neutral-800 border border-neutral-700">
+                  <li key={t.id} className="task ios-task-card bg-neutral-800 border border-neutral-700">
                     <div className="flex items-start gap-2">
                       <div className="flex-1">
                       <div className="text-sm font-medium leading-[1.15]">
@@ -2874,7 +2913,7 @@ export default function App() {
       {/* Floating Upcoming Drawer Button */}
       <button
         ref={upcomingButtonRef}
-        className={`fixed bottom-4 right-4 px-3 py-2 rounded-full bg-neutral-800 border border-neutral-700 shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
+        className={`ios-pill-button fixed bottom-4 right-4 bg-neutral-800 border border-neutral-700 shadow-lg transition-transform ${upcomingHover ? 'scale-110' : ''}`}
         onClick={() => setShowUpcoming(true)}
         title="Upcoming (hidden) tasks"
         onDragOver={(e) => { e.preventDefault(); setUpcomingHover(true); }}
@@ -2895,9 +2934,9 @@ export default function App() {
           {upcoming.length === 0 ? (
             <div className="text-sm text-neutral-400">No upcoming tasks.</div>
           ) : (
-            <ul className="space-y-2">
+            <ul className="space-y-3">
               {upcoming.map((t) => (
-                <li key={t.id} className="task px-3 rounded-xl bg-neutral-900 border border-neutral-800">
+                <li key={t.id} className="task ios-task-card bg-neutral-900 border border-neutral-800">
                   <div className="flex items-start gap-2">
                     <div className="flex-1">
                       <div className="text-sm font-medium leading-[1.15]">{renderTitleWithLink(t.title, t.note)}</div>
@@ -2920,9 +2959,9 @@ export default function App() {
                       ) : null}
                     </div>
                   </div>
-                  <div className="mt-2 flex gap-2">
+                  <div className="mt-3 flex gap-2">
                     <button
-                      className="px-3 py-1 rounded-full bg-emerald-600 hover:bg-emerald-500 text-sm"
+                      className="ios-pill-button bg-emerald-600 hover:bg-emerald-500 text-white"
                       onClick={() =>
                         setTasks((prev) =>
                           prev.map((x) =>
@@ -2934,7 +2973,7 @@ export default function App() {
                       Reveal now
                     </button>
                     <button
-                      className="px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600 text-sm"
+                      className="ios-pill-button bg-neutral-700 hover:bg-neutral-600"
                       onClick={() => { setEditing(t); setShowUpcoming(false); }}
                     >
                       Edit
@@ -3389,7 +3428,7 @@ function Card({
   return (
     <div
       ref={cardRef}
-      className="task group relative px-2 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
+      className="task ios-task-card group relative bg-neutral-800 border border-neutral-700 select-none"
       // Allow horizontal swiping across columns on mobile
       style={{ touchAction: "auto" }}
       draggable
@@ -3413,7 +3452,7 @@ function Card({
             }}
             aria-label="Mark incomplete"
             title="Mark incomplete"
-            className="flex items-center justify-center w-8 h-8 rounded-full text-emerald-500"
+            className="ios-icon-button text-emerald-500"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none">
               <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
@@ -3429,7 +3468,7 @@ function Card({
             }}
             aria-label="Complete task"
             title="Mark complete"
-            className="flex items-center justify-center w-8 h-8 rounded-full text-neutral-300 hover:text-emerald-500 transition"
+            className="ios-icon-button text-neutral-300 hover:text-emerald-500"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none">
               <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
@@ -3492,7 +3531,7 @@ function Card({
 function IconButton({
   children, onClick, label, intent, buttonRef
 }: React.PropsWithChildren<{ onClick: ()=>void; label: string; intent?: "danger"|"success"; buttonRef?: React.Ref<HTMLButtonElement> }>) {
-  const base = "w-9 h-9 rounded-full inline-flex items-center justify-center text-sm border border-transparent bg-neutral-700/40 hover:bg-neutral-700/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500";
+  const base = "ios-icon-button border border-transparent bg-neutral-700/40 hover:bg-neutral-700/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500";
   const danger = " border-rose-700";
   const success = " bg-emerald-700/30 hover:bg-emerald-700/50";
   const cls = base + (intent==="danger" ? danger : intent==="success" ? success : "");
@@ -3624,7 +3663,14 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
             {images.map((img, i) => (
               <div key={i} className="relative">
                 <img src={img} className="max-h-40 rounded-lg" />
-                <button type="button" className="absolute top-1 right-1 bg-black/70 rounded-full px-1 text-xs" onClick={() => setImages(images.filter((_, j) => j !== i))}>×</button>
+                <button
+                  type="button"
+                  data-compact
+                  className="absolute top-1 right-1 bg-black/70 rounded-full px-1 text-xs"
+                  onClick={() => setImages(images.filter((_, j) => j !== i))}
+                >
+                  ×
+                </button>
               </div>
             ))}
           </div>
@@ -3643,18 +3689,19 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                 className="accent-emerald-600"
               />
               <input
-                className="flex-1 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                className="ios-field flex-1 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
                 value={st.title}
                 onChange={(e) => setSubtasks(prev => prev.map(s => s.id === st.id ? { ...s, title: e.target.value } : s))}
                 placeholder="Subtask"
               />
-              <button
-                type="button"
-                className="text-sm text-rose-500"
-                onClick={() => setSubtasks(prev => prev.filter(s => s.id !== st.id))}
-              >
-                ✕
-              </button>
+            <button
+              type="button"
+              className="ios-icon-button text-rose-500 hover:bg-rose-600/20"
+              aria-label="Remove subtask"
+              onClick={() => setSubtasks(prev => prev.filter(s => s.id !== st.id))}
+            >
+              ✕
+            </button>
             </div>
           ))}
           <div className="flex items-center gap-2 mt-2">
@@ -3664,11 +3711,11 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
               onChange={e=>setNewSubtask(e.target.value)}
               onKeyDown={e=>{ if (e.key === "Enter") { e.preventDefault(); addSubtask(true); } }}
               placeholder="New subtask…"
-              className="flex-1 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+              className="ios-field flex-1 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
             />
             <button
               type="button"
-              className="text-sm px-2 py-1 rounded bg-neutral-800"
+              className="ios-pill-button text-sm bg-neutral-800 hover:bg-neutral-700"
               onClick={() => addSubtask()}
             >
               Add
@@ -3834,7 +3881,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                 </div>
               ) : (
                 <textarea readOnly value={task.bounty.token || ""}
-                          className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" rows={3}/>
+                          className="ios-field w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" rows={3}/>
               )}
               <div className="flex gap-2 flex-wrap">
                 {task.bounty.token && (
@@ -5040,7 +5087,7 @@ function SettingsModal({
                 <div className="text-xs text-neutral-400 mb-1">Your Nostr public key (hex)</div>
                 <div className="flex gap-2 items-center">
                   <input readOnly value={pubkeyHex || "(generating…)"}
-                         className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                         className="ios-field flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
                   <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ if(pubkeyHex) { try { await navigator.clipboard?.writeText(pubkeyHex); } catch {} } }}>Copy</button>
                 </div>
               </div>
@@ -5120,7 +5167,7 @@ function SettingsModal({
             <button className="flex-1 px-3 py-2 rounded-xl bg-neutral-800" onClick={backupData}>Download backup</button>
             <label className="flex-1 px-3 py-2 rounded-xl bg-neutral-800 text-center cursor-pointer">
               Restore from backup
-              <input type="file" accept="application/json" className="hidden" onChange={restoreFromBackup} />
+              <input type="file" accept="application/json" className="ios-field hidden" onChange={restoreFromBackup} />
             </label>
           </div>
         </section>
@@ -5145,7 +5192,7 @@ function SettingsModal({
           <div className="text-xs text-neutral-400 mb-3">Donate from your internal wallet to dev@solife.me</div>
           <div className="flex gap-2 mb-2 w-full">
             <input
-              className="min-w-[7rem] flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              className="ios-field min-w-[7rem] flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               placeholder="Amount (sats)"
               value={donateAmt}
               onChange={(e)=>setDonateAmt(e.target.value)}
@@ -5158,7 +5205,7 @@ function SettingsModal({
             >Donate Now</button>
           </div>
           <input
-            className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+            className="ios-field w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
             placeholder="Comment (optional)"
             value={donateComment}
             onChange={(e)=>setDonateComment(e.target.value)}
@@ -5275,7 +5322,7 @@ function SettingsModal({
                 <div className="text-xs text-neutral-400">Board ID</div>
                 <div className="flex gap-2 items-center">
                   <input readOnly value={manageBoard.nostr.boardId}
-                         className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                         className="ios-field flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
                   <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ try { await navigator.clipboard?.writeText(manageBoard.nostr!.boardId); } catch {} }}>Copy</button>
                 </div>
                   {showAdvanced && (

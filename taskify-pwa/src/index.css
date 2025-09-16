@@ -19,9 +19,9 @@
 
 /* Ensure app fills screen */
 :root {
-  /* Larger default reading size */
+  /* Align with native iOS sizing */
   font: -apple-system-body;
-  font-size: 18px;
+  font-size: 17px;
   -webkit-text-size-adjust: 100%;
 }
 
@@ -76,19 +76,59 @@ button, input, select, textarea {
               border-color 0.2s ease, opacity 0.2s ease;
 }
 
-/* Compact spacing for buttons, tasks, and textboxes */
+/* iOS-inspired control sizing */
 @layer base {
-  button,
+  button:not([data-compact]),
   select {
-    padding: 0.125rem 0.5rem !important;
+    border-radius: 9999px !important;
+    min-height: 2.75rem;
+    padding: 0.6rem 1.2rem !important;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
   }
 
-  /* Reduce vertical padding for inputs and textareas */
-  input,
-  textarea,
-  .task {
-    padding-top: 0.125rem !important;
-    padding-bottom: 0.125rem !important;
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([data-compact]),
+  textarea:not([data-compact]) {
+    border-radius: 9999px !important;
+    min-height: 2.75rem;
+    padding: 0.6rem 1rem !important;
+    font-size: 1rem;
+    line-height: 1.2;
+  }
+}
+
+@layer components {
+  .ios-pill-button {
+    @apply inline-flex items-center justify-center rounded-full font-semibold transition-colors;
+    min-height: 2.75rem;
+    padding: 0.6rem 1.2rem !important;
+    font-size: 1rem;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+  }
+
+  .ios-icon-button {
+    @apply inline-flex items-center justify-center rounded-full p-0 transition-colors;
+    width: 2.75rem;
+    height: 2.75rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    padding: 0 !important;
+  }
+
+  .ios-field {
+    @apply rounded-full border border-neutral-800 bg-neutral-900 text-white placeholder:text-neutral-500 transition focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500/60;
+    min-height: 2.75rem;
+    padding: 0.6rem 1rem !important;
+    font-size: 1rem;
+    line-height: 1.2;
+  }
+
+  .ios-task-card {
+    @apply rounded-full px-4 py-3;
+    border-radius: 9999px !important;
   }
 }
 

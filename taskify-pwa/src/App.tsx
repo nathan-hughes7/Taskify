@@ -486,11 +486,11 @@ function useSettings() {
       }
       return {
         weekStart: 0,
-        newTaskPosition: "bottom",
+        newTaskPosition: "top",
         streaksEnabled: true,
         completedTab: true,
         showFullWeekRecurring: false,
-        inlineAdd: false,
+        inlineAdd: true,
         ...parsed,
         baseFontSize,
         theme: typeof parsed.theme === "string" ? parsed.theme : "dark",
@@ -499,11 +499,11 @@ function useSettings() {
     } catch {
       return {
         weekStart: 0,
-        newTaskPosition: "bottom",
+        newTaskPosition: "top",
         streaksEnabled: true,
         completedTab: true,
         showFullWeekRecurring: false,
-        inlineAdd: false,
+        inlineAdd: true,
         baseFontSize: null,
         theme: "dark",
         startBoardByDay: {},

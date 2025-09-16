@@ -11,6 +11,15 @@ import { useToast } from "./context/ToastContext";
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sun
 type DayChoice = Weekday | "bounties" | string; // string = custom list columnId
 const WD_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+const WD_FULL = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+] as const;
 
 type Recurrence =
   | { type: "none"; untilISO?: string }
@@ -96,6 +105,7 @@ type Settings = {
   // Base UI font size in pixels; null uses the OS preferred size
   baseFontSize: number | null;
   theme: "system" | "light" | "dark";
+  startBoardByDay: Partial<Record<Weekday, string>>;
 };
 
 const R_NONE: Recurrence = { type: "none" };
@@ -465,6 +475,15 @@ function useSettings() {
       let baseFontSize =
         typeof parsed.baseFontSize === "number" ? parsed.baseFontSize : null;
       if (baseFontSize === 18) baseFontSize = null; // default to system size
+      const startBoardByDay: Partial<Record<Weekday, string>> = {};
+      if (parsed && typeof parsed.startBoardByDay === "object" && parsed.startBoardByDay) {
+        for (const [key, value] of Object.entries(parsed.startBoardByDay as Record<string, unknown>)) {
+          const day = Number(key);
+          if (!Number.isInteger(day) || day < 0 || day > 6) continue;
+          if (typeof value !== "string" || !value) continue;
+          startBoardByDay[day as Weekday] = value;
+        }
+      }
       return {
         weekStart: 0,
         newTaskPosition: "bottom",
@@ -475,6 +494,7 @@ function useSettings() {
         ...parsed,
         baseFontSize,
         theme: typeof parsed.theme === "string" ? parsed.theme : "dark",
+        startBoardByDay,
       };
     } catch {
       return {
@@ -486,16 +506,31 @@ function useSettings() {
         inlineAdd: false,
         baseFontSize: null,
         theme: "dark",
+        startBoardByDay: {},
       };
     }
   });
-  const setSettings = (s: Partial<Settings>) => {
+  const setSettings = useCallback((s: Partial<Settings>) => {
     setSettingsRaw(prev => ({ ...prev, ...s }));
-  };
+  }, []);
   useEffect(() => {
     localStorage.setItem(LS_SETTINGS, JSON.stringify(settings));
   }, [settings]);
   return [settings, setSettings] as const;
+}
+
+function pickStartupBoard(boards: Board[], overrides?: Partial<Record<Weekday, string>>): string {
+  const visible = boards.filter(b => !b.archived && !b.hidden);
+  const today = (new Date().getDay() as Weekday);
+  const overrideId = overrides?.[today];
+  if (overrideId) {
+    const match = visible.find(b => b.id === overrideId) || boards.find(b => !b.archived && b.id === overrideId);
+    if (match) return match.id;
+  }
+  if (visible.length) return visible[0].id;
+  const firstUnarchived = boards.find(b => !b.archived);
+  if (firstUnarchived) return firstUnarchived.id;
+  return boards[0]?.id || "";
 }
 
 function migrateBoards(stored: any): Board[] | null {
@@ -630,26 +665,19 @@ export default function App() {
     return () => { try { clip.writeText = original; } catch {} };
   }, [showToast]);
   const [boards, setBoards] = useBoards();
-  const [currentBoardId, setCurrentBoardId] = useState(() => {
-    const firstVisible = boards.find(b => !b.archived && !b.hidden);
-    if (firstVisible) return firstVisible.id;
-    const firstUnarchived = boards.find(b => !b.archived);
-    if (firstUnarchived) return firstUnarchived.id;
-    return boards[0]?.id || "";
-  });
+  const [settings, setSettings] = useSettings();
+  const [currentBoardId, setCurrentBoardId] = useState(() => pickStartupBoard(boards, settings.startBoardByDay));
   const currentBoard = boards.find(b => b.id === currentBoardId);
   const visibleBoards = useMemo(() => boards.filter(b => !b.archived && !b.hidden), [boards]);
-  const unarchivedBoards = useMemo(() => boards.filter(b => !b.archived), [boards]);
 
   useEffect(() => {
     const current = boards.find(b => b.id === currentBoardId);
-    if (current) return;
-    const next = visibleBoards[0]?.id || unarchivedBoards[0]?.id || boards[0]?.id || "";
+    if (current && !current.archived && !current.hidden) return;
+    const next = pickStartupBoard(boards, settings.startBoardByDay);
     if (next !== currentBoardId) setCurrentBoardId(next);
-  }, [boards, visibleBoards, unarchivedBoards, currentBoardId]);
+  }, [boards, currentBoardId, settings.startBoardByDay]);
 
   const [tasks, setTasks] = useTasks();
-  const [settings, setSettings] = useSettings();
   const [defaultRelays, setDefaultRelays] = useState<string[]>(() => loadDefaultRelays());
   useEffect(() => { saveDefaultRelays(defaultRelays); }, [defaultRelays]);
 
@@ -658,6 +686,28 @@ export default function App() {
     setTasks(prev => ensureWeekRecurrences(prev));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.showFullWeekRecurring, settings.weekStart]);
+
+  useEffect(() => {
+    const overrides = settings.startBoardByDay;
+    if (!overrides || Object.keys(overrides).length === 0) return;
+    const visibleIds = new Set(boards.filter(b => !b.archived && !b.hidden).map(b => b.id));
+    let changed = false;
+    const next: Partial<Record<Weekday, string>> = {};
+    for (const key of Object.keys(overrides)) {
+      const dayNum = Number(key);
+      const boardId = overrides[key as keyof typeof overrides];
+      if (!Number.isInteger(dayNum) || dayNum < 0 || dayNum > 6) {
+        changed = true;
+        continue;
+      }
+      if (typeof boardId !== "string" || !boardId || !visibleIds.has(boardId)) {
+        changed = true;
+        continue;
+      }
+      next[dayNum as Weekday] = boardId;
+    }
+    if (changed) setSettings({ startBoardByDay: next });
+  }, [boards, settings.startBoardByDay, setSettings]);
 
   // Apply font size setting to root; fall back to default size
   useEffect(() => {
@@ -4227,6 +4277,7 @@ function SettingsModal({
   const manageBoard = boards.find(b => b.id === manageBoardId);
   const [relaysCsv, setRelaysCsv] = useState("");
   const [customSk, setCustomSk] = useState("");
+  const [showViewAdvanced, setShowViewAdvanced] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [reloadNeeded, setReloadNeeded] = useState(false);
   const [newDefaultRelay, setNewDefaultRelay] = useState("");
@@ -4234,6 +4285,7 @@ function SettingsModal({
   const [newOverrideRelay, setNewOverrideRelay] = useState("");
   const [showArchivedBoards, setShowArchivedBoards] = useState(false);
   const [archiveDropActive, setArchiveDropActive] = useState(false);
+  const visibleBoards = useMemo(() => boards.filter(b => !b.archived && !b.hidden), [boards]);
   const unarchivedBoards = useMemo(() => boards.filter(b => !b.archived), [boards]);
   const archivedBoards = useMemo(() => boards.filter(b => b.archived), [boards]);
   // Mint selector moved to Wallet modal; no need to read here.
@@ -4259,6 +4311,19 @@ function SettingsModal({
   function removeRelayFromCsv(csv: string, relay: string): string {
     const list = parseCsv(csv);
     return list.filter(r => r !== relay).join(",");
+  }
+
+  function handleDailyStartBoardChange(day: Weekday, boardId: string) {
+    const prev = settings.startBoardByDay;
+    const next: Partial<Record<Weekday, string>> = { ...prev };
+    if (!boardId) {
+      if (prev[day] === undefined) return;
+      delete next[day];
+    } else {
+      if (prev[day] === boardId) return;
+      next[day] = boardId;
+    }
+    setSettings({ startBoardByDay: next });
   }
 
   function backupData() {
@@ -4738,113 +4803,142 @@ function SettingsModal({
           </button>
         </section>
 
-        {/* Week start */}
-        <section>
-          <div className="text-sm font-medium mb-2">Week starts on</div>
-          <div className="flex gap-2">
-            <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 6 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 6 })}>Saturday</button>
-            <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 0 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 0 })}>Sunday</button>
-            <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 1 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 1 })}>Monday</button>
-          </div>
-          <div className="text-xs text-neutral-400 mt-2">Affects when weekly recurring tasks re-appear.</div>
-        </section>
-
-        {/* New task position */}
-        <section>
-          <div className="text-sm font-medium mb-2">Add new tasks to</div>
-          <div className="flex gap-2">
-            <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'top' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'top' })}>Top</button>
-            <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'bottom' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'bottom' })}>Bottom</button>
-          </div>
-        </section>
-
-        {/* Inline add boxes */}
-        <section>
-          <div className="text-sm font-medium mb-2">Add tasks within lists</div>
-          <div className="flex gap-2">
-            <button className={`px-3 py-2 rounded-xl ${settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: true })}>Inline</button>
-            <button className={`px-3 py-2 rounded-xl ${!settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: false })}>Top bar</button>
-          </div>
-        </section>
-
-        {/* Theme */}
-        <section>
-          <div className="text-sm font-medium mb-2">Theme</div>
-          <div className="flex gap-2">
-            <button className={`px-3 py-2 rounded-xl ${settings.theme === "system" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "system" })}>System</button>
-            <button className={`px-3 py-2 rounded-xl ${settings.theme === "light" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "light" })}>Light</button>
-            <button className={`px-3 py-2 rounded-xl ${settings.theme === "dark" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "dark" })}>Dark</button>
-          </div>
-        </section>
-
-        {/* Font size */}
-        <section>
-          <div className="text-sm font-medium mb-2">Font size</div>
-          <div className="flex gap-2 flex-wrap">
+        {/* View */}
+        <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="text-sm font-medium">View</div>
+            <div className="ml-auto" />
             <button
-              className={`px-3 py-2 rounded-xl ${settings.baseFontSize == null ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ baseFontSize: null })}
-            >System</button>
-            <button
-              className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 16 ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ baseFontSize: 16 })}
-            >Small</button>
-            <button
-              className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 18 ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ baseFontSize: 18 })}
-            >Default</button>
-            <button
-              className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 20 ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ baseFontSize: 20 })}
-            >Large</button>
-            <button
-              className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 22 ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ baseFontSize: 22 })}
-            >X-Large</button>
-          </div>
-          <div className="text-xs text-neutral-400 mt-2">Scales the entire UI. Defaults to a larger reading size.</div>
-        </section>
-
-        {/* Streaks */}
-        <section>
-          <div className="text-sm font-medium mb-2">Streaks</div>
-          <div className="flex gap-2">
-            <button
-              className={`px-3 py-2 rounded-xl ${settings.streaksEnabled ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ streaksEnabled: !settings.streaksEnabled })}
+              className="px-3 py-1 rounded-lg bg-neutral-800 text-xs"
+              onClick={() => setShowViewAdvanced((v) => !v)}
             >
-              {settings.streaksEnabled ? "On" : "Off"}
+              {showViewAdvanced ? "Hide advanced" : "Advanced"}
             </button>
           </div>
-          <div className="text-xs text-neutral-400 mt-2">Track consecutive completions on recurring tasks.</div>
-        </section>
-
-        {/* Full week recurring */}
-        <section>
-          <div className="text-sm font-medium mb-2">Show full week for recurring tasks</div>
-          <div className="flex gap-2">
-            <button
-              className={`px-3 py-2 rounded-xl ${settings.showFullWeekRecurring ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ showFullWeekRecurring: !settings.showFullWeekRecurring })}
-            >
-              {settings.showFullWeekRecurring ? "On" : "Off"}
-            </button>
+          <div className="space-y-4">
+            <div>
+              <div className="text-sm font-medium mb-2">Theme</div>
+              <div className="flex gap-2">
+                <button className={`px-3 py-2 rounded-xl ${settings.theme === "system" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "system" })}>System</button>
+                <button className={`px-3 py-2 rounded-xl ${settings.theme === "light" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "light" })}>Light</button>
+                <button className={`px-3 py-2 rounded-xl ${settings.theme === "dark" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "dark" })}>Dark</button>
+              </div>
+            </div>
+            <div>
+              <div className="text-sm font-medium mb-2">Font size</div>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize == null ? "bg-emerald-600" : "bg-neutral-800"}`}
+                  onClick={() => setSettings({ baseFontSize: null })}
+                >System</button>
+                <button
+                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 16 ? "bg-emerald-600" : "bg-neutral-800"}`}
+                  onClick={() => setSettings({ baseFontSize: 16 })}
+                >Small</button>
+                <button
+                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 18 ? "bg-emerald-600" : "bg-neutral-800"}`}
+                  onClick={() => setSettings({ baseFontSize: 18 })}
+                >Default</button>
+                <button
+                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 20 ? "bg-emerald-600" : "bg-neutral-800"}`}
+                  onClick={() => setSettings({ baseFontSize: 20 })}
+                >Large</button>
+                <button
+                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 22 ? "bg-emerald-600" : "bg-neutral-800"}`}
+                  onClick={() => setSettings({ baseFontSize: 22 })}
+                >X-Large</button>
+              </div>
+              <div className="text-xs text-neutral-400 mt-2">Scales the entire UI. Defaults to a larger reading size.</div>
+            </div>
+            <div>
+              <div className="text-sm font-medium mb-2">Add new tasks to</div>
+              <div className="flex gap-2">
+                <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'top' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'top' })}>Top</button>
+                <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'bottom' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'bottom' })}>Bottom</button>
+              </div>
+            </div>
+            <div>
+              <div className="text-sm font-medium mb-2">Add tasks within lists</div>
+              <div className="flex gap-2">
+                <button className={`px-3 py-2 rounded-xl ${settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: true })}>Inline</button>
+                <button className={`px-3 py-2 rounded-xl ${!settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: false })}>Top bar</button>
+              </div>
+            </div>
           </div>
-          <div className="text-xs text-neutral-400 mt-2">Display all occurrences for the current week at once.</div>
-        </section>
-
-        {/* Completed tab */}
-        <section>
-          <div className="text-sm font-medium mb-2">Completed tab</div>
-          <div className="flex gap-2">
-            <button
-              className={`px-3 py-2 rounded-xl ${settings.completedTab ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ completedTab: !settings.completedTab })}
-            >
-              {settings.completedTab ? "On" : "Off"}
-            </button>
-          </div>
-          <div className="text-xs text-neutral-400 mt-2">Hide the completed tab and show a Clear completed button instead.</div>
+          {showViewAdvanced && (
+            <div className="mt-4 border-t border-neutral-800 pt-4 space-y-4">
+              <div>
+                <div className="text-sm font-medium mb-2">Week starts on</div>
+                <div className="flex gap-2">
+                  <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 6 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 6 })}>Saturday</button>
+                  <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 0 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 0 })}>Sunday</button>
+                  <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 1 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 1 })}>Monday</button>
+                </div>
+                <div className="text-xs text-neutral-400 mt-2">Affects when weekly recurring tasks re-appear.</div>
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">Show full week for recurring tasks</div>
+                <div className="flex gap-2">
+                  <button
+                    className={`px-3 py-2 rounded-xl ${settings.showFullWeekRecurring ? "bg-emerald-600" : "bg-neutral-800"}`}
+                    onClick={() => setSettings({ showFullWeekRecurring: !settings.showFullWeekRecurring })}
+                  >
+                    {settings.showFullWeekRecurring ? "On" : "Off"}
+                  </button>
+                </div>
+                <div className="text-xs text-neutral-400 mt-2">Display all occurrences for the current week at once.</div>
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">Completed tab</div>
+                <div className="flex gap-2">
+                  <button
+                    className={`px-3 py-2 rounded-xl ${settings.completedTab ? "bg-emerald-600" : "bg-neutral-800"}`}
+                    onClick={() => setSettings({ completedTab: !settings.completedTab })}
+                  >
+                    {settings.completedTab ? "On" : "Off"}
+                  </button>
+                </div>
+                <div className="text-xs text-neutral-400 mt-2">Hide the completed tab and show a Clear completed button instead.</div>
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">Streaks</div>
+                <div className="flex gap-2">
+                  <button
+                    className={`px-3 py-2 rounded-xl ${settings.streaksEnabled ? "bg-emerald-600" : "bg-neutral-800"}`}
+                    onClick={() => setSettings({ streaksEnabled: !settings.streaksEnabled })}
+                  >
+                    {settings.streaksEnabled ? "On" : "Off"}
+                  </button>
+                </div>
+                <div className="text-xs text-neutral-400 mt-2">Track consecutive completions on recurring tasks.</div>
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">Board on app start</div>
+                <div className="space-y-2">
+                  {WD_FULL.map((label, idx) => (
+                    <div key={label} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                      <div className="text-xs uppercase tracking-wide text-neutral-400 sm:w-28">{label}</div>
+                      <select
+                        className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                        value={settings.startBoardByDay[idx as Weekday] ?? ""}
+                        onChange={(e) => handleDailyStartBoardChange(idx as Weekday, e.target.value)}
+                      >
+                        <option value="">Default (first visible)</option>
+                        {visibleBoards.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+                <div className="text-xs text-neutral-400 mt-2">
+                  Choose which board opens first for each day. Perfect for work boards on weekdays and personal lists on weekends.
+                </div>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Nostr */}

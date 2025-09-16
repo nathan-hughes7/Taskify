@@ -2803,7 +2803,7 @@ export default function App() {
       {/* Floating Upcoming Drawer Button */}
       <button
         ref={upcomingButtonRef}
-        className={`fixed ${settings.inlineAdd ? 'top-36' : 'bottom-4'} right-4 px-3 py-2 rounded-full bg-neutral-800 border border-neutral-700 shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
+        className={`fixed bottom-4 right-4 px-3 py-2 rounded-full bg-neutral-800 border border-neutral-700 shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
         onClick={() => setShowUpcoming(true)}
         title="Upcoming (hidden) tasks"
         onDragOver={(e) => { e.preventDefault(); setUpcomingHover(true); }}

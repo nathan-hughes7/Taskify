@@ -3040,9 +3040,17 @@ export default function App() {
             setCurrentBoardId(id);
           }}
           onRegenerateBoardId={regenerateBoardId}
-          onBoardChanged={(boardId) => {
-            const b = boards.find(x => x.id === boardId);
-            if (b) publishBoardMetadata(b).catch(() => {});
+          onBoardChanged={(boardId, options) => {
+            const board = boards.find(x => x.id === boardId);
+            if (!board) return;
+            publishBoardMetadata(board).catch(() => {});
+            if (options?.republishTasks) {
+              tasks
+                .filter(t => t.boardId === boardId)
+                .forEach(t => {
+                  maybePublishTask(t, board).catch(() => {});
+                });
+            }
           }}
           onClose={() => setShowSettings(false)}
         />
@@ -4189,7 +4197,7 @@ function SettingsModal({
   onShareBoard: (boardId: string, relaysCsv?: string) => void;
   onJoinBoard: (nostrId: string, name?: string, relaysCsv?: string) => void;
   onRegenerateBoardId: (boardId: string) => void;
-  onBoardChanged: (boardId: string) => void;
+  onBoardChanged: (boardId: string, options?: { republishTasks?: boolean }) => void;
   onRestartTutorial: () => void;
   onClose: () => void;
 }) {
@@ -5133,7 +5141,10 @@ function SettingsModal({
                     </>
                   )}
                   <div className="flex gap-2">
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onBoardChanged(manageBoard.id)}>Republish metadata</button>
+                  <button
+                    className="px-3 py-2 rounded-xl bg-neutral-800"
+                    onClick={()=>onBoardChanged(manageBoard.id, { republishTasks: true })}
+                  >Republish metadata</button>
                   <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>{
                     setBoards(prev => prev.map(b => b.id === manageBoard.id ? (b.kind === 'week'
                       ? { id: b.id, name: b.name, kind: 'week', archived: b.archived, hidden: b.hidden } as Board

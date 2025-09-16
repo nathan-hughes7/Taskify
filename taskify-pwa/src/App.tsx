@@ -2429,15 +2429,6 @@ export default function App() {
                   </svg>
                 </button>
               )}
-              {/* Wallet */}
-              <button
-                ref={walletButtonRef}
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                onClick={() => setShowWallet(true)}
-                title="Wallet"
-              >
-                <span className="wallet-icon">💰</span>
-              </button>
               {/* Settings */}
               <button
                 className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
@@ -2532,12 +2523,31 @@ export default function App() {
                   )}
               </div>
             </div>
-            <div className="ml-auto flex-shrink-0">
+            <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+              {/* Wallet */}
+              <button
+                ref={walletButtonRef}
+                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                onClick={() => setShowWallet(true)}
+                title="Wallet"
+              >
+                <span className="wallet-icon">💰</span>
+              </button>
               {settings.completedTab ? (
-                <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden flex">
-                  <button className={`px-3 py-2 flex-1 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
-                  <button ref={completedTabRef} className={`px-3 py-2 flex-1 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
-                </div>
+                <button
+                  ref={completedTabRef}
+                  className={`flex h-10 w-10 items-center justify-center rounded-full border border-neutral-800 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 ${
+                    view === "completed"
+                      ? "bg-emerald-600 hover:bg-emerald-500 text-white"
+                      : "bg-neutral-900 hover:bg-neutral-800 text-neutral-400"
+                  }`}
+                  onClick={() => setView((prev) => (prev === "completed" ? "board" : "completed"))}
+                  aria-pressed={view === "completed"}
+                  aria-label={view === "completed" ? "Show board" : "Show completed tasks"}
+                  title={view === "completed" ? "Show board" : "Show completed tasks"}
+                >
+                  <span aria-hidden className="text-lg">✓</span>
+                </button>
               ) : (
                 <button
                   className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 disabled:opacity-50"

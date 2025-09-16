@@ -4227,6 +4227,7 @@ function SettingsModal({
   const manageBoard = boards.find(b => b.id === manageBoardId);
   const [relaysCsv, setRelaysCsv] = useState("");
   const [customSk, setCustomSk] = useState("");
+  const [showViewAdvanced, setShowViewAdvanced] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [reloadNeeded, setReloadNeeded] = useState(false);
   const [newDefaultRelay, setNewDefaultRelay] = useState("");
@@ -4738,71 +4739,105 @@ function SettingsModal({
           </button>
         </section>
 
-        {/* Week start */}
-        <section>
-          <div className="text-sm font-medium mb-2">Week starts on</div>
-          <div className="flex gap-2">
-            <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 6 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 6 })}>Saturday</button>
-            <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 0 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 0 })}>Sunday</button>
-            <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 1 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 1 })}>Monday</button>
-          </div>
-          <div className="text-xs text-neutral-400 mt-2">Affects when weekly recurring tasks re-appear.</div>
-        </section>
-
-        {/* New task position */}
-        <section>
-          <div className="text-sm font-medium mb-2">Add new tasks to</div>
-          <div className="flex gap-2">
-            <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'top' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'top' })}>Top</button>
-            <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'bottom' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'bottom' })}>Bottom</button>
-          </div>
-        </section>
-
-        {/* Inline add boxes */}
-        <section>
-          <div className="text-sm font-medium mb-2">Add tasks within lists</div>
-          <div className="flex gap-2">
-            <button className={`px-3 py-2 rounded-xl ${settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: true })}>Inline</button>
-            <button className={`px-3 py-2 rounded-xl ${!settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: false })}>Top bar</button>
-          </div>
-        </section>
-
-        {/* Theme */}
-        <section>
-          <div className="text-sm font-medium mb-2">Theme</div>
-          <div className="flex gap-2">
-            <button className={`px-3 py-2 rounded-xl ${settings.theme === "system" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "system" })}>System</button>
-            <button className={`px-3 py-2 rounded-xl ${settings.theme === "light" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "light" })}>Light</button>
-            <button className={`px-3 py-2 rounded-xl ${settings.theme === "dark" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "dark" })}>Dark</button>
-          </div>
-        </section>
-
-        {/* Font size */}
-        <section>
-          <div className="text-sm font-medium mb-2">Font size</div>
-          <div className="flex gap-2 flex-wrap">
+        {/* View */}
+        <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="text-sm font-medium">View</div>
+            <div className="ml-auto" />
             <button
-              className={`px-3 py-2 rounded-xl ${settings.baseFontSize == null ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ baseFontSize: null })}
-            >System</button>
-            <button
-              className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 16 ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ baseFontSize: 16 })}
-            >Small</button>
-            <button
-              className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 18 ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ baseFontSize: 18 })}
-            >Default</button>
-            <button
-              className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 20 ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ baseFontSize: 20 })}
-            >Large</button>
-            <button
-              className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 22 ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ baseFontSize: 22 })}
-            >X-Large</button>
+              className="px-3 py-1 rounded-lg bg-neutral-800 text-xs"
+              onClick={() => setShowViewAdvanced((v) => !v)}
+            >
+              {showViewAdvanced ? "Hide advanced" : "Advanced"}
+            </button>
           </div>
-          <div className="text-xs text-neutral-400 mt-2">Scales the entire UI. Defaults to a larger reading size.</div>
+          <div className="space-y-4">
+            <div>
+              <div className="text-sm font-medium mb-2">Theme</div>
+              <div className="flex gap-2">
+                <button className={`px-3 py-2 rounded-xl ${settings.theme === "system" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "system" })}>System</button>
+                <button className={`px-3 py-2 rounded-xl ${settings.theme === "light" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "light" })}>Light</button>
+                <button className={`px-3 py-2 rounded-xl ${settings.theme === "dark" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "dark" })}>Dark</button>
+              </div>
+            </div>
+            <div>
+              <div className="text-sm font-medium mb-2">Font size</div>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize == null ? "bg-emerald-600" : "bg-neutral-800"}`}
+                  onClick={() => setSettings({ baseFontSize: null })}
+                >System</button>
+                <button
+                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 16 ? "bg-emerald-600" : "bg-neutral-800"}`}
+                  onClick={() => setSettings({ baseFontSize: 16 })}
+                >Small</button>
+                <button
+                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 18 ? "bg-emerald-600" : "bg-neutral-800"}`}
+                  onClick={() => setSettings({ baseFontSize: 18 })}
+                >Default</button>
+                <button
+                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 20 ? "bg-emerald-600" : "bg-neutral-800"}`}
+                  onClick={() => setSettings({ baseFontSize: 20 })}
+                >Large</button>
+                <button
+                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 22 ? "bg-emerald-600" : "bg-neutral-800"}`}
+                  onClick={() => setSettings({ baseFontSize: 22 })}
+                >X-Large</button>
+              </div>
+              <div className="text-xs text-neutral-400 mt-2">Scales the entire UI. Defaults to a larger reading size.</div>
+            </div>
+            <div>
+              <div className="text-sm font-medium mb-2">Add new tasks to</div>
+              <div className="flex gap-2">
+                <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'top' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'top' })}>Top</button>
+                <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'bottom' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'bottom' })}>Bottom</button>
+              </div>
+            </div>
+            <div>
+              <div className="text-sm font-medium mb-2">Add tasks within lists</div>
+              <div className="flex gap-2">
+                <button className={`px-3 py-2 rounded-xl ${settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: true })}>Inline</button>
+                <button className={`px-3 py-2 rounded-xl ${!settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: false })}>Top bar</button>
+              </div>
+            </div>
+          </div>
+          {showViewAdvanced && (
+            <div className="mt-4 border-t border-neutral-800 pt-4 space-y-4">
+              <div>
+                <div className="text-sm font-medium mb-2">Week starts on</div>
+                <div className="flex gap-2">
+                  <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 6 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 6 })}>Saturday</button>
+                  <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 0 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 0 })}>Sunday</button>
+                  <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 1 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 1 })}>Monday</button>
+                </div>
+                <div className="text-xs text-neutral-400 mt-2">Affects when weekly recurring tasks re-appear.</div>
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">Show full week for recurring tasks</div>
+                <div className="flex gap-2">
+                  <button
+                    className={`px-3 py-2 rounded-xl ${settings.showFullWeekRecurring ? "bg-emerald-600" : "bg-neutral-800"}`}
+                    onClick={() => setSettings({ showFullWeekRecurring: !settings.showFullWeekRecurring })}
+                  >
+                    {settings.showFullWeekRecurring ? "On" : "Off"}
+                  </button>
+                </div>
+                <div className="text-xs text-neutral-400 mt-2">Display all occurrences for the current week at once.</div>
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">Completed tab</div>
+                <div className="flex gap-2">
+                  <button
+                    className={`px-3 py-2 rounded-xl ${settings.completedTab ? "bg-emerald-600" : "bg-neutral-800"}`}
+                    onClick={() => setSettings({ completedTab: !settings.completedTab })}
+                  >
+                    {settings.completedTab ? "On" : "Off"}
+                  </button>
+                </div>
+                <div className="text-xs text-neutral-400 mt-2">Hide the completed tab and show a Clear completed button instead.</div>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Streaks */}
@@ -4817,34 +4852,6 @@ function SettingsModal({
             </button>
           </div>
           <div className="text-xs text-neutral-400 mt-2">Track consecutive completions on recurring tasks.</div>
-        </section>
-
-        {/* Full week recurring */}
-        <section>
-          <div className="text-sm font-medium mb-2">Show full week for recurring tasks</div>
-          <div className="flex gap-2">
-            <button
-              className={`px-3 py-2 rounded-xl ${settings.showFullWeekRecurring ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ showFullWeekRecurring: !settings.showFullWeekRecurring })}
-            >
-              {settings.showFullWeekRecurring ? "On" : "Off"}
-            </button>
-          </div>
-          <div className="text-xs text-neutral-400 mt-2">Display all occurrences for the current week at once.</div>
-        </section>
-
-        {/* Completed tab */}
-        <section>
-          <div className="text-sm font-medium mb-2">Completed tab</div>
-          <div className="flex gap-2">
-            <button
-              className={`px-3 py-2 rounded-xl ${settings.completedTab ? "bg-emerald-600" : "bg-neutral-800"}`}
-              onClick={() => setSettings({ completedTab: !settings.completedTab })}
-            >
-              {settings.completedTab ? "On" : "Off"}
-            </button>
-          </div>
-          <div className="text-xs text-neutral-400 mt-2">Hide the completed tab and show a Clear completed button instead.</div>
         </section>
 
         {/* Nostr */}

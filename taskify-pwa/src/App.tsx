@@ -137,6 +137,8 @@ const DEFAULT_RELAYS = [
   "wss://solife.me/nostrrelay/1",
 ];
 
+const NOSTR_MIN_EVENT_INTERVAL_MS = 200;
+
 function loadDefaultRelays(): string[] {
   try {
     const raw = localStorage.getItem(LS_NOSTR_RELAYS);
@@ -743,16 +745,29 @@ export default function App() {
   };
 
   const lastNostrCreated = useRef(0);
+  const nostrPublishQueue = useRef<Promise<void>>(Promise.resolve());
+  const lastNostrSentMs = useRef(0);
   async function nostrPublish(relays: string[], template: EventTemplate) {
-    const now = Math.floor(Date.now() / 1000);
-    let createdAt = typeof template.created_at === "number" ? template.created_at : now;
-    if (createdAt <= lastNostrCreated.current) {
-      createdAt = lastNostrCreated.current + 1;
-    }
-    lastNostrCreated.current = createdAt;
-    const ev = finalizeEvent({ ...template, created_at: createdAt }, nostrSK);
-    pool.publishEvent(relays, ev as unknown as NostrEvent);
-    return createdAt;
+    const run = async () => {
+      const nowMs = Date.now();
+      const elapsed = nowMs - lastNostrSentMs.current;
+      if (elapsed < NOSTR_MIN_EVENT_INTERVAL_MS) {
+        await new Promise((resolve) => setTimeout(resolve, NOSTR_MIN_EVENT_INTERVAL_MS - elapsed));
+      }
+      const now = Math.floor(Date.now() / 1000);
+      let createdAt = typeof template.created_at === "number" ? template.created_at : now;
+      if (createdAt <= lastNostrCreated.current) {
+        createdAt = lastNostrCreated.current + 1;
+      }
+      lastNostrCreated.current = createdAt;
+      const ev = finalizeEvent({ ...template, created_at: createdAt }, nostrSK);
+      pool.publishEvent(relays, ev as unknown as NostrEvent);
+      lastNostrSentMs.current = Date.now();
+      return createdAt;
+    };
+    const next = nostrPublishQueue.current.catch(() => {}).then(run);
+    nostrPublishQueue.current = next.then(() => {}, () => {});
+    return next;
   }
   type NostrIndex = {
     boardMeta: Map<string, number>; // nostrBoardId -> created_at
@@ -1405,10 +1420,16 @@ export default function App() {
     }
     nostrIdxRef.current.taskClock.get(bTag)!.set(t.id, createdAt);
   }
-  async function maybePublishTask(t: Task, boardOverride?: Board) {
+  async function maybePublishTask(
+    t: Task,
+    boardOverride?: Board,
+    options?: { skipBoardMetadata?: boolean }
+  ) {
     const b = boardOverride || boards.find((x) => x.id === t.boardId);
     if (!b || !isShared(b) || !b.nostr) return;
-    await publishBoardMetadata(b);
+    if (!options?.skipBoardMetadata) {
+      await publishBoardMetadata(b);
+    }
     const relays = getBoardRelays(b);
     const boardId = b.nostr.boardId;
     const bTag = boardTag(boardId);
@@ -1448,7 +1469,7 @@ export default function App() {
         publishBoardMetadata(updated!).catch(() => {});
         tasks
           .filter(t => t.boardId === updated!.id)
-          .forEach(t => { maybePublishTask(t, updated!).catch(() => {}); });
+          .forEach(t => { maybePublishTask(t, updated!, { skipBoardMetadata: true }).catch(() => {}); });
       }, 0);
     }
   }
@@ -3016,7 +3037,7 @@ export default function App() {
               setTimeout(() => {
                 publishBoardMetadata(nb).catch(() => {});
                 tasks.filter(t => t.boardId === nb.id).forEach(t => {
-                  maybePublishTask(t, nb).catch(() => {});
+                  maybePublishTask(t, nb, { skipBoardMetadata: true }).catch(() => {});
                 });
               }, 0);
               return nb;
@@ -3040,9 +3061,17 @@ export default function App() {
             setCurrentBoardId(id);
           }}
           onRegenerateBoardId={regenerateBoardId}
-          onBoardChanged={(boardId) => {
-            const b = boards.find(x => x.id === boardId);
-            if (b) publishBoardMetadata(b).catch(() => {});
+          onBoardChanged={(boardId, options) => {
+            const board = boards.find(x => x.id === boardId);
+            if (!board) return;
+            publishBoardMetadata(board).catch(() => {});
+            if (options?.republishTasks) {
+              tasks
+                .filter(t => t.boardId === boardId)
+                .forEach(t => {
+                  maybePublishTask(t, board, { skipBoardMetadata: true }).catch(() => {});
+                });
+            }
           }}
           onClose={() => setShowSettings(false)}
         />
@@ -4189,7 +4218,7 @@ function SettingsModal({
   onShareBoard: (boardId: string, relaysCsv?: string) => void;
   onJoinBoard: (nostrId: string, name?: string, relaysCsv?: string) => void;
   onRegenerateBoardId: (boardId: string) => void;
-  onBoardChanged: (boardId: string) => void;
+  onBoardChanged: (boardId: string, options?: { republishTasks?: boolean }) => void;
   onRestartTutorial: () => void;
   onClose: () => void;
 }) {
@@ -5133,7 +5162,10 @@ function SettingsModal({
                     </>
                   )}
                   <div className="flex gap-2">
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onBoardChanged(manageBoard.id)}>Republish metadata</button>
+                  <button
+                    className="px-3 py-2 rounded-xl bg-neutral-800"
+                    onClick={()=>onBoardChanged(manageBoard.id, { republishTasks: true })}
+                  >Republish metadata</button>
                   <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>{
                     setBoards(prev => prev.map(b => b.id === manageBoard.id ? (b.kind === 'week'
                       ? { id: b.id, name: b.name, kind: 'week', archived: b.archived, hidden: b.hidden } as Board

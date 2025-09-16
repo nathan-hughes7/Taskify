@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19, nip04 } from "nostr-tools";
 import { CashuWalletModal } from "./components/CashuWalletModal";
@@ -94,6 +94,8 @@ type Board =
   | (BoardBase & { kind: "week" }) // fixed Sun–Sat + Bounties
   | (BoardBase & { kind: "lists"; columns: ListColumn[] }); // multiple customizable columns
 
+type AccentOption = "emerald" | "blue";
+
 type Settings = {
   weekStart: Weekday; // 0=Sun, 1=Mon, 6=Sat
   newTaskPosition: "top" | "bottom";
@@ -106,7 +108,16 @@ type Settings = {
   baseFontSize: number | null;
   theme: "system" | "light" | "dark";
   startBoardByDay: Partial<Record<Weekday, string>>;
+  accent: AccentOption;
 };
+
+const ACCENT_SWATCH: Record<AccentOption, string> = {
+  emerald: "#059669",
+  blue: "#007aff",
+};
+
+const selectionButtonClass = (active: boolean) =>
+  `px-3 py-2 rounded-xl transition-colors ${active ? "accent-surface" : "bg-neutral-800"}`;
 
 const R_NONE: Recurrence = { type: "none" };
 const LS_TASKS = "taskify_tasks_v4";
@@ -484,6 +495,9 @@ function useSettings() {
           startBoardByDay[day as Weekday] = value;
         }
       }
+      const accent: AccentOption = parsed.accent === "blue" || parsed.accent === "emerald"
+        ? parsed.accent
+        : "emerald";
       return {
         weekStart: 0,
         newTaskPosition: "top",
@@ -495,6 +509,7 @@ function useSettings() {
         baseFontSize,
         theme: typeof parsed.theme === "string" ? parsed.theme : "dark",
         startBoardByDay,
+        accent,
       };
     } catch {
       return {
@@ -507,6 +522,7 @@ function useSettings() {
         baseFontSize: null,
         theme: "dark",
         startBoardByDay: {},
+        accent: "emerald",
       };
     }
   });
@@ -747,6 +763,12 @@ export default function App() {
     } catch {}
   }, [settings.theme]);
 
+  useEffect(() => {
+    try {
+      document.documentElement.dataset.accent = settings.accent || "emerald";
+    } catch {}
+  }, [settings.accent]);
+
   // Nostr pool + merge indexes
   const pool = useMemo(() => createNostrPool(), []);
   // In-app Nostr key (secp256k1/Schnorr) for signing
@@ -943,7 +965,7 @@ export default function App() {
             <p>Copy it now or later from Settings → Nostr and store it in a safe password manager.</p>
             <div>
               <button
-                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm"
+                className="ios-pill-button accent-button text-sm"
                 onClick={handleCopyNsec}
               >
                 Copy my nsec
@@ -2408,13 +2430,13 @@ export default function App() {
               {/* Refresh (if shared) */}
               {currentBoard?.nostr?.boardId && (
                 <button
-                  className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                  className="ios-icon-button bg-neutral-900 border border-neutral-800 hover:bg-neutral-800"
                   onClick={() => setNostrRefresh(n => n + 1)}
                   title="Refresh shared board"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
-                    className="w-5 h-5 text-white"
+                    className="w-6 h-6 text-white"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -2429,22 +2451,14 @@ export default function App() {
                   </svg>
                 </button>
               )}
-              {/* Wallet */}
-              <button
-                ref={walletButtonRef}
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                onClick={() => setShowWallet(true)}
-                title="Wallet"
-              >
-                <span className="wallet-icon">💰</span>
-              </button>
               {/* Settings */}
               <button
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                className="ios-icon-button bg-neutral-900 border border-neutral-800 hover:bg-neutral-800"
                 onClick={() => setShowSettings(true)}
                 title="Settings"
               >
-                ⚙️
+                <span aria-hidden className="text-base leading-none">⚙️</span>
+                <span className="sr-only">Settings</span>
               </button>
             </div>
           </div>
@@ -2479,13 +2493,13 @@ export default function App() {
                   scheduleBoardDropClose();
                 }}
               >
-                <select
-                  ref={boardSelectorRef}
-                  value={currentBoardId}
-                  onChange={handleBoardSelect}
-                  className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                  title="Boards"
-                >
+              <select
+                ref={boardSelectorRef}
+                value={currentBoardId}
+                onChange={handleBoardSelect}
+                className="ios-field"
+                title="Boards"
+              >
                   {visibleBoards.length === 0 ? (
                     <option value="">No boards</option>
                   ) : (
@@ -2532,15 +2546,46 @@ export default function App() {
                   )}
               </div>
             </div>
-            <div className="ml-auto flex-shrink-0">
+            <div className="ml-auto flex items-center gap-3 flex-shrink-0">
+              {/* Wallet */}
+              <button
+                ref={walletButtonRef}
+                className="ios-icon-button bg-neutral-900 border border-neutral-800 hover:bg-neutral-800"
+                onClick={() => setShowWallet(true)}
+                title="Wallet"
+              >
+                <span aria-hidden className="wallet-icon leading-none">💰</span>
+                <span className="sr-only">Wallet</span>
+              </button>
               {settings.completedTab ? (
-                <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden flex">
-                  <button className={`px-3 py-2 flex-1 ${view==="board" ? "bg-neutral-800":""}`} onClick={()=>setView("board")}>Board</button>
-                  <button ref={completedTabRef} className={`px-3 py-2 flex-1 ${view==="completed" ? "bg-neutral-800":""}`} onClick={()=>setView("completed")}>Completed</button>
-                </div>
+                <button
+                  ref={completedTabRef}
+                  className={`ios-icon-button border accent-focus ${
+                    view === "completed"
+                      ? "accent-surface"
+                      : "bg-neutral-900 border-neutral-800 hover:bg-neutral-800"
+                  }`}
+                  onClick={() => setView((prev) => (prev === "completed" ? "board" : "completed"))}
+                  aria-pressed={view === "completed"}
+                  aria-label={view === "completed" ? "Show board" : "Show completed tasks"}
+                  title={view === "completed" ? "Show board" : "Show completed tasks"}
+                >
+                  <svg
+                    aria-hidden
+                    viewBox="0 0 20 20"
+                    className="h-7 w-7 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polyline points="4 11 8 15 16 6" />
+                  </svg>
+                </button>
               ) : (
                 <button
-                  className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 disabled:opacity-50"
+                  className="ios-pill-button bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 disabled:opacity-50"
                   onClick={clearCompleted}
                   disabled={completed.length === 0}
                 >
@@ -2569,12 +2614,12 @@ export default function App() {
                 }
               }}
               placeholder="New task…"
-              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
+              className="ios-field flex-1 min-w-0"
             />
             <button
               ref={addButtonRef}
               onClick={() => addTask()}
-              className="shrink-0 px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium"
+              className="ios-pill-button shrink-0 accent-button"
             >
               Add
             </button>
@@ -2596,7 +2641,7 @@ export default function App() {
                     setDayChoice(v === "bounties" ? "bounties" : (Number(v) as Weekday));
                     setScheduleDate("");
                   }}
-                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
+                  className="ios-field flex-1 min-w-0 truncate"
                 >
                   {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
                   <option value="bounties">Bounties</option>
@@ -2605,7 +2650,7 @@ export default function App() {
                 <select
                   value={String(dayChoice)}
                   onChange={(e)=>setDayChoice(e.target.value)}
-                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
+                  className="ios-field flex-1 min-w-0 truncate"
                 >
                   {listColumns.map(c => (<option key={c.id} value={c.id}>{c.name}</option>))}
                 </select>
@@ -2619,7 +2664,7 @@ export default function App() {
                   setQuickRule(v);
                   if (v === "custom") setShowAddAdvanced(true);
                 }}
-                className="shrink-0 w-fit px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                className="ios-field shrink-0 w-fit"
                 title="Recurrence"
               >
                 <option value="none">No recurrence</option>
@@ -2662,17 +2707,23 @@ export default function App() {
                       scrollable={settings.inlineAdd}
                       footer={settings.inlineAdd ? (
                         <form
-                          className="mt-2 flex gap-1"
+                          className="mt-2 flex items-center gap-2"
                           onSubmit={(e) => { e.preventDefault(); addInlineTask(String(day)); }}
                         >
                           <input
                             ref={el => setInlineInputRef(String(day), el)}
                             value={inlineTitles[String(day)] || ""}
                             onChange={(e) => setInlineTitles(prev => ({ ...prev, [String(day)]: e.target.value }))}
-                            className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                            className="ios-field flex-1 min-w-0"
                             placeholder="Add task"
                           />
-                          <button type="submit" className="rounded-xl bg-emerald-600 hover:bg-emerald-500">+</button>
+                          <button
+                            type="submit"
+                            className="ios-icon-button accent-surface"
+                            aria-label="Add task"
+                          >
+                            <span aria-hidden className="text-[1.9rem] leading-none">+</span>
+                          </button>
                         </form>
                       ) : undefined}
                     >
@@ -2708,17 +2759,23 @@ export default function App() {
                     scrollable={settings.inlineAdd}
                     footer={settings.inlineAdd ? (
                       <form
-                        className="mt-2 flex gap-1"
+                        className="mt-2 flex items-center gap-2"
                         onSubmit={(e) => { e.preventDefault(); addInlineTask("bounties"); }}
                       >
                         <input
                           ref={el => setInlineInputRef("bounties", el)}
                           value={inlineTitles["bounties"] || ""}
                           onChange={(e) => setInlineTitles(prev => ({ ...prev, bounties: e.target.value }))}
-                          className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                          className="ios-field flex-1 min-w-0"
                           placeholder="Add task"
                         />
-                        <button type="submit" className="rounded-xl bg-emerald-600 hover:bg-emerald-500">+</button>
+                        <button
+                          type="submit"
+                          className="ios-icon-button accent-surface"
+                          aria-label="Add task"
+                        >
+                          <span aria-hidden className="text-[1.9rem] leading-none">+</span>
+                        </button>
                       </form>
                     ) : undefined}
                   >
@@ -2764,17 +2821,23 @@ export default function App() {
                     scrollable={settings.inlineAdd}
                     footer={settings.inlineAdd ? (
                       <form
-                        className="mt-2 flex gap-1"
+                        className="mt-2 flex items-center gap-2"
                         onSubmit={(e) => { e.preventDefault(); addInlineTask(col.id); }}
                       >
                         <input
                           ref={el => setInlineInputRef(col.id, el)}
                           value={inlineTitles[col.id] || ""}
                           onChange={(e) => setInlineTitles(prev => ({ ...prev, [col.id]: e.target.value }))}
-                          className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                          className="ios-field flex-1 min-w-0"
                           placeholder="Add task"
                         />
-                        <button type="submit" className="rounded-xl bg-emerald-600 hover:bg-emerald-500">+</button>
+                        <button
+                          type="submit"
+                          className="ios-icon-button accent-surface"
+                          aria-label="Add task"
+                        >
+                          <span aria-hidden className="text-[1.9rem] leading-none">+</span>
+                        </button>
                       </form>
                     ) : undefined}
                   >
@@ -2805,11 +2868,11 @@ export default function App() {
         ) : (
           // Completed view
           <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-4">
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-3 mb-3">
               <div className="text-lg font-semibold">Completed</div>
               <div className="ml-auto">
                 <button
-                  className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600"
+                  className="ios-pill-button bg-rose-600/80 hover:bg-rose-600 text-white"
                   onClick={clearCompleted}
                 >
                   Clear completed
@@ -2819,12 +2882,26 @@ export default function App() {
             {completed.length === 0 ? (
               <div className="text-neutral-400 text-sm">No completed tasks yet.</div>
             ) : (
-              <ul className="space-y-2">
-                {completed.map((t) => (
-                  <li key={t.id} className="task px-3 rounded-xl bg-neutral-800 border border-neutral-700">
+              <ul className="space-y-3">
+                {completed.map((t) => {
+                  const plainNote = t.note?.replace(/https?:\/\/[^\s)]+/gi, "").trim();
+                  const hasUrlPreview = /https?:\/\//i.test(`${t.title} ${t.note || ""}`);
+                  const hasExtras =
+                    !!plainNote ||
+                    (t.images?.length ?? 0) > 0 ||
+                    (t.subtasks?.length ?? 0) > 0 ||
+                    !!t.bounty ||
+                    hasUrlPreview;
+                  const multi = hasExtras || t.title.length > 42;
+                  return (
+                    <li
+                      key={t.id}
+                      className="task ios-task-card bg-neutral-800 border border-neutral-700"
+                      data-multiline={multi ? "true" : undefined}
+                    >
                     <div className="flex items-start gap-2">
                       <div className="flex-1">
-                      <div className="text-sm font-medium leading-[1.15]">
+                        <div className="text-sm font-medium leading-[1.15]">
                           {renderTitleWithLink(t.title, t.note)}
                         </div>
                         <div className="text-xs text-neutral-400">
@@ -2844,7 +2921,7 @@ export default function App() {
                           <ul className="mt-1 space-y-1">
                             {t.subtasks.map(st => (
                               <li key={st.id} className="flex items-center gap-2 text-xs">
-                                <input type="checkbox" checked={!!st.completed} disabled className="accent-emerald-600"/>
+                                <input type="checkbox" checked={!!st.completed} disabled className="accent-accent" />
                                 <span className={st.completed ? 'line-through text-neutral-400' : ''}>{st.title}</span>
                               </li>
                             ))}
@@ -2852,7 +2929,7 @@ export default function App() {
                         ) : null}
                         {t.bounty && (
                           <div className="mt-1">
-                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border ${t.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : t.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : t.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
+                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border ${t.bounty.state==='unlocked' ? 'accent-chip' : t.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : t.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
                               Bounty {typeof t.bounty.amount==='number' ? `• ${t.bounty.amount} sats` : ''} • {t.bounty.state}
                             </span>
                           </div>
@@ -2863,8 +2940,9 @@ export default function App() {
                         <IconButton label="Delete" onClick={() => deleteTask(t.id)} intent="danger">✕</IconButton>
                       </div>
                     </div>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -2874,7 +2952,7 @@ export default function App() {
       {/* Floating Upcoming Drawer Button */}
       <button
         ref={upcomingButtonRef}
-        className={`fixed bottom-4 right-4 px-3 py-2 rounded-full bg-neutral-800 border border-neutral-700 shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
+        className={`ios-pill-button fixed bottom-4 right-4 bg-neutral-800 border border-neutral-700 shadow-lg transition-transform ${upcomingHover ? 'scale-110' : ''}`}
         onClick={() => setShowUpcoming(true)}
         title="Upcoming (hidden) tasks"
         onDragOver={(e) => { e.preventDefault(); setUpcomingHover(true); }}
@@ -2895,12 +2973,26 @@ export default function App() {
           {upcoming.length === 0 ? (
             <div className="text-sm text-neutral-400">No upcoming tasks.</div>
           ) : (
-            <ul className="space-y-2">
-              {upcoming.map((t) => (
-                <li key={t.id} className="task px-3 rounded-xl bg-neutral-900 border border-neutral-800">
-                  <div className="flex items-start gap-2">
-                    <div className="flex-1">
-                      <div className="text-sm font-medium leading-[1.15]">{renderTitleWithLink(t.title, t.note)}</div>
+            <ul className="space-y-3">
+              {upcoming.map((t) => {
+                const plainNote = t.note?.replace(/https?:\/\/[^\s)]+/gi, "").trim();
+                const hasUrlPreview = /https?:\/\//i.test(`${t.title} ${t.note || ""}`);
+                const hasExtras =
+                  !!plainNote ||
+                  (t.images?.length ?? 0) > 0 ||
+                  (t.subtasks?.length ?? 0) > 0 ||
+                  !!t.bounty ||
+                  hasUrlPreview;
+                const multi = hasExtras || t.title.length > 42;
+                return (
+                  <li
+                    key={t.id}
+                    className="task ios-task-card bg-neutral-900 border border-neutral-800"
+                    data-multiline={multi ? "true" : undefined}
+                  >
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1">
+                        <div className="text-sm font-medium leading-[1.15]">{renderTitleWithLink(t.title, t.note)}</div>
                       <div className="text-xs text-neutral-400">
                         {currentBoard?.kind === "week"
                           ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
@@ -2912,42 +3004,43 @@ export default function App() {
                         <ul className="mt-1 space-y-1">
                           {t.subtasks.map(st => (
                             <li key={st.id} className="flex items-center gap-2 text-xs">
-                              <input type="checkbox" checked={!!st.completed} disabled className="accent-emerald-600"/>
+                              <input type="checkbox" checked={!!st.completed} disabled className="accent-accent" />
                               <span className={st.completed ? 'line-through text-neutral-400' : ''}>{st.title}</span>
                             </li>
                           ))}
                         </ul>
                       ) : null}
+                      </div>
                     </div>
-                  </div>
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      className="px-3 py-1 rounded-full bg-emerald-600 hover:bg-emerald-500 text-sm"
-                      onClick={() =>
-                        setTasks((prev) =>
-                          prev.map((x) =>
-                            x.id === t.id ? { ...x, hiddenUntilISO: undefined } : x
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        className="ios-pill-button accent-button"
+                        onClick={() =>
+                          setTasks((prev) =>
+                            prev.map((x) =>
+                              x.id === t.id ? { ...x, hiddenUntilISO: undefined } : x
+                            )
                           )
-                        )
-                      }
-                    >
-                      Reveal now
-                    </button>
-                    <button
-                      className="px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600 text-sm"
-                      onClick={() => { setEditing(t); setShowUpcoming(false); }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      className="px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600 text-sm"
-                      onClick={() => deleteTask(t.id)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </li>
-              ))}
+                        }
+                      >
+                        Reveal now
+                      </button>
+                      <button
+                        className="ios-pill-button bg-neutral-700 hover:bg-neutral-600"
+                        onClick={() => { setEditing(t); setShowUpcoming(false); }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600 text-sm"
+                        onClick={() => deleteTask(t.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </SideDrawer>
@@ -2990,7 +3083,7 @@ export default function App() {
       {undoTask && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-neutral-800 border border-neutral-700 text-sm px-4 py-2 rounded-xl shadow-lg flex items-center gap-3">
           Task deleted
-          <button onClick={undoDelete} className="pressable px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500">Undo</button>
+          <button onClick={undoDelete} className="pressable accent-button rounded-full" data-compact>Undo</button>
         </div>
       )}
 
@@ -3051,7 +3144,7 @@ export default function App() {
                   </button>
                 )}
                 <button
-                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm"
+                  className="ios-pill-button accent-button text-sm"
                   onClick={handleNextTutorial}
                 >
                   {tutorialStep === totalTutorialSteps - 1 ? "Finish" : "Next"}
@@ -3141,7 +3234,7 @@ function renderTitleWithLink(title: string, note?: string) {
   const url = firstUrl(note || "");
   if (!url) return title;
   return (
-    <a href={url} target="_blank" rel="noopener noreferrer" className="underline decoration-neutral-500 hover:decoration-emerald-500">
+    <a href={url} target="_blank" rel="noopener noreferrer" className="underline decoration-neutral-500 accent-hover-underline">
       {title}
     </a>
   );
@@ -3157,7 +3250,7 @@ function autolink(text: string) {
     <>
       {parts.map((p, i) =>
         /^https?:\/\//i.test(p) ? (
-          <a key={i} href={p} target="_blank" rel="noopener noreferrer" className="underline decoration-neutral-500 hover:decoration-emerald-500 break-words">
+          <a key={i} href={p} target="_blank" rel="noopener noreferrer" className="underline decoration-neutral-500 accent-hover-underline break-words">
             {p}
           </a>
         ) : (
@@ -3362,7 +3455,46 @@ function Card({
   onDragEnd: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
+  const [isStacked, setIsStacked] = useState(false);
+
+  const plainNote = task.note?.replace(/https?:\/\/[^\s)]+/gi, "").trim();
+  const hasUrlPreview = /https?:\/\//i.test(`${task.title} ${task.note || ""}`);
+  const hasSupplementary =
+    !!plainNote ||
+    (task.images?.length ?? 0) > 0 ||
+    (task.subtasks?.length ?? 0) > 0 ||
+    !!task.bounty ||
+    hasUrlPreview;
+
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    if (!card) return;
+    const measure = () => {
+      let multi = hasSupplementary;
+      const titleEl = titleRef.current;
+      if (!multi && titleEl) {
+        try {
+          const style = window.getComputedStyle(titleEl);
+          const lineHeight = parseFloat(style.lineHeight || "0");
+          if (lineHeight > 0 && titleEl.scrollHeight > lineHeight + 1) {
+            multi = true;
+          }
+        } catch {}
+      }
+      if (!multi) {
+        const height = card.scrollHeight;
+        if (height > 80) multi = true;
+      }
+      setIsStacked(multi);
+    };
+    measure();
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(card);
+    if (titleRef.current) observer.observe(titleRef.current);
+    return () => observer.disconnect();
+  }, [hasSupplementary, task.title, task.note, task.images?.length, task.subtasks?.length, task.bounty?.state]);
 
   function handleDragStart(e: React.DragEvent) {
     e.dataTransfer.setData("text/task-id", task.id);
@@ -3389,7 +3521,8 @@ function Card({
   return (
     <div
       ref={cardRef}
-      className="task group relative px-2 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
+      data-multiline={isStacked ? "true" : undefined}
+      className="task ios-task-card group relative bg-neutral-800 border border-neutral-700 select-none"
       // Allow horizontal swiping across columns on mobile
       style={{ touchAction: "auto" }}
       draggable
@@ -3401,7 +3534,10 @@ function Card({
     >
       {/* insert-before indicator */}
       {overBefore && (
-        <div className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] bg-emerald-500 rounded-full" />
+        <div
+          className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] rounded-full"
+          style={{ backgroundColor: "var(--accent-solid)" }}
+        />
       )}
 
       <div className="flex items-center gap-2">
@@ -3413,9 +3549,14 @@ function Card({
             }}
             aria-label="Mark incomplete"
             title="Mark incomplete"
-            className="flex items-center justify-center w-8 h-8 rounded-full text-emerald-500"
+            className="ios-icon-button ios-task-complete accent-icon"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none">
+            <svg
+              width="30"
+              height="30"
+              viewBox="0 0 24 24"
+              className="pointer-events-none h-[1.9rem] w-[1.9rem]"
+            >
               <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
               <path d="M8 12l2.5 2.5L16 9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -3429,9 +3570,14 @@ function Card({
             }}
             aria-label="Complete task"
             title="Mark complete"
-            className="flex items-center justify-center w-8 h-8 rounded-full text-neutral-300 hover:text-emerald-500 transition"
+            className="ios-icon-button ios-task-complete text-neutral-300 accent-icon-hover"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none">
+            <svg
+              width="30"
+              height="30"
+              viewBox="0 0 24 24"
+              className="pointer-events-none h-[1.9rem] w-[1.9rem]"
+            >
               <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
             </svg>
           </button>
@@ -3439,7 +3585,10 @@ function Card({
 
         {/* Title (hyperlinked if note contains a URL) */}
         <div className="flex-1 min-w-0 cursor-pointer" onClick={onEdit}>
-          <div className={`text-sm font-medium leading-[1.15] break-words ${task.completed ? 'line-through text-neutral-400' : ''}`}>
+          <div
+            ref={titleRef}
+            className={`text-sm font-medium leading-[1.15] break-words ${task.completed ? 'line-through text-neutral-400' : ''}`}
+          >
             {renderTitleWithLink(task.title, task.note)}
           </div>
           {showStreaks &&
@@ -3464,7 +3613,7 @@ function Card({
                 type="checkbox"
                 checked={!!st.completed}
                 onChange={() => onToggleSubtask(st.id)}
-                className="accent-emerald-600"
+                className="accent-accent"
               />
               <span className={st.completed ? "line-through text-neutral-400" : ""}>{st.title}</span>
             </li>
@@ -3472,14 +3621,14 @@ function Card({
         </ul>
       ) : null}
       {task.completed && task.bounty && task.bounty.state !== 'claimed' && (
-        <div className="mt-1 text-xs text-emerald-400">
+        <div className="mt-1 text-xs accent-text">
           {task.bounty.state === 'unlocked' ? 'Bounty unlocked!' : 'Complete! - Unlock bounty'}
         </div>
       )}
       {/* Bounty badge */}
       {task.bounty && (
         <div className="mt-1">
-          <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
+          <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'accent-chip' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
             Bounty {typeof task.bounty.amount==='number' ? `• ${task.bounty.amount} sats` : ''} • {task.bounty.state}
           </span>
         </div>
@@ -3492,9 +3641,9 @@ function Card({
 function IconButton({
   children, onClick, label, intent, buttonRef
 }: React.PropsWithChildren<{ onClick: ()=>void; label: string; intent?: "danger"|"success"; buttonRef?: React.Ref<HTMLButtonElement> }>) {
-  const base = "w-9 h-9 rounded-full inline-flex items-center justify-center text-sm border border-transparent bg-neutral-700/40 hover:bg-neutral-700/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500";
+  const base = "ios-icon-button border border-transparent bg-neutral-700/40 hover:bg-neutral-700/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500";
   const danger = " border-rose-700";
-  const success = " bg-emerald-700/30 hover:bg-emerald-700/50";
+  const success = " accent-soft-surface";
   const cls = base + (intent==="danger" ? danger : intent==="success" ? success : "");
   return <button ref={buttonRef} aria-label={label} title={label} className={cls} onClick={onClick}>{children}</button>;
 }
@@ -3606,7 +3755,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
       title="Edit task"
       actions={
         <button
-          className="pressable px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500"
+          className="pressable ios-pill-button accent-button"
           onClick={() => save()}
         >
           Save
@@ -3624,7 +3773,14 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
             {images.map((img, i) => (
               <div key={i} className="relative">
                 <img src={img} className="max-h-40 rounded-lg" />
-                <button type="button" className="absolute top-1 right-1 bg-black/70 rounded-full px-1 text-xs" onClick={() => setImages(images.filter((_, j) => j !== i))}>×</button>
+                <button
+                  type="button"
+                  data-compact
+                  className="absolute top-1 right-1 bg-black/70 rounded-full px-1 text-xs"
+                  onClick={() => setImages(images.filter((_, j) => j !== i))}
+                >
+                  ×
+                </button>
               </div>
             ))}
           </div>
@@ -3640,21 +3796,22 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                 type="checkbox"
                 checked={!!st.completed}
                 onChange={() => setSubtasks(prev => prev.map(s => s.id === st.id ? { ...s, completed: !s.completed } : s))}
-                className="accent-emerald-600"
+                className="accent-accent"
               />
               <input
-                className="flex-1 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                className="ios-field flex-1 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
                 value={st.title}
                 onChange={(e) => setSubtasks(prev => prev.map(s => s.id === st.id ? { ...s, title: e.target.value } : s))}
                 placeholder="Subtask"
               />
-              <button
-                type="button"
-                className="text-sm text-rose-500"
-                onClick={() => setSubtasks(prev => prev.filter(s => s.id !== st.id))}
-              >
-                ✕
-              </button>
+            <button
+              type="button"
+              className="ios-icon-button text-rose-500 hover:bg-rose-600/20"
+              aria-label="Remove subtask"
+              onClick={() => setSubtasks(prev => prev.filter(s => s.id !== st.id))}
+            >
+              ✕
+            </button>
             </div>
           ))}
           <div className="flex items-center gap-2 mt-2">
@@ -3664,11 +3821,11 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
               onChange={e=>setNewSubtask(e.target.value)}
               onKeyDown={e=>{ if (e.key === "Enter") { e.preventDefault(); addSubtask(true); } }}
               placeholder="New subtask…"
-              className="flex-1 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+              className="ios-field flex-1 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
             />
             <button
               type="button"
-              className="text-sm px-2 py-1 rounded bg-neutral-800"
+              className="ios-pill-button text-sm bg-neutral-800 hover:bg-neutral-700"
               onClick={() => addSubtask()}
             >
               Add
@@ -3699,7 +3856,14 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
             <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "daily" })}>Daily</button>
             <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "weekly", days: [1,2,3,4,5] })}>Mon–Fri</button>
             <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "weekly", days: [0,6] })}>Weekends</button>
-            <button className="pressable ml-auto px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setShowAdvanced(true)} title="Advanced recurrence…">Advanced…</button>
+            <button
+              className="pressable ml-auto rounded-full bg-neutral-800"
+              data-compact
+              onClick={() => setShowAdvanced(true)}
+              title="Advanced recurrence…"
+            >
+              Advanced…
+            </button>
           </div>
         </div>
 
@@ -3709,7 +3873,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
             <div className="text-sm font-medium">Bounty (ecash)</div>
             {task.bounty && (
               <div className="ml-auto flex items-center gap-2 text-[0.6875rem]">
-                <span className={`px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>{task.bounty.state}</span>
+                <span className={`px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'accent-chip' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>{task.bounty.state}</span>
                 {task.createdBy && (window as any).nostrPK === task.createdBy && <span className="px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700" title="You created the task">owner: you</span>}
                 {task.bounty.sender && (window as any).nostrPK === task.bounty.sender && <span className="px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700" title="You funded the bounty">funder: you</span>}
                 {task.bounty.receiver && (window as any).nostrPK === task.bounty.receiver && <span className="px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700" title="You are the recipient">recipient: you</span>}
@@ -3834,13 +3998,13 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                 </div>
               ) : (
                 <textarea readOnly value={task.bounty.token || ""}
-                          className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" rows={3}/>
+                          className="ios-field w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" rows={3}/>
               )}
               <div className="flex gap-2 flex-wrap">
                 {task.bounty.token && (
                   task.bounty.state === 'unlocked' ? (
                     <button
-                      className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                      className="pressable ios-pill-button accent-button"
                       onClick={async (e) => {
                         const fromRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                         try {
@@ -3882,7 +4046,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                   ((task.bounty.enc as any).alg === 'aes-gcm-256' && task.bounty.sender === (window as any).nostrPK) ||
                   ((task.bounty.enc as any).alg === 'nip04' && task.bounty.receiver === (window as any).nostrPK)
                 ) && (
-                  <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                  <button className="pressable ios-pill-button accent-button"
                           onClick={async () => {
                             try {
                               await revealBounty(task.id);
@@ -3902,7 +4066,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                 </button>
                 {task.bounty.state === 'locked' && (
                   <>
-                    <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                    <button className="pressable ios-pill-button accent-button"
                             onClick={() => {
                               // Placeholder unlock: trust user has reissued unlocked token externally
                               const newTok = prompt('Paste unlocked token (after you reissued in your wallet):');
@@ -4065,7 +4229,8 @@ function RecurrenceModal({
             Cancel
           </button>
           <button
-            className="pressable px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500"
+            className="pressable accent-button rounded-full"
+            data-compact
             onClick={() =>
               onApply(
                 value,
@@ -4147,7 +4312,7 @@ function RecurrencePicker({ value, onChange }: { value: Recurrence; onChange: (r
             const on = weekly.has(d);
             return (
               <button key={d} onClick={()=>toggleDay(d)}
-                      className={`px-2 py-2 rounded-xl ${on ? "bg-emerald-600":"bg-neutral-800"}`}>
+                      className={`px-2 py-2 rounded-xl transition-colors ${on ? "accent-surface" : "bg-neutral-800"}`}>
                 {WD_SHORT[d]}
               </button>
             );
@@ -4664,6 +4829,32 @@ function SettingsModal({
   }) {
     const [overBefore, setOverBefore] = useState(false);
     const [dragging, setDragging] = useState(false);
+    const itemRef = useRef<HTMLLIElement>(null);
+    const nameRef = useRef<HTMLSpanElement>(null);
+    const [stacked, setStacked] = useState(false);
+
+    useLayoutEffect(() => {
+      const el = itemRef.current;
+      if (!el) return;
+      const measure = () => {
+        let multi = false;
+        const title = nameRef.current;
+        if (title) {
+          try {
+            const style = window.getComputedStyle(title);
+            const lineHeight = parseFloat(style.lineHeight || "0");
+            if (lineHeight > 0 && title.scrollHeight > lineHeight + 1) multi = true;
+          } catch {}
+        }
+        if (!multi && el.scrollHeight > 64) multi = true;
+        setStacked(multi);
+      };
+      measure();
+      const observer = new ResizeObserver(measure);
+      observer.observe(el);
+      if (nameRef.current) observer.observe(nameRef.current);
+      return () => observer.disconnect();
+    }, [board.name]);
     function handleDragStart(e: React.DragEvent) {
       e.dataTransfer.setData("text/board-id", board.id);
       e.dataTransfer.effectAllowed = "move";
@@ -4694,11 +4885,13 @@ function SettingsModal({
       onPrimaryAction();
     }
     const buttonClasses = hidden
-      ? "flex-1 text-left min-w-0 text-neutral-300 hover:text-neutral-100 transition-colors"
-      : "flex-1 text-left min-w-0";
+      ? "flex-1 min-w-0 text-left text-neutral-300 hover:text-neutral-100 transition-colors"
+      : "flex-1 min-w-0 text-left";
     return (
       <li
-        className="relative p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2"
+        ref={itemRef}
+        data-multiline={stacked ? "true" : undefined}
+        className="relative ios-settings-item flex items-center gap-3 transition hover:bg-neutral-800"
         draggable
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
@@ -4707,23 +4900,27 @@ function SettingsModal({
         onDragEnd={handleDragEnd}
       >
         {overBefore && (
-          <div className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] bg-emerald-500 rounded-full" />
+          <div
+            className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] rounded-full"
+            style={{ backgroundColor: "var(--accent-solid)" }}
+          />
         )}
         <button type="button" className={buttonClasses} onClick={handleClick}>
-          <span className="flex items-center gap-2">
+          <span className="flex items-center gap-2 text-[0.95rem] leading-[1.15] font-medium">
             {hidden && (
               <span className="shrink-0" aria-hidden="true">
                 <HiddenBoardIcon />
               </span>
             )}
-            <span className="truncate">{board.name}</span>
+            <span ref={nameRef} className="truncate">{board.name}</span>
             {hidden && <span className="sr-only">Hidden board</span>}
           </span>
         </button>
         {hidden && onEdit && (
           <button
             type="button"
-            className="px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600"
+            className="pressable rounded-full bg-neutral-700 hover:bg-neutral-600"
+            data-compact
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -4740,6 +4937,32 @@ function SettingsModal({
 
   function ColumnItem({ boardId, column }: { boardId: string; column: ListColumn }) {
     const [overBefore, setOverBefore] = useState(false);
+    const itemRef = useRef<HTMLLIElement>(null);
+    const nameRef = useRef<HTMLDivElement>(null);
+    const [stacked, setStacked] = useState(false);
+
+    useLayoutEffect(() => {
+      const el = itemRef.current;
+      if (!el) return;
+      const measure = () => {
+        let multi = false;
+        const nameEl = nameRef.current;
+        if (nameEl) {
+          try {
+            const style = window.getComputedStyle(nameEl);
+            const lineHeight = parseFloat(style.lineHeight || "0");
+            if (lineHeight > 0 && nameEl.scrollHeight > lineHeight + 1) multi = true;
+          } catch {}
+        }
+        if (!multi && el.scrollHeight > 64) multi = true;
+        setStacked(multi);
+      };
+      measure();
+      const observer = new ResizeObserver(measure);
+      observer.observe(el);
+      if (nameRef.current) observer.observe(nameRef.current);
+      return () => observer.disconnect();
+    }, [column.name]);
     function handleDragStart(e: React.DragEvent) {
       e.dataTransfer.setData("text/column-id", column.id);
       e.dataTransfer.effectAllowed = "move";
@@ -4759,7 +4982,9 @@ function SettingsModal({
     function handleDragLeave() { setOverBefore(false); }
     return (
       <li
-        className="relative p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2"
+        ref={itemRef}
+        data-multiline={stacked ? "true" : undefined}
+        className="relative ios-settings-item flex items-center gap-3 transition hover:bg-neutral-800"
         draggable
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
@@ -4767,12 +4992,15 @@ function SettingsModal({
         onDragLeave={handleDragLeave}
       >
         {overBefore && (
-          <div className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] bg-emerald-500 rounded-full" />
+          <div
+            className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] rounded-full"
+            style={{ backgroundColor: "var(--accent-solid)" }}
+          />
         )}
-        <div className="flex-1">{column.name}</div>
+        <div ref={nameRef} className="flex-1 text-[0.95rem] leading-[1.15] font-medium">{column.name}</div>
         <div className="flex gap-1">
-          <button className="px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600" onClick={()=>renameColumn(boardId, column.id)}>Rename</button>
-          <button className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteColumn(boardId, column.id)}>Delete</button>
+          <button className="pressable rounded-full bg-neutral-700 hover:bg-neutral-600" data-compact onClick={()=>renameColumn(boardId, column.id)}>Rename</button>
+          <button className="pressable rounded-full bg-rose-600/80 hover:bg-rose-600" data-compact onClick={()=>deleteColumn(boardId, column.id)}>Delete</button>
         </div>
       </li>
     );
@@ -4816,7 +5044,7 @@ function SettingsModal({
         {/* Boards & Columns */}
         <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
           <div className="flex items-center gap-2 mb-3">
-            <div className="text-sm font-medium">Boards & Lists</div>
+            <div className="text-base font-semibold">Boards & Lists</div>
           </div>
           <ul
             ref={boardListRef}
@@ -4839,17 +5067,17 @@ function SettingsModal({
               value={newBoardName}
               onChange={e=>setNewBoardName(e.target.value)}
               placeholder="Board name or ID"
-              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              className="ios-field flex-1 min-w-0"
             />
             <button
-              className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 shrink-0"
+              className="pressable ios-pill-button accent-button shrink-0"
               onClick={addBoard}
             >
               Create/Join
             </button>
           </div>
           <button
-            className={`pressable mt-2 px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 transition ${archiveDropActive ? "ring-2 ring-emerald-500" : ""}`}
+            className={`pressable mt-2 ios-pill-button bg-neutral-900/80 border border-neutral-800 hover:bg-neutral-800 transition ${archiveDropActive ? "ring-2 accent-ring" : ""}`}
             onClick={() => setShowArchivedBoards(true)}
             onDragEnter={handleArchiveButtonDragEnter}
             onDragOver={handleArchiveButtonDragOver}
@@ -4863,10 +5091,11 @@ function SettingsModal({
         {/* View */}
         <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
           <div className="flex items-center gap-2 mb-3">
-            <div className="text-sm font-medium">View</div>
+            <div className="text-base font-semibold">View</div>
             <div className="ml-auto" />
             <button
-              className="px-3 py-1 rounded-lg bg-neutral-800 text-xs"
+              className="pressable rounded-full bg-neutral-800"
+              data-compact
               onClick={() => setShowViewAdvanced((v) => !v)}
             >
               {showViewAdvanced ? "Hide advanced" : "Advanced"}
@@ -4874,109 +5103,129 @@ function SettingsModal({
           </div>
           <div className="space-y-4">
             <div>
-              <div className="text-sm font-medium mb-2">Theme</div>
+              <div className="text-base font-semibold mb-2">Theme</div>
               <div className="flex gap-2">
-                <button className={`px-3 py-2 rounded-xl ${settings.theme === "system" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "system" })}>System</button>
-                <button className={`px-3 py-2 rounded-xl ${settings.theme === "light" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "light" })}>Light</button>
-                <button className={`px-3 py-2 rounded-xl ${settings.theme === "dark" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "dark" })}>Dark</button>
+                <button className={selectionButtonClass(settings.theme === "system")} onClick={() => setSettings({ theme: "system" })}>System</button>
+                <button className={selectionButtonClass(settings.theme === "light")} onClick={() => setSettings({ theme: "light" })}>Light</button>
+                <button className={selectionButtonClass(settings.theme === "dark")} onClick={() => setSettings({ theme: "dark" })}>Dark</button>
               </div>
             </div>
             <div>
-              <div className="text-sm font-medium mb-2">Font size</div>
+              <div className="text-base font-semibold mb-2">Font size</div>
               <div className="flex gap-2 flex-wrap">
                 <button
-                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize == null ? "bg-emerald-600" : "bg-neutral-800"}`}
+                  className={selectionButtonClass(settings.baseFontSize == null)}
                   onClick={() => setSettings({ baseFontSize: null })}
                 >System</button>
                 <button
-                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 16 ? "bg-emerald-600" : "bg-neutral-800"}`}
+                  className={selectionButtonClass(settings.baseFontSize === 16)}
                   onClick={() => setSettings({ baseFontSize: 16 })}
                 >Small</button>
                 <button
-                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 18 ? "bg-emerald-600" : "bg-neutral-800"}`}
+                  className={selectionButtonClass(settings.baseFontSize === 18)}
                   onClick={() => setSettings({ baseFontSize: 18 })}
                 >Default</button>
                 <button
-                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 20 ? "bg-emerald-600" : "bg-neutral-800"}`}
+                  className={selectionButtonClass(settings.baseFontSize === 20)}
                   onClick={() => setSettings({ baseFontSize: 20 })}
                 >Large</button>
                 <button
-                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 22 ? "bg-emerald-600" : "bg-neutral-800"}`}
+                  className={selectionButtonClass(settings.baseFontSize === 22)}
                   onClick={() => setSettings({ baseFontSize: 22 })}
                 >X-Large</button>
               </div>
-              <div className="text-xs text-neutral-400 mt-2">Scales the entire UI. Defaults to a larger reading size.</div>
+              <div className="text-sm text-neutral-400 mt-2">Scales the entire UI. Defaults to a larger reading size.</div>
             </div>
             <div>
-              <div className="text-sm font-medium mb-2">Add new tasks to</div>
+              <div className="text-base font-semibold mb-2">Add new tasks to</div>
               <div className="flex gap-2">
-                <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'top' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'top' })}>Top</button>
-                <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'bottom' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'bottom' })}>Bottom</button>
+                <button className={selectionButtonClass(settings.newTaskPosition === 'top')} onClick={() => setSettings({ newTaskPosition: 'top' })}>Top</button>
+                <button className={selectionButtonClass(settings.newTaskPosition === 'bottom')} onClick={() => setSettings({ newTaskPosition: 'bottom' })}>Bottom</button>
               </div>
             </div>
             <div>
-              <div className="text-sm font-medium mb-2">Add tasks within lists</div>
+              <div className="text-base font-semibold mb-2">Add tasks within lists</div>
               <div className="flex gap-2">
-                <button className={`px-3 py-2 rounded-xl ${settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: true })}>Inline</button>
-                <button className={`px-3 py-2 rounded-xl ${!settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: false })}>Top bar</button>
+                <button className={selectionButtonClass(settings.inlineAdd)} onClick={() => setSettings({ inlineAdd: true })}>Inline</button>
+                <button className={selectionButtonClass(!settings.inlineAdd)} onClick={() => setSettings({ inlineAdd: false })}>Top bar</button>
               </div>
             </div>
           </div>
           {showViewAdvanced && (
             <div className="mt-4 border-t border-neutral-800 pt-4 space-y-4">
               <div>
-                <div className="text-sm font-medium mb-2">Week starts on</div>
+                <div className="text-base font-semibold mb-2">Week starts on</div>
                 <div className="flex gap-2">
-                  <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 6 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 6 })}>Saturday</button>
-                  <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 0 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 0 })}>Sunday</button>
-                  <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 1 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 1 })}>Monday</button>
+                  <button className={selectionButtonClass(settings.weekStart === 6)} onClick={() => setSettings({ weekStart: 6 })}>Saturday</button>
+                  <button className={selectionButtonClass(settings.weekStart === 0)} onClick={() => setSettings({ weekStart: 0 })}>Sunday</button>
+                  <button className={selectionButtonClass(settings.weekStart === 1)} onClick={() => setSettings({ weekStart: 1 })}>Monday</button>
                 </div>
-                <div className="text-xs text-neutral-400 mt-2">Affects when weekly recurring tasks re-appear.</div>
+                <div className="text-sm text-neutral-400 mt-2">Affects when weekly recurring tasks re-appear.</div>
               </div>
               <div>
-                <div className="text-sm font-medium mb-2">Show full week for recurring tasks</div>
+                <div className="text-base font-semibold mb-2">Show full week for recurring tasks</div>
                 <div className="flex gap-2">
                   <button
-                    className={`px-3 py-2 rounded-xl ${settings.showFullWeekRecurring ? "bg-emerald-600" : "bg-neutral-800"}`}
+                    className={selectionButtonClass(settings.showFullWeekRecurring)}
                     onClick={() => setSettings({ showFullWeekRecurring: !settings.showFullWeekRecurring })}
                   >
                     {settings.showFullWeekRecurring ? "On" : "Off"}
                   </button>
                 </div>
-                <div className="text-xs text-neutral-400 mt-2">Display all occurrences for the current week at once.</div>
+                <div className="text-sm text-neutral-400 mt-2">Display all occurrences for the current week at once.</div>
               </div>
               <div>
-                <div className="text-sm font-medium mb-2">Completed tab</div>
+                <div className="text-base font-semibold mb-2">Completed tab</div>
                 <div className="flex gap-2">
                   <button
-                    className={`px-3 py-2 rounded-xl ${settings.completedTab ? "bg-emerald-600" : "bg-neutral-800"}`}
+                    className={selectionButtonClass(settings.completedTab)}
                     onClick={() => setSettings({ completedTab: !settings.completedTab })}
                   >
                     {settings.completedTab ? "On" : "Off"}
                   </button>
                 </div>
-                <div className="text-xs text-neutral-400 mt-2">Hide the completed tab and show a Clear completed button instead.</div>
+                <div className="text-sm text-neutral-400 mt-2">Hide the completed tab and show a Clear completed button instead.</div>
               </div>
               <div>
-                <div className="text-sm font-medium mb-2">Streaks</div>
+                <div className="text-base font-semibold mb-2">Streaks</div>
                 <div className="flex gap-2">
                   <button
-                    className={`px-3 py-2 rounded-xl ${settings.streaksEnabled ? "bg-emerald-600" : "bg-neutral-800"}`}
+                    className={selectionButtonClass(settings.streaksEnabled)}
                     onClick={() => setSettings({ streaksEnabled: !settings.streaksEnabled })}
                   >
                     {settings.streaksEnabled ? "On" : "Off"}
                   </button>
                 </div>
-                <div className="text-xs text-neutral-400 mt-2">Track consecutive completions on recurring tasks.</div>
+                <div className="text-sm text-neutral-400 mt-2">Track consecutive completions on recurring tasks.</div>
               </div>
               <div>
-                <div className="text-sm font-medium mb-2">Board on app start</div>
+                <div className="text-base font-semibold mb-2">Accent color</div>
+                <div className="flex gap-2">
+                  <button
+                    className={`${selectionButtonClass(settings.accent === "emerald")} flex items-center gap-2`}
+                    onClick={() => setSettings({ accent: "emerald" })}
+                  >
+                    <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: ACCENT_SWATCH.emerald }} />
+                    <span>Emerald</span>
+                  </button>
+                  <button
+                    className={`${selectionButtonClass(settings.accent === "blue")} flex items-center gap-2`}
+                    onClick={() => setSettings({ accent: "blue" })}
+                  >
+                    <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: ACCENT_SWATCH.blue }} />
+                    <span>Blue</span>
+                  </button>
+                </div>
+                <div className="text-sm text-neutral-400 mt-2">Change button and highlight accents.</div>
+              </div>
+              <div>
+                <div className="text-base font-semibold mb-2">Board on app start</div>
                 <div className="space-y-2">
                   {WD_FULL.map((label, idx) => (
                     <div key={label} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
                       <div className="text-xs uppercase tracking-wide text-neutral-400 sm:w-28">{label}</div>
                       <select
-                        className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                        className="ios-field flex-1"
                         value={settings.startBoardByDay[idx as Weekday] ?? ""}
                         onChange={(e) => handleDailyStartBoardChange(idx as Weekday, e.target.value)}
                       >
@@ -4990,7 +5239,7 @@ function SettingsModal({
                     </div>
                   ))}
                 </div>
-                <div className="text-xs text-neutral-400 mt-2">
+                <div className="text-sm text-neutral-400 mt-2">
                   Choose which board opens first for each day. Perfect for work boards on weekdays and personal lists on weekends.
                 </div>
               </div>
@@ -5001,17 +5250,18 @@ function SettingsModal({
         {/* Nostr */}
         <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
           <div className="flex items-center gap-2 mb-3">
-            <div className="text-sm font-medium">Nostr</div>
+            <div className="text-base font-semibold">Nostr</div>
             <div className="ml-auto" />
             <button
-              className="px-3 py-1 rounded-lg bg-neutral-800 text-xs"
+              className="pressable rounded-full bg-neutral-800"
+              data-compact
               onClick={()=>setShowAdvanced(a=>!a)}
             >{showAdvanced ? "Hide advanced" : "Advanced"}</button>
           </div>
           {/* Quick actions available outside Advanced */}
           <div className="mb-3 flex gap-2">
             <button
-              className="px-3 py-2 rounded-xl bg-neutral-800"
+              className="ios-pill-button bg-neutral-800"
               onClick={async ()=>{
                 try {
                   const sk = localStorage.getItem(LS_NOSTR_SK) || "";
@@ -5029,7 +5279,7 @@ function SettingsModal({
               }}
             >Copy nsec</button>
             <button
-              className="px-3 py-2 rounded-xl bg-neutral-800"
+              className="ios-pill-button bg-neutral-800"
               onClick={()=>setDefaultRelays(DEFAULT_RELAYS.slice())}
             >Reload default relays</button>
           </div>
@@ -5037,17 +5287,17 @@ function SettingsModal({
             <>
               {/* Public key */}
               <div className="mb-3">
-                <div className="text-xs text-neutral-400 mb-1">Your Nostr public key (hex)</div>
+              <div className="text-sm text-neutral-400 mb-1">Your Nostr public key (hex)</div>
                 <div className="flex gap-2 items-center">
                   <input readOnly value={pubkeyHex || "(generating…)"}
-                         className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+                         className="ios-field flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
                   <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ if(pubkeyHex) { try { await navigator.clipboard?.writeText(pubkeyHex); } catch {} } }}>Copy</button>
                 </div>
               </div>
 
               {/* Private key options */}
               <div className="mb-3 space-y-2">
-                <div className="text-xs text-neutral-400 mb-1">Custom Nostr private key (hex or nsec)</div>
+                <div className="text-sm text-neutral-400 mb-1">Custom Nostr private key (hex or nsec)</div>
                 <div className="flex gap-2 items-center">
                   <input value={customSk} onChange={e=>setCustomSk(e.target.value)}
                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="nsec or hex"/>
@@ -5078,7 +5328,7 @@ function SettingsModal({
 
               {/* Default relays */}
               <div className="mb-3">
-                <div className="text-xs text-neutral-400 mb-1">Default relays</div>
+              <div className="text-sm text-neutral-400 mb-1">Default relays</div>
                 <div className="flex gap-2 mb-2">
                   <input
                     value={newDefaultRelay}
@@ -5115,24 +5365,24 @@ function SettingsModal({
 
         {/* Backup & Restore */}
         <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
-          <div className="text-sm font-medium mb-3">Backup</div>
+          <div className="text-base font-semibold mb-3">Backup</div>
           <div className="flex gap-2">
-            <button className="flex-1 px-3 py-2 rounded-xl bg-neutral-800" onClick={backupData}>Download backup</button>
-            <label className="flex-1 px-3 py-2 rounded-xl bg-neutral-800 text-center cursor-pointer">
+            <button className="flex-1 pressable ios-pill-button bg-neutral-800" onClick={backupData}>Download backup</button>
+            <label className="flex-1 pressable ios-pill-button bg-neutral-800 text-center cursor-pointer">
               Restore from backup
-              <input type="file" accept="application/json" className="hidden" onChange={restoreFromBackup} />
+              <input type="file" accept="application/json" className="ios-field hidden" onChange={restoreFromBackup} />
             </label>
           </div>
         </section>
 
         {/* Tutorial */}
         <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
-          <div className="text-sm font-medium mb-2">Tutorial</div>
-          <div className="text-xs text-neutral-400 mb-3">
+          <div className="text-base font-semibold mb-2">Tutorial</div>
+          <div className="text-sm text-neutral-400 mb-3">
             Replay the guided tour to refresh how Taskify works.
           </div>
           <button
-            className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700"
+            className="pressable ios-pill-button bg-neutral-800 hover:bg-neutral-700"
             onClick={onRestartTutorial}
           >
             View tutorial again
@@ -5141,65 +5391,66 @@ function SettingsModal({
 
         {/* Development donation */}
         <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
-          <div className="text-sm font-medium mb-2">Support development</div>
-          <div className="text-xs text-neutral-400 mb-3">Donate from your internal wallet to dev@solife.me</div>
+          <div className="text-base font-semibold mb-2">Support development</div>
+          <div className="text-sm text-neutral-400 mb-3">Donate from your internal wallet to dev@solife.me</div>
           <div className="flex gap-2 mb-2 w-full">
             <input
-              className="min-w-[7rem] flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              className="ios-field min-w-[7rem] flex-1"
               placeholder="Amount (sats)"
               value={donateAmt}
               onChange={(e)=>setDonateAmt(e.target.value)}
               inputMode="numeric"
             />
             <button
-              className="shrink-0 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 whitespace-nowrap"
+              className="pressable shrink-0 ios-pill-button accent-button whitespace-nowrap"
               onClick={handleDonate}
               disabled={!mintUrl || donateState === 'sending'}
             >Donate Now</button>
           </div>
           <input
-            className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+            className="ios-field w-full"
             placeholder="Comment (optional)"
             value={donateComment}
             onChange={(e)=>setDonateComment(e.target.value)}
           />
-          <div className="mt-2 text-xs">
+          <div className="mt-2 text-sm">
             {donateState === 'sending' && <span>Sending…</span>}
-            {donateState === 'done' && <span className="text-emerald-400">{donateMsg}</span>}
+            {donateState === 'done' && <span className="accent-text">{donateMsg}</span>}
             {donateState === 'error' && <span className="text-rose-400">{donateMsg}</span>}
           </div>
         </section>
 
         {/* Feedback / Feature requests */}
         <section>
-          <div className="text-xs text-neutral-400">
+          <div className="text-sm text-neutral-400">
             Please submit any feedback or feature requests to{' '}
             <button
-              className="underline text-emerald-400"
+              className="underline accent-link"
               onClick={async ()=>{ try { await navigator.clipboard?.writeText('dev@solife.me'); showToast('Copied dev@solife.me'); } catch {} }}
             >dev@solife.me</button>{' '}or Board ID{' '}
             <button
-              className="underline text-emerald-400"
+              className="underline accent-link"
               onClick={async ()=>{ try { await navigator.clipboard?.writeText('c3db0d84-ee89-43df-a31e-edb4c75be32b'); showToast('Copied Board ID'); } catch {} }}
             >c3db0d84-ee89-43df-a31e-edb4c75be32b</button>
           </div>
         </section>
 
         <div className="flex justify-end">
-          <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={handleClose}>Close</button>
+          <button className="pressable ios-pill-button bg-neutral-800" onClick={handleClose}>Close</button>
         </div>
       </div>
     </Modal>
     {showArchivedBoards && (
       <Modal onClose={() => setShowArchivedBoards(false)} title="Archived boards">
         {archivedBoards.length === 0 ? (
-          <div className="text-sm text-neutral-400">No archived boards.</div>
+          <div className="text-base text-neutral-400">No archived boards.</div>
         ) : (
           <ul className="space-y-2">
             {archivedBoards.map((b) => (
               <li
                 key={b.id}
-                className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2 cursor-pointer hover:bg-neutral-700"
+                data-multiline={b.name.length > 32 ? "true" : undefined}
+                className="ios-settings-item flex items-center gap-3 cursor-pointer hover:bg-neutral-800 transition"
                 role="button"
                 tabIndex={0}
                 onClick={() => openArchivedBoard(b.id)}
@@ -5210,10 +5461,11 @@ function SettingsModal({
                   }
                 }}
               >
-                <div className="flex-1 truncate">{b.name}</div>
+                <div className="flex-1 truncate text-[0.95rem] leading-[1.15] font-medium">{b.name}</div>
                 <div className="flex gap-2">
                   <button
-                    className="pressable px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600"
+                    className="pressable rounded-full bg-neutral-700 hover:bg-neutral-600"
+                    data-compact
                     onClick={(e) => {
                       e.stopPropagation();
                       unarchiveBoard(b.id);
@@ -5222,7 +5474,8 @@ function SettingsModal({
                     Unarchive
                   </button>
                   <button
-                    className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600"
+                    className="pressable rounded-full bg-rose-600/80 hover:bg-rose-600"
+                    data-compact
                     onClick={(e) => {
                       e.stopPropagation();
                       deleteBoard(b.id);
@@ -5242,7 +5495,7 @@ function SettingsModal({
         <input
           value={manageBoard.name}
           onChange={e => renameBoard(manageBoard.id, e.target.value)}
-          className="w-full mb-4 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+          className="ios-field w-full mb-4"
         />
         {manageBoard.kind === "lists" ? (
           <>
@@ -5252,54 +5505,62 @@ function SettingsModal({
               ))}
             </ul>
             <div className="mt-2">
-              <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>addColumn(manageBoard.id)}>Add list</button>
+              <button className="pressable ios-pill-button bg-neutral-800" onClick={()=>addColumn(manageBoard.id)}>Add list</button>
             </div>
-            <div className="text-xs text-neutral-400 mt-2">Tasks can be dragged between lists directly on the board.</div>
+            <div className="text-sm text-neutral-400 mt-2">Tasks can be dragged between lists directly on the board.</div>
           </>
         ) : (
-          <div className="text-xs text-neutral-400">The Week board has fixed columns (Sun–Sat, Bounties).</div>
+          <div className="text-sm text-neutral-400">The Week board has fixed columns (Sun–Sat, Bounties).</div>
         )}
 
         <div className="mt-6">
           <div className="flex items-center gap-2 mb-2">
-            <div className="text-sm font-medium">Sharing</div>
+            <div className="text-base font-semibold">Sharing</div>
             <div className="ml-auto" />
             <button
-              className="px-3 py-1 rounded-lg bg-neutral-800 text-xs"
+              className="pressable rounded-full bg-neutral-800"
+              data-compact
               onClick={()=>setShowAdvanced(a=>!a)}
             >{showAdvanced ? "Hide advanced" : "Advanced"}</button>
           </div>
           <div className="space-y-2">
             {manageBoard.nostr ? (
               <>
-                <div className="text-xs text-neutral-400">Board ID</div>
+                <div className="text-sm text-neutral-400">Board ID</div>
                 <div className="flex gap-2 items-center">
-                  <input readOnly value={manageBoard.nostr.boardId}
-                         className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ try { await navigator.clipboard?.writeText(manageBoard.nostr!.boardId); } catch {} }}>Copy</button>
+                  <input
+                    readOnly
+                    value={manageBoard.nostr.boardId}
+                    className="ios-field flex-1 min-w-0"
+                  />
+                  <button
+                    className="pressable ios-pill-button bg-neutral-800"
+                    onClick={async ()=>{ try { await navigator.clipboard?.writeText(manageBoard.nostr!.boardId); } catch {} }}
+                  >Copy</button>
                 </div>
                   {showAdvanced && (
                     <>
-                      <div className="text-xs text-neutral-400">Relays</div>
+                      <div className="text-sm text-neutral-400">Relays</div>
                       <div className="flex gap-2 mb-2">
                         <input
                           value={newBoardRelay}
                           onChange={(e)=>setNewBoardRelay(e.target.value)}
                           onKeyDown={(e)=>{ if (e.key === 'Enter' && manageBoard?.nostr) { const v = newBoardRelay.trim(); if (v && !(manageBoard.nostr.relays || []).includes(v)) { setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays: [...(manageBoard.nostr!.relays || []), v] } }) : b)); setNewBoardRelay(""); } } }}
-                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                          className="ios-field flex-1"
                           placeholder="wss://relay.example"
                         />
                         <button
-                          className="px-3 py-2 rounded-xl bg-neutral-800"
+                          className="pressable ios-pill-button bg-neutral-800"
                           onClick={()=>{ if (!manageBoard?.nostr) return; const v = newBoardRelay.trim(); if (v && !(manageBoard.nostr.relays || []).includes(v)) { setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays: [...(manageBoard.nostr!.relays || []), v] } }) : b)); setNewBoardRelay(""); } }}
                         >Add</button>
                       </div>
                       <ul className="space-y-2 mb-2">
                         {(manageBoard.nostr.relays || []).map((r) => (
-                          <li key={r} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
-                            <div className="flex-1 truncate">{r}</div>
+                          <li key={r} className="ios-settings-item flex items-center gap-3">
+                            <div className="flex-1 truncate text-[0.95rem] leading-[1.15] font-medium">{r}</div>
                             <button
-                              className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600"
+                              className="pressable rounded-full bg-rose-600/80 hover:bg-rose-600"
+                              data-compact
                               onClick={()=>{
                                 if (!manageBoard?.nostr) return;
                                 const relays = (manageBoard.nostr.relays || []).filter(x => x !== r);
@@ -5309,15 +5570,15 @@ function SettingsModal({
                           </li>
                         ))}
                       </ul>
-                      <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onRegenerateBoardId(manageBoard.id)}>Generate new board ID</button>
+                      <button className="pressable ios-pill-button bg-neutral-800" onClick={()=>onRegenerateBoardId(manageBoard.id)}>Generate new board ID</button>
                     </>
                   )}
                   <div className="flex gap-2">
                   <button
-                    className="px-3 py-2 rounded-xl bg-neutral-800"
+                    className="pressable ios-pill-button bg-neutral-800"
                     onClick={()=>onBoardChanged(manageBoard.id, { republishTasks: true })}
                   >Republish metadata</button>
-                  <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>{
+                  <button className="pressable ios-pill-button bg-rose-600/80 hover:bg-rose-600" onClick={()=>{
                     setBoards(prev => prev.map(b => b.id === manageBoard.id ? (b.kind === 'week'
                       ? { id: b.id, name: b.name, kind: 'week', archived: b.archived, hidden: b.hidden } as Board
                       : { id: b.id, name: b.name, kind: 'lists', columns: b.columns, archived: b.archived, hidden: b.hidden } as Board
@@ -5329,54 +5590,54 @@ function SettingsModal({
               <>
                 {showAdvanced && (
                   <>
-                    <div className="text-xs text-neutral-400">Relays override (optional)</div>
+                    <div className="text-sm text-neutral-400">Relays override (optional)</div>
                     <div className="flex gap-2 mb-2">
                       <input
                         value={newOverrideRelay}
                         onChange={(e)=>setNewOverrideRelay(e.target.value)}
                         onKeyDown={(e)=>{ if (e.key === 'Enter') { const v = newOverrideRelay.trim(); if (v) { setRelaysCsv(addRelayToCsv(relaysCsv, v)); setNewOverrideRelay(""); } } }}
-                        className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                        className="ios-field flex-1"
                         placeholder="wss://relay.example"
                       />
-                      <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{ const v = newOverrideRelay.trim(); if (v) { setRelaysCsv(addRelayToCsv(relaysCsv, v)); setNewOverrideRelay(""); } }}>Add</button>
+                      <button className="pressable ios-pill-button bg-neutral-800" onClick={()=>{ const v = newOverrideRelay.trim(); if (v) { setRelaysCsv(addRelayToCsv(relaysCsv, v)); setNewOverrideRelay(""); } }}>Add</button>
                     </div>
                     <ul className="space-y-2 mb-2">
                       {parseCsv(relaysCsv).map((r) => (
-                        <li key={r} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
-                          <div className="flex-1 truncate">{r}</div>
-                          <button className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>setRelaysCsv(removeRelayFromCsv(relaysCsv, r))}>Delete</button>
+                        <li key={r} className="ios-settings-item flex items-center gap-3">
+                          <div className="flex-1 truncate text-[0.95rem] leading-[1.15] font-medium">{r}</div>
+                          <button className="pressable rounded-full bg-rose-600/80 hover:bg-rose-600" data-compact onClick={()=>setRelaysCsv(removeRelayFromCsv(relaysCsv, r))}>Delete</button>
                         </li>
                       ))}
                     </ul>
                   </>
                 )}
-                <button className="block w-full px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={()=>{onShareBoard(manageBoard.id, showAdvanced ? relaysCsv : ""); setRelaysCsv('');}}>Share this board</button>
+                <button className="pressable ios-pill-button w-full accent-button" onClick={()=>{onShareBoard(manageBoard.id, showAdvanced ? relaysCsv : ""); setRelaysCsv('');}}>Share this board</button>
               </>
             )}
             <div className="mt-4 flex gap-2">
               <button
-                className="pressable flex-1 px-3 py-2 rounded-xl bg-neutral-700 hover:bg-neutral-600"
+                className="pressable ios-pill-button flex-1 bg-neutral-700 hover:bg-neutral-600"
                 onClick={() => setBoardHidden(manageBoard.id, !manageBoard.hidden)}
               >
                 {manageBoard.hidden ? "Unhide board" : "Hide board"}
               </button>
               {!manageBoard.archived ? (
                 <button
-                  className="pressable flex-1 px-3 py-2 rounded-xl bg-neutral-700 hover:bg-neutral-600"
+                  className="pressable ios-pill-button flex-1 bg-neutral-700 hover:bg-neutral-600"
                   onClick={() => archiveBoard(manageBoard.id)}
                 >
                   Archive board
                 </button>
               ) : (
                 <button
-                  className="pressable flex-1 px-3 py-2 rounded-xl bg-neutral-700 hover:bg-neutral-600"
+                  className="pressable ios-pill-button flex-1 bg-neutral-700 hover:bg-neutral-600"
                   onClick={() => unarchiveBoard(manageBoard.id)}
                 >
                   Unarchive board
                 </button>
               )}
             </div>
-            <button className="pressable mt-2 block w-full px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
+            <button className="pressable mt-2 ios-pill-button w-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
           </div>
         </div>
       </Modal>

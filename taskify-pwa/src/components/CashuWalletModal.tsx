@@ -243,7 +243,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       </ActionSheet>
 
       <ActionSheet open={receiveMode === "ecash"} onClose={()=>{setReceiveMode(null); setShowReceiveOptions(false); setRecvTokenStr(""); setRecvMsg("");}} title="Receive eCash">
-        <textarea ref={recvRef} className="w-full h-24 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Paste Cashu token (cashuA...)" value={recvTokenStr} onChange={(e)=>setRecvTokenStr(e.target.value)} />
+        <textarea ref={recvRef} className="ios-field w-full h-24 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Paste Cashu token (cashuA...)" value={recvTokenStr} onChange={(e)=>setRecvTokenStr(e.target.value)} />
         <div className="mt-2 flex gap-2 items-center">
           <button
             className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700"
@@ -263,13 +263,13 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
 
       <ActionSheet open={receiveMode === "lightning"} onClose={()=>{setReceiveMode(null); setShowReceiveOptions(false);}} title="Mint via Lightning">
         <div className="flex gap-2 mb-2">
-          <input className="flex-1 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Amount (sats)" value={mintAmt} onChange={(e)=>setMintAmt(e.target.value)} />
+          <input className="ios-field flex-1 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Amount (sats)" value={mintAmt} onChange={(e)=>setMintAmt(e.target.value)} />
           <button className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700" onClick={handleCreateInvoice} disabled={!mintUrl}>Get Invoice</button>
         </div>
         {mintQuote && (
           <div className="text-xs bg-neutral-950 border border-neutral-800 rounded-xl p-2">
             <div className="mb-1">Invoice:</div>
-            <textarea readOnly className="w-full h-20 bg-transparent outline-none" value={mintQuote.request} />
+            <textarea readOnly className="ios-field w-full h-20 bg-transparent outline-none" value={mintQuote.request} />
             <div className="flex gap-2 mt-2">
               <a className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" href={`lightning:${mintQuote.request}`}>Open Wallet</a>
               <button
@@ -293,12 +293,12 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
 
       <ActionSheet open={sendMode === "ecash"} onClose={()=>{setSendMode(null); setShowSendOptions(false);}} title="Send eCash">
         <div className="flex gap-2 mb-2">
-          <input className="flex-1 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Amount (sats)" value={sendAmt} onChange={(e)=>setSendAmt(e.target.value)} />
+          <input className="ios-field flex-1 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Amount (sats)" value={sendAmt} onChange={(e)=>setSendAmt(e.target.value)} />
           <button className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700" onClick={handleCreateSendToken} disabled={!mintUrl}>Create Token</button>
         </div>
         {sendTokenStr && (
           <div className="text-xs bg-neutral-950 border border-neutral-800 rounded-xl p-2">
-            <textarea readOnly className="w-full h-24 bg-transparent outline-none" value={sendTokenStr} />
+            <textarea readOnly className="ios-field w-full h-24 bg-transparent outline-none" value={sendTokenStr} />
             <div className="mt-2">
               <button
                 className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700"
@@ -310,9 +310,9 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       </ActionSheet>
 
       <ActionSheet open={sendMode === "lightning"} onClose={()=>{setSendMode(null); setShowSendOptions(false); setLnInput(""); setLnAddrAmt(""); setLnState("idle"); setLnError("");}} title="Pay Lightning Invoice">
-        <textarea ref={lnRef} className="w-full h-20 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Paste BOLT11 invoice or enter lightning address" value={lnInput} onChange={(e)=>setLnInput(e.target.value)} />
+        <textarea ref={lnRef} className="ios-field w-full h-20 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Paste BOLT11 invoice or enter lightning address" value={lnInput} onChange={(e)=>setLnInput(e.target.value)} />
         {isLnAddress && (
-          <input className="mt-2 w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Amount (sats)" value={lnAddrAmt} onChange={(e)=>setLnAddrAmt(e.target.value)} />
+          <input className="ios-field mt-2 w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Amount (sats)" value={lnAddrAmt} onChange={(e)=>setLnAddrAmt(e.target.value)} />
         )}
         <div className="mt-2 flex gap-2">
           <button
@@ -328,7 +328,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
           >Paste</button>
           <button className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700" onClick={handlePayInvoice} disabled={!mintUrl || !lnInput || (isLnAddress && !lnAddrAmt)}>Pay</button>
           {lnState === "sending" && <div className="text-xs">Paying…</div>}
-          {lnState === "done" && <div className="text-xs text-emerald-400">Paid</div>}
+          {lnState === "done" && <div className="text-xs accent-text">Paid</div>}
           {lnState === "error" && <div className="text-xs text-rose-400">{lnError}</div>}
         </div>
       </ActionSheet>
@@ -341,7 +341,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
                 <button className="w-full text-left" onClick={()=>setExpandedIdx(expandedIdx===i?null:i)}>{h.summary}</button>
                 {expandedIdx === i && h.detail && (
                   <div className="mt-1">
-                    <textarea readOnly className="w-full h-24 bg-neutral-950 border border-neutral-800 rounded-xl p-2" value={h.detail} />
+                    <textarea readOnly className="ios-field w-full h-24 bg-neutral-950 border border-neutral-800 rounded-xl p-2" value={h.detail} />
                     <button
                       className="mt-1 px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700"
                       onClick={async ()=>{ try { await navigator.clipboard.writeText(h.detail!); } catch {} }}
@@ -363,13 +363,13 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
             <div className="text-xs text-neutral-400 mb-1">Active mint</div>
             <div className="flex gap-2 items-center">
               <input
-                className="flex-1 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800"
+                className="ios-field flex-1 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800"
                 value={mintInputSheet}
                 onChange={(e)=>setMintInputSheet(e.target.value)}
                 placeholder="https://mint.minibits.cash/Bitcoin"
               />
               <button
-                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                className="px-3 py-2 rounded-xl accent-button"
                 onClick={async ()=>{ try { await setMintUrl(mintInputSheet.trim()); refreshMintEntries(); } catch (e: any) { alert(e?.message || String(e)); } }}
               >Save</button>
             </div>
@@ -401,7 +401,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
                       onClick={async ()=>{ try { await navigator.clipboard?.writeText(m.url); } catch {} }}
                     >Copy</button>
                     {m.url !== mintUrl && (
-                      <button className="px-2 py-1 rounded bg-emerald-700/70 hover:bg-emerald-600 text-xs" onClick={async ()=>{ try { await setMintUrl(m.url); refreshMintEntries(); } catch (e: any) { alert(e?.message || String(e)); } }}>Set active</button>
+                      <button className="px-2 py-1 rounded accent-soft-surface text-xs" onClick={async ()=>{ try { await setMintUrl(m.url); refreshMintEntries(); } catch (e: any) { alert(e?.message || String(e)); } }}>Set active</button>
                     )}
                   </div>
                 ))}

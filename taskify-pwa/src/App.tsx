@@ -77,6 +77,7 @@ type BoardBase = {
   name: string;
   // Optional Nostr sharing metadata
   nostr?: { boardId: string; relays: string[] };
+  hidden?: boolean;
 };
 
 type Board =
@@ -499,16 +500,23 @@ function migrateBoards(stored: any): Board[] | null {
     const arr = stored as any[];
     if (!Array.isArray(arr)) return null;
     return arr.map((b) => {
-      if (b?.kind === "week") return b as Board;
-      if (b?.kind === "lists" && Array.isArray(b.columns)) return b as Board;
+      const hidden = typeof b?.hidden === "boolean" ? b.hidden : false;
+      if (b?.kind === "week") return { ...b, hidden } as Board;
+      if (b?.kind === "lists" && Array.isArray(b.columns)) return { ...b, hidden } as Board;
       if (b?.kind === "list") {
         // old single-column boards -> migrate to lists with one column
         const colId = crypto.randomUUID();
-        return { id: b.id, name: b.name, kind: "lists", columns: [{ id: colId, name: "Items" }] } as Board;
+        return { id: b.id, name: b.name, kind: "lists", columns: [{ id: colId, name: "Items" }], hidden } as Board;
       }
       // unknown -> keep as lists with one column
       const colId = crypto.randomUUID();
-      return { id: b?.id || crypto.randomUUID(), name: b?.name || "Board", kind: "lists", columns: [{ id: colId, name: "Items" }] } as Board;
+      return {
+        id: b?.id || crypto.randomUUID(),
+        name: b?.name || "Board",
+        kind: "lists",
+        columns: [{ id: colId, name: "Items" }],
+        hidden,
+      } as Board;
     });
   } catch { return null; }
 }
@@ -521,7 +529,7 @@ function useBoards() {
       if (migrated && migrated.length) return migrated;
     }
     // default: one Week board
-    return [{ id: "week-default", name: "Week", kind: "week" }];
+    return [{ id: "week-default", name: "Week", kind: "week", hidden: false }];
   });
   useEffect(() => {
     localStorage.setItem(LS_BOARDS, JSON.stringify(boards));
@@ -581,8 +589,15 @@ export default function App() {
     return () => { try { clip.writeText = original; } catch {} };
   }, [showToast]);
   const [boards, setBoards] = useBoards();
-  const [currentBoardId, setCurrentBoardId] = useState(boards[0]?.id || "");
+  const [currentBoardId, setCurrentBoardId] = useState(() => boards.find(b => !b.hidden)?.id || boards[0]?.id || "");
   const currentBoard = boards.find(b => b.id === currentBoardId);
+  const visibleBoards = useMemo(() => boards.filter(b => !b.hidden), [boards]);
+
+  useEffect(() => {
+    if (visibleBoards.some(b => b.id === currentBoardId)) return;
+    const next = visibleBoards[0]?.id || "";
+    if (next !== currentBoardId) setCurrentBoardId(next);
+  }, [visibleBoards, currentBoardId]);
 
   const [tasks, setTasks] = useTasks();
   const [settings, setSettings] = useSettings();
@@ -885,9 +900,11 @@ export default function App() {
   const [newTitle, setNewTitle] = useState("");
   const [newImages, setNewImages] = useState<string[]>([]);
   const [dayChoice, setDayChoice] = useState<DayChoice>(() => {
-    return (boards[0].kind === "lists")
-      ? (boards[0] as Extract<Board, {kind:"lists"}>).columns[0]?.id || "items"
-      : (new Date().getDay() as Weekday);
+    const firstBoard = boards.find(b => !b.hidden) ?? boards[0];
+    if (firstBoard?.kind === "lists") {
+      return (firstBoard as Extract<Board, {kind:"lists"}>).columns[0]?.id || "items";
+    }
+    return new Date().getDay() as Weekday;
   });
   const [scheduleDate, setScheduleDate] = useState<string>("");
   const [inlineTitles, setInlineTitles] = useState<Record<string, string>>({});
@@ -1244,7 +1261,7 @@ export default function App() {
           })
           .sort((a, b) => (a.completed === b.completed ? (a.order ?? 0) - (b.order ?? 0) : a.completed ? 1 : -1))
       : [],
-    [tasksForBoard, currentBoard.kind, settings.completedTab]
+    [tasksForBoard, currentBoard?.kind, settings.completedTab]
   );
 
   // Custom list boards
@@ -1410,10 +1427,10 @@ export default function App() {
     setBoards(prev => prev.map(b => {
       if (b.id !== board.id) return b;
       const nm = name || b.name;
-      if (kindTag === "week") return { id: b.id, name: nm, nostr: b.nostr, kind: "week" } as Board;
+      if (kindTag === "week") return { id: b.id, name: nm, nostr: b.nostr, kind: "week", hidden: b.hidden } as Board;
       if (kindTag === "lists") {
         const cols: ListColumn[] = Array.isArray(payload.columns) ? payload.columns : (b.kind === "lists" ? b.columns : [{ id: crypto.randomUUID(), name: "Items" }]);
-        return { id: b.id, name: nm, nostr: b.nostr, kind: "lists", columns: cols } as Board;
+        return { id: b.id, name: nm, nostr: b.nostr, kind: "lists", columns: cols, hidden: b.hidden } as Board;
       }
       return b;
     }));
@@ -1668,7 +1685,7 @@ export default function App() {
     let dueISO = isoForWeekday(0);
     if (scheduleDate) {
       dueISO = new Date(scheduleDate + "T00:00").toISOString();
-    } else if (currentBoard.kind === "week" && dayChoice !== "bounties") {
+    } else if (currentBoard?.kind === "week" && dayChoice !== "bounties") {
       dueISO = isoForWeekday(dayChoice as Weekday);
     }
 
@@ -1687,7 +1704,7 @@ export default function App() {
       streak: recurrence && (recurrence.type === "daily" || recurrence.type === "weekly") ? 0 : undefined,
     };
     if (newImages.length) t.images = newImages;
-    if (currentBoard.kind === "week") {
+    if (currentBoard?.kind === "week") {
       t.column = dayChoice === "bounties" ? "bounties" : "day";
     } else {
       // lists board
@@ -1730,7 +1747,7 @@ export default function App() {
       completed: false,
       order: nextOrder,
     };
-    if (currentBoard.kind === "week") {
+    if (currentBoard?.kind === "week") {
       if (key === "bounties") t.column = "bounties";
       else {
         t.column = "day";
@@ -2221,7 +2238,7 @@ export default function App() {
   // reset dayChoice when board/view changes and center current day for week boards
   useEffect(() => {
     if (!currentBoard || view !== "board") return;
-    if (currentBoard.kind === "lists") {
+    if (currentBoard?.kind === "lists") {
       const firstCol = currentBoard.columns[0];
       const valid = currentBoard.columns.some(c => c.id === dayChoice);
       if (!valid) setDayChoice(firstCol?.id || crypto.randomUUID());
@@ -2335,10 +2352,10 @@ export default function App() {
                   className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
                   title="Boards"
                 >
-                  {boards.length === 0 ? (
+                  {visibleBoards.length === 0 ? (
                     <option value="">No boards</option>
                   ) : (
-                    boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
+                    visibleBoards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
                   )}
                 </select>
                 {boardDropOpen && boardDropPos &&
@@ -2357,21 +2374,25 @@ export default function App() {
                         scheduleBoardDropClose();
                       }}
                     >
-                      {boards.map(b => (
-                        <div
-                          key={b.id}
-                          className="px-3 py-2 hover:bg-neutral-800"
-                          onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
-                          onDrop={e => {
-                            if (!draggingTaskId) return;
-                            e.preventDefault();
-                            moveTaskToBoard(draggingTaskId, b.id);
-                            handleDragEnd();
-                          }}
-                        >
-                          {b.name}
-                        </div>
-                      ))}
+                      {visibleBoards.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-neutral-400">No boards</div>
+                      ) : (
+                        visibleBoards.map(b => (
+                          <div
+                            key={b.id}
+                            className="px-3 py-2 hover:bg-neutral-800"
+                            onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
+                            onDrop={e => {
+                              if (!draggingTaskId) return;
+                              e.preventDefault();
+                              moveTaskToBoard(draggingTaskId, b.id);
+                              handleDragEnd();
+                            }}
+                          >
+                            {b.name}
+                          </div>
+                        ))
+                      )}
                     </div>,
                     document.body
                   )}
@@ -2433,7 +2454,7 @@ export default function App() {
 
             {/* Column picker and recurrence */}
             <div className="w-full flex gap-2 items-center">
-              {currentBoard.kind === "week" ? (
+              {currentBoard?.kind === "week" ? (
                 <select
                   value={dayChoice === "bounties" ? "bounties" : String(dayChoice)}
                   onChange={(e) => {
@@ -2486,7 +2507,7 @@ export default function App() {
         {view === "board" || !settings.completedTab ? (
           !currentBoard ? (
             <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-6 text-center text-sm text-neutral-400">No boards. Open Settings to create one.</div>
-          ) : currentBoard.kind === "week" ? (
+          ) : currentBoard?.kind === "week" ? (
             <>
               {/* HORIZONTAL board: single row, side-scroll */}
               <div
@@ -2943,7 +2964,7 @@ export default function App() {
             const id = nostrId.trim();
             if (!id) return;
             const defaultCols: ListColumn[] = [{ id: crypto.randomUUID(), name: "Items" }];
-            const newBoard: Board = { id, name: name || "Shared Board", kind: "lists", columns: defaultCols, nostr: { boardId: id, relays: relays.length ? relays : defaultRelays } };
+            const newBoard: Board = { id, name: name || "Shared Board", kind: "lists", columns: defaultCols, nostr: { boardId: id, relays: relays.length ? relays : defaultRelays }, hidden: false };
             setBoards(prev => [...prev, newBoard]);
             setCurrentBoardId(id);
           }}
@@ -4111,6 +4132,9 @@ function SettingsModal({
   const [newDefaultRelay, setNewDefaultRelay] = useState("");
   const [newBoardRelay, setNewBoardRelay] = useState("");
   const [newOverrideRelay, setNewOverrideRelay] = useState("");
+  const [showHiddenBoards, setShowHiddenBoards] = useState(false);
+  const visibleBoards = useMemo(() => boards.filter(b => !b.hidden), [boards]);
+  const hiddenBoards = useMemo(() => boards.filter(b => b.hidden), [boards]);
   // Mint selector moved to Wallet modal; no need to read here.
   const { show: showToast } = useToast();
   const { mintUrl, payInvoice } = useCashu();
@@ -4244,7 +4268,7 @@ function SettingsModal({
       return;
     }
     const id = crypto.randomUUID();
-    const board: Board = { id, name, kind: "lists", columns: [{ id: crypto.randomUUID(), name: "List 1" }] };
+    const board: Board = { id, name, kind: "lists", columns: [{ id: crypto.randomUUID(), name: "List 1" }], hidden: false };
     setBoards(prev => [...prev, board]);
     setNewBoardName("");
     setCurrentBoardId(id);
@@ -4254,6 +4278,25 @@ function SettingsModal({
     setBoards(prev => prev.map(x => x.id === id ? { ...x, name } : x));
     const sb = boards.find(x => x.id === id);
     if (sb?.nostr) setTimeout(() => onBoardChanged(id), 0);
+  }
+
+  function hideBoard(id: string) {
+    const board = boards.find(x => x.id === id);
+    if (!board || board.hidden) return;
+    const remaining = visibleBoards.filter(b => b.id !== id);
+    if (remaining.length === 0) {
+      alert("At least one board must remain visible.");
+      return;
+    }
+    setBoards(prev => prev.map(b => b.id === id ? { ...b, hidden: true } : b));
+    if (currentBoardId === id) {
+      setCurrentBoardId(remaining[0]?.id || "");
+    }
+    if (manageBoardId === id) setManageBoardId(null);
+  }
+
+  function unhideBoard(id: string) {
+    setBoards(prev => prev.map(b => b.id === id ? { ...b, hidden: false } : b));
   }
 
   function deleteBoard(id: string) {
@@ -4427,7 +4470,7 @@ function SettingsModal({
             <div className="text-sm font-medium">Boards & Lists</div>
           </div>
           <ul className="space-y-2 mb-3">
-            {boards.map((b) => (
+            {visibleBoards.map((b) => (
               <BoardListItem
                 key={b.id}
                 board={b}
@@ -4450,6 +4493,12 @@ function SettingsModal({
               Create/Join
             </button>
           </div>
+          <button
+            className="pressable mt-2 px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700"
+            onClick={() => setShowHiddenBoards(true)}
+          >
+            Hidden
+          </button>
         </section>
 
         {/* Week start */}
@@ -4753,6 +4802,27 @@ function SettingsModal({
         </div>
       </div>
     </Modal>
+    {showHiddenBoards && (
+      <Modal onClose={() => setShowHiddenBoards(false)} title="Hidden boards">
+        {hiddenBoards.length === 0 ? (
+          <div className="text-sm text-neutral-400">No hidden boards.</div>
+        ) : (
+          <ul className="space-y-2">
+            {hiddenBoards.map((b) => (
+              <li key={b.id} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
+                <div className="flex-1 truncate">{b.name}</div>
+                <button
+                  className="pressable px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600"
+                  onClick={() => unhideBoard(b.id)}
+                >
+                  Unhide
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
+    )}
     {manageBoard && (
       <Modal onClose={() => setManageBoardId(null)} title="Manage board">
         <input
@@ -4829,9 +4899,12 @@ function SettingsModal({
                     </>
                   )}
                   <div className="flex gap-2">
-                    <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onBoardChanged(manageBoard.id)}>Republish metadata</button>
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onBoardChanged(manageBoard.id)}>Republish metadata</button>
                   <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>{
-                    setBoards(prev => prev.map(b => b.id === manageBoard.id ? (b.kind === 'week' ? { id: b.id, name: b.name, kind: 'week' } as Board : { id: b.id, name: b.name, kind: 'lists', columns: b.columns } as Board) : b));
+                    setBoards(prev => prev.map(b => b.id === manageBoard.id ? (b.kind === 'week'
+                      ? { id: b.id, name: b.name, kind: 'week', hidden: b.hidden } as Board
+                      : { id: b.id, name: b.name, kind: 'lists', columns: b.columns, hidden: b.hidden } as Board
+                    ) : b));
                   }}>Stop sharing</button>
                 </div>
               </>
@@ -4862,6 +4935,14 @@ function SettingsModal({
                 )}
                 <button className="block w-full px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={()=>{onShareBoard(manageBoard.id, showAdvanced ? relaysCsv : ""); setRelaysCsv('');}}>Share this board</button>
               </>
+            )}
+            {!manageBoard.hidden && (
+              <button
+                className="pressable block w-full px-3 py-2 rounded-xl bg-neutral-700 hover:bg-neutral-600"
+                onClick={()=>hideBoard(manageBoard.id)}
+              >
+                Hide board
+              </button>
             )}
             <button className="pressable block w-full px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
           </div>

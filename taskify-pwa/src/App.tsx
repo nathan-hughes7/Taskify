@@ -4285,6 +4285,8 @@ function SettingsModal({
   const [newOverrideRelay, setNewOverrideRelay] = useState("");
   const [showArchivedBoards, setShowArchivedBoards] = useState(false);
   const [archiveDropActive, setArchiveDropActive] = useState(false);
+  const boardListRef = useRef<HTMLUListElement>(null);
+  const [boardListMaxHeight, setBoardListMaxHeight] = useState<number | null>(null);
   const visibleBoards = useMemo(() => boards.filter(b => !b.archived && !b.hidden), [boards]);
   const unarchivedBoards = useMemo(() => boards.filter(b => !b.archived), [boards]);
   const archivedBoards = useMemo(() => boards.filter(b => b.archived), [boards]);
@@ -4295,6 +4297,57 @@ function SettingsModal({
   const [donateComment, setDonateComment] = useState("");
   const [donateState, setDonateState] = useState<"idle" | "sending" | "done" | "error">("idle");
   const [donateMsg, setDonateMsg] = useState("");
+
+  useEffect(() => {
+    const listEl = boardListRef.current;
+    if (!listEl) return;
+
+    function computeHeight() {
+      const currentList = boardListRef.current;
+      if (!currentList) return;
+      const items = Array.from(currentList.children) as HTMLElement[];
+      if (items.length === 0) {
+        setBoardListMaxHeight(null);
+        return;
+      }
+      const firstRect = items[0].getBoundingClientRect();
+      if (firstRect.height === 0) {
+        setBoardListMaxHeight(null);
+        return;
+      }
+      let step = firstRect.height;
+      if (items.length > 1) {
+        const secondRect = items[1].getBoundingClientRect();
+        const diff = secondRect.top - firstRect.top;
+        if (diff > 0) step = diff;
+      }
+      const lastRect = items[items.length - 1].getBoundingClientRect();
+      const totalHeight = lastRect.bottom - firstRect.top;
+      const limit = step * 5.5;
+      if (totalHeight <= limit) {
+        setBoardListMaxHeight(null);
+        return;
+      }
+      setBoardListMaxHeight(limit);
+    }
+
+    computeHeight();
+
+    const handleResize = () => computeHeight();
+    window.addEventListener("resize", handleResize);
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => computeHeight());
+      resizeObserver.observe(listEl);
+      Array.from(listEl.children).forEach((child) => resizeObserver!.observe(child));
+    }
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      resizeObserver?.disconnect();
+    };
+  }, [unarchivedBoards]);
 
   function parseCsv(csv: string): string[] {
     return csv.split(",").map(s => s.trim()).filter(Boolean);
@@ -4765,7 +4818,11 @@ function SettingsModal({
           <div className="flex items-center gap-2 mb-3">
             <div className="text-sm font-medium">Boards & Lists</div>
           </div>
-          <ul className="space-y-2 mb-3">
+          <ul
+            ref={boardListRef}
+            className="space-y-2 mb-3 overflow-y-auto pr-1"
+            style={boardListMaxHeight != null ? { maxHeight: `${boardListMaxHeight}px` } : undefined}
+          >
             {unarchivedBoards.map((b) => (
               <BoardListItem
                 key={b.id}
@@ -5088,14 +5145,14 @@ function SettingsModal({
           <div className="text-xs text-neutral-400 mb-3">Donate from your internal wallet to dev@solife.me</div>
           <div className="flex gap-2 mb-2">
             <input
-              className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              className="w-28 sm:flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               placeholder="Amount (sats)"
               value={donateAmt}
               onChange={(e)=>setDonateAmt(e.target.value)}
               inputMode="numeric"
             />
             <button
-              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 whitespace-nowrap"
               onClick={handleDonate}
               disabled={!mintUrl || donateState === 'sending'}
             >Donate Now</button>

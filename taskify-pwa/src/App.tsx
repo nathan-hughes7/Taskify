@@ -5088,14 +5088,14 @@ function SettingsModal({
           <div className="text-xs text-neutral-400 mb-3">Donate from your internal wallet to dev@solife.me</div>
           <div className="flex gap-2 mb-2">
             <input
-              className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              className="w-28 sm:flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
               placeholder="Amount (sats)"
               value={donateAmt}
               onChange={(e)=>setDonateAmt(e.target.value)}
               inputMode="numeric"
             />
             <button
-              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 whitespace-nowrap"
               onClick={handleDonate}
               disabled={!mintUrl || donateState === 'sending'}
             >Donate Now</button>

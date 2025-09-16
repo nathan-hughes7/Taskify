@@ -77,6 +77,8 @@ type BoardBase = {
   name: string;
   // Optional Nostr sharing metadata
   nostr?: { boardId: string; relays: string[] };
+  archived?: boolean;
+  hidden?: boolean;
 };
 
 type Board =
@@ -499,16 +501,61 @@ function migrateBoards(stored: any): Board[] | null {
     const arr = stored as any[];
     if (!Array.isArray(arr)) return null;
     return arr.map((b) => {
-      if (b?.kind === "week") return b as Board;
-      if (b?.kind === "lists" && Array.isArray(b.columns)) return b as Board;
+      const archived =
+        typeof b?.archived === "boolean"
+          ? b.archived
+          : typeof b?.hidden === "boolean"
+            ? b.hidden
+            : false;
+      const hidden =
+        typeof b?.hidden === "boolean" && typeof b?.archived === "boolean"
+          ? b.hidden
+          : false;
+      if (b?.kind === "week") {
+        return {
+          id: b.id,
+          name: b.name,
+          kind: "week",
+          nostr: b.nostr,
+          archived,
+          hidden,
+        } as Board;
+      }
+      if (b?.kind === "lists" && Array.isArray(b.columns)) {
+        return {
+          id: b.id,
+          name: b.name,
+          kind: "lists",
+          columns: b.columns,
+          nostr: b.nostr,
+          archived,
+          hidden,
+        } as Board;
+      }
       if (b?.kind === "list") {
         // old single-column boards -> migrate to lists with one column
         const colId = crypto.randomUUID();
-        return { id: b.id, name: b.name, kind: "lists", columns: [{ id: colId, name: "Items" }] } as Board;
+        return {
+          id: b.id,
+          name: b.name,
+          kind: "lists",
+          columns: [{ id: colId, name: "Items" }],
+          nostr: b?.nostr,
+          archived,
+          hidden,
+        } as Board;
       }
       // unknown -> keep as lists with one column
       const colId = crypto.randomUUID();
-      return { id: b?.id || crypto.randomUUID(), name: b?.name || "Board", kind: "lists", columns: [{ id: colId, name: "Items" }] } as Board;
+      return {
+        id: b?.id || crypto.randomUUID(),
+        name: b?.name || "Board",
+        kind: "lists",
+        columns: [{ id: colId, name: "Items" }],
+        nostr: b?.nostr,
+        archived,
+        hidden,
+      } as Board;
     });
   } catch { return null; }
 }
@@ -521,7 +568,7 @@ function useBoards() {
       if (migrated && migrated.length) return migrated;
     }
     // default: one Week board
-    return [{ id: "week-default", name: "Week", kind: "week" }];
+    return [{ id: "week-default", name: "Week", kind: "week", archived: false, hidden: false }];
   });
   useEffect(() => {
     localStorage.setItem(LS_BOARDS, JSON.stringify(boards));
@@ -581,8 +628,23 @@ export default function App() {
     return () => { try { clip.writeText = original; } catch {} };
   }, [showToast]);
   const [boards, setBoards] = useBoards();
-  const [currentBoardId, setCurrentBoardId] = useState(boards[0]?.id || "");
+  const [currentBoardId, setCurrentBoardId] = useState(() => {
+    const firstVisible = boards.find(b => !b.archived && !b.hidden);
+    if (firstVisible) return firstVisible.id;
+    const firstUnarchived = boards.find(b => !b.archived);
+    if (firstUnarchived) return firstUnarchived.id;
+    return boards[0]?.id || "";
+  });
   const currentBoard = boards.find(b => b.id === currentBoardId);
+  const visibleBoards = useMemo(() => boards.filter(b => !b.archived && !b.hidden), [boards]);
+  const unarchivedBoards = useMemo(() => boards.filter(b => !b.archived), [boards]);
+
+  useEffect(() => {
+    const current = boards.find(b => b.id === currentBoardId);
+    if (current) return;
+    const next = visibleBoards[0]?.id || unarchivedBoards[0]?.id || boards[0]?.id || "";
+    if (next !== currentBoardId) setCurrentBoardId(next);
+  }, [boards, visibleBoards, unarchivedBoards, currentBoardId]);
 
   const [tasks, setTasks] = useTasks();
   const [settings, setSettings] = useSettings();
@@ -885,9 +947,11 @@ export default function App() {
   const [newTitle, setNewTitle] = useState("");
   const [newImages, setNewImages] = useState<string[]>([]);
   const [dayChoice, setDayChoice] = useState<DayChoice>(() => {
-    return (boards[0].kind === "lists")
-      ? (boards[0] as Extract<Board, {kind:"lists"}>).columns[0]?.id || "items"
-      : (new Date().getDay() as Weekday);
+    const firstBoard = boards.find(b => !b.archived) ?? boards[0];
+    if (firstBoard?.kind === "lists") {
+      return (firstBoard as Extract<Board, {kind:"lists"}>).columns[0]?.id || "items";
+    }
+    return new Date().getDay() as Weekday;
   });
   const [scheduleDate, setScheduleDate] = useState<string>("");
   const [inlineTitles, setInlineTitles] = useState<Record<string, string>>({});
@@ -1244,7 +1308,7 @@ export default function App() {
           })
           .sort((a, b) => (a.completed === b.completed ? (a.order ?? 0) - (b.order ?? 0) : a.completed ? 1 : -1))
       : [],
-    [tasksForBoard, currentBoard.kind, settings.completedTab]
+    [tasksForBoard, currentBoard?.kind, settings.completedTab]
   );
 
   // Custom list boards
@@ -1410,10 +1474,26 @@ export default function App() {
     setBoards(prev => prev.map(b => {
       if (b.id !== board.id) return b;
       const nm = name || b.name;
-      if (kindTag === "week") return { id: b.id, name: nm, nostr: b.nostr, kind: "week" } as Board;
+      if (kindTag === "week")
+        return {
+          id: b.id,
+          name: nm,
+          nostr: b.nostr,
+          kind: "week",
+          archived: b.archived,
+          hidden: b.hidden,
+        } as Board;
       if (kindTag === "lists") {
         const cols: ListColumn[] = Array.isArray(payload.columns) ? payload.columns : (b.kind === "lists" ? b.columns : [{ id: crypto.randomUUID(), name: "Items" }]);
-        return { id: b.id, name: nm, nostr: b.nostr, kind: "lists", columns: cols } as Board;
+        return {
+          id: b.id,
+          name: nm,
+          nostr: b.nostr,
+          kind: "lists",
+          columns: cols,
+          archived: b.archived,
+          hidden: b.hidden,
+        } as Board;
       }
       return b;
     }));
@@ -1668,7 +1748,7 @@ export default function App() {
     let dueISO = isoForWeekday(0);
     if (scheduleDate) {
       dueISO = new Date(scheduleDate + "T00:00").toISOString();
-    } else if (currentBoard.kind === "week" && dayChoice !== "bounties") {
+    } else if (currentBoard?.kind === "week" && dayChoice !== "bounties") {
       dueISO = isoForWeekday(dayChoice as Weekday);
     }
 
@@ -1687,7 +1767,7 @@ export default function App() {
       streak: recurrence && (recurrence.type === "daily" || recurrence.type === "weekly") ? 0 : undefined,
     };
     if (newImages.length) t.images = newImages;
-    if (currentBoard.kind === "week") {
+    if (currentBoard?.kind === "week") {
       t.column = dayChoice === "bounties" ? "bounties" : "day";
     } else {
       // lists board
@@ -1730,7 +1810,7 @@ export default function App() {
       completed: false,
       order: nextOrder,
     };
-    if (currentBoard.kind === "week") {
+    if (currentBoard?.kind === "week") {
       if (key === "bounties") t.column = "bounties";
       else {
         t.column = "day";
@@ -2221,7 +2301,7 @@ export default function App() {
   // reset dayChoice when board/view changes and center current day for week boards
   useEffect(() => {
     if (!currentBoard || view !== "board") return;
-    if (currentBoard.kind === "lists") {
+    if (currentBoard?.kind === "lists") {
       const firstCol = currentBoard.columns[0];
       const valid = currentBoard.columns.some(c => c.id === dayChoice);
       if (!valid) setDayChoice(firstCol?.id || crypto.randomUUID());
@@ -2335,10 +2415,10 @@ export default function App() {
                   className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
                   title="Boards"
                 >
-                  {boards.length === 0 ? (
+                  {visibleBoards.length === 0 ? (
                     <option value="">No boards</option>
                   ) : (
-                    boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
+                    visibleBoards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
                   )}
                 </select>
                 {boardDropOpen && boardDropPos &&
@@ -2357,21 +2437,25 @@ export default function App() {
                         scheduleBoardDropClose();
                       }}
                     >
-                      {boards.map(b => (
-                        <div
-                          key={b.id}
-                          className="px-3 py-2 hover:bg-neutral-800"
-                          onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
-                          onDrop={e => {
-                            if (!draggingTaskId) return;
-                            e.preventDefault();
-                            moveTaskToBoard(draggingTaskId, b.id);
-                            handleDragEnd();
-                          }}
-                        >
-                          {b.name}
-                        </div>
-                      ))}
+                      {visibleBoards.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-neutral-400">No boards</div>
+                      ) : (
+                        visibleBoards.map(b => (
+                          <div
+                            key={b.id}
+                            className="px-3 py-2 hover:bg-neutral-800"
+                            onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
+                            onDrop={e => {
+                              if (!draggingTaskId) return;
+                              e.preventDefault();
+                              moveTaskToBoard(draggingTaskId, b.id);
+                              handleDragEnd();
+                            }}
+                          >
+                            {b.name}
+                          </div>
+                        ))
+                      )}
                     </div>,
                     document.body
                   )}
@@ -2433,7 +2517,7 @@ export default function App() {
 
             {/* Column picker and recurrence */}
             <div className="w-full flex gap-2 items-center">
-              {currentBoard.kind === "week" ? (
+              {currentBoard?.kind === "week" ? (
                 <select
                   value={dayChoice === "bounties" ? "bounties" : String(dayChoice)}
                   onChange={(e) => {
@@ -2486,7 +2570,7 @@ export default function App() {
         {view === "board" || !settings.completedTab ? (
           !currentBoard ? (
             <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-6 text-center text-sm text-neutral-400">No boards. Open Settings to create one.</div>
-          ) : currentBoard.kind === "week" ? (
+          ) : currentBoard?.kind === "week" ? (
             <>
               {/* HORIZONTAL board: single row, side-scroll */}
               <div
@@ -2943,7 +3027,15 @@ export default function App() {
             const id = nostrId.trim();
             if (!id) return;
             const defaultCols: ListColumn[] = [{ id: crypto.randomUUID(), name: "Items" }];
-            const newBoard: Board = { id, name: name || "Shared Board", kind: "lists", columns: defaultCols, nostr: { boardId: id, relays: relays.length ? relays : defaultRelays } };
+            const newBoard: Board = {
+              id,
+              name: name || "Shared Board",
+              kind: "lists",
+              columns: defaultCols,
+              nostr: { boardId: id, relays: relays.length ? relays : defaultRelays },
+              archived: false,
+              hidden: false,
+            };
             setBoards(prev => [...prev, newBoard]);
             setCurrentBoardId(id);
           }}
@@ -4111,6 +4203,10 @@ function SettingsModal({
   const [newDefaultRelay, setNewDefaultRelay] = useState("");
   const [newBoardRelay, setNewBoardRelay] = useState("");
   const [newOverrideRelay, setNewOverrideRelay] = useState("");
+  const [showArchivedBoards, setShowArchivedBoards] = useState(false);
+  const [archiveDropActive, setArchiveDropActive] = useState(false);
+  const unarchivedBoards = useMemo(() => boards.filter(b => !b.archived), [boards]);
+  const archivedBoards = useMemo(() => boards.filter(b => b.archived), [boards]);
   // Mint selector moved to Wallet modal; no need to read here.
   const { show: showToast } = useToast();
   const { mintUrl, payInvoice } = useCashu();
@@ -4234,6 +4330,11 @@ function SettingsModal({
     }
   }
 
+  const handleClose = useCallback(() => {
+    onClose();
+    if (reloadNeeded) window.location.reload();
+  }, [onClose, reloadNeeded]);
+
   function addBoard() {
     const name = newBoardName.trim();
     if (!name) return;
@@ -4244,7 +4345,14 @@ function SettingsModal({
       return;
     }
     const id = crypto.randomUUID();
-    const board: Board = { id, name, kind: "lists", columns: [{ id: crypto.randomUUID(), name: "List 1" }] };
+    const board: Board = {
+      id,
+      name,
+      kind: "lists",
+      columns: [{ id: crypto.randomUUID(), name: "List 1" }],
+      archived: false,
+      hidden: false,
+    };
     setBoards(prev => [...prev, board]);
     setNewBoardName("");
     setCurrentBoardId(id);
@@ -4254,6 +4362,47 @@ function SettingsModal({
     setBoards(prev => prev.map(x => x.id === id ? { ...x, name } : x));
     const sb = boards.find(x => x.id === id);
     if (sb?.nostr) setTimeout(() => onBoardChanged(id), 0);
+  }
+
+  function archiveBoard(id: string) {
+    const board = boards.find(x => x.id === id);
+    if (!board || board.archived) return;
+    const remainingUnarchived = boards.filter(b => b.id !== id && !b.archived);
+    if (remainingUnarchived.length === 0) {
+      alert("At least one board must remain unarchived.");
+      return;
+    }
+    setBoards(prev => prev.map(b => b.id === id ? { ...b, archived: true } : b));
+    if (currentBoardId === id) {
+      const nextVisible = boards.find(b => b.id !== id && !b.archived && !b.hidden);
+      const fallback = remainingUnarchived[0];
+      setCurrentBoardId((nextVisible ?? fallback)?.id || "");
+    }
+    if (manageBoardId === id) setManageBoardId(null);
+  }
+
+  function setBoardHidden(id: string, hidden: boolean) {
+    setBoards(prev => prev.map(b => (b.id === id ? { ...b, hidden } : b)));
+  }
+
+  function openHiddenBoard(id: string) {
+    const board = boards.find(x => x.id === id && !x.archived && x.hidden);
+    if (!board) return;
+    setCurrentBoardId(id);
+    setManageBoardId(null);
+    handleClose();
+  }
+
+  function openArchivedBoard(id: string) {
+    const board = boards.find(x => x.id === id && x.archived);
+    if (!board) return;
+    setCurrentBoardId(id);
+    setShowArchivedBoards(false);
+    handleClose();
+  }
+
+  function unarchiveBoard(id: string) {
+    setBoards(prev => prev.map(b => b.id === id ? { ...b, archived: false } : b));
   }
 
   function deleteBoard(id: string) {
@@ -4335,11 +4484,43 @@ function SettingsModal({
     }));
   }
 
-  function BoardListItem({ board, onOpen, onDrop }: { board: Board; onOpen: ()=>void; onDrop: (dragId: string, before: boolean)=>void }) {
+  function HiddenBoardIcon() {
+    return (
+      <svg
+        className="w-4 h-4 text-neutral-400"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M2 12s3-6 10-6 10 6 10 6-3 6-10 6S2 12 2 12Z" />
+        <path d="M3 3l18 18" />
+      </svg>
+    );
+  }
+
+  function BoardListItem({
+    board,
+    hidden,
+    onPrimaryAction,
+    onDrop,
+    onEdit,
+  }: {
+    board: Board;
+    hidden: boolean;
+    onPrimaryAction: () => void;
+    onDrop: (dragId: string, before: boolean) => void;
+    onEdit?: () => void;
+  }) {
     const [overBefore, setOverBefore] = useState(false);
+    const [dragging, setDragging] = useState(false);
     function handleDragStart(e: React.DragEvent) {
       e.dataTransfer.setData("text/board-id", board.id);
       e.dataTransfer.effectAllowed = "move";
+      setDragging(true);
     }
     function handleDragOver(e: React.DragEvent) {
       e.preventDefault();
@@ -4352,21 +4533,60 @@ function SettingsModal({
       const dragId = e.dataTransfer.getData("text/board-id");
       if (dragId) onDrop(dragId, overBefore);
       setOverBefore(false);
+      setDragging(false);
     }
-    function handleDragLeave() { setOverBefore(false); }
+    function handleDragLeave() {
+      setOverBefore(false);
+    }
+    function handleDragEnd() {
+      setDragging(false);
+      setOverBefore(false);
+    }
+    function handleClick() {
+      if (dragging) return;
+      onPrimaryAction();
+    }
+    const buttonClasses = hidden
+      ? "flex-1 text-left min-w-0 text-neutral-300 hover:text-neutral-100 transition-colors"
+      : "flex-1 text-left min-w-0";
     return (
       <li
-        className="relative p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center"
+        className="relative p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2"
         draggable
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         onDragLeave={handleDragLeave}
+        onDragEnd={handleDragEnd}
       >
         {overBefore && (
           <div className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] bg-emerald-500 rounded-full" />
         )}
-        <button className="flex-1 text-left" onClick={onOpen}>{board.name}</button>
+        <button type="button" className={buttonClasses} onClick={handleClick}>
+          <span className="flex items-center gap-2">
+            {hidden && (
+              <span className="shrink-0" aria-hidden="true">
+                <HiddenBoardIcon />
+              </span>
+            )}
+            <span className="truncate">{board.name}</span>
+            {hidden && <span className="sr-only">Hidden board</span>}
+          </span>
+        </button>
+        {hidden && onEdit && (
+          <button
+            type="button"
+            className="px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (dragging) return;
+              onEdit();
+            }}
+          >
+            Edit
+          </button>
+        )}
       </li>
     );
   }
@@ -4411,10 +4631,35 @@ function SettingsModal({
     );
   }
 
-  const handleClose = () => {
-    onClose();
-    if (reloadNeeded) window.location.reload();
-  };
+  function isBoardDrag(event: React.DragEvent) {
+    return Array.from(event.dataTransfer.types).includes("text/board-id");
+  }
+
+  function handleArchiveButtonDragEnter(e: React.DragEvent<HTMLButtonElement>) {
+    if (!isBoardDrag(e)) return;
+    e.preventDefault();
+    setArchiveDropActive(true);
+  }
+
+  function handleArchiveButtonDragOver(e: React.DragEvent<HTMLButtonElement>) {
+    if (!isBoardDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setArchiveDropActive(true);
+  }
+
+  function handleArchiveButtonDragLeave() {
+    setArchiveDropActive(false);
+  }
+
+  function handleArchiveButtonDrop(e: React.DragEvent<HTMLButtonElement>) {
+    if (!isBoardDrag(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setArchiveDropActive(false);
+    const id = e.dataTransfer.getData("text/board-id");
+    if (id) archiveBoard(id);
+  }
 
   return (
     <>
@@ -4427,11 +4672,13 @@ function SettingsModal({
             <div className="text-sm font-medium">Boards & Lists</div>
           </div>
           <ul className="space-y-2 mb-3">
-            {boards.map((b) => (
+            {unarchivedBoards.map((b) => (
               <BoardListItem
                 key={b.id}
                 board={b}
-                onOpen={() => setManageBoardId(b.id)}
+                hidden={!!b.hidden}
+                onPrimaryAction={b.hidden ? () => openHiddenBoard(b.id) : () => setManageBoardId(b.id)}
+                onEdit={b.hidden ? () => setManageBoardId(b.id) : undefined}
                 onDrop={(dragId, before) => reorderBoards(dragId, b.id, before)}
               />
             ))}
@@ -4450,6 +4697,16 @@ function SettingsModal({
               Create/Join
             </button>
           </div>
+          <button
+            className={`pressable mt-2 px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 transition ${archiveDropActive ? "ring-2 ring-emerald-500" : ""}`}
+            onClick={() => setShowArchivedBoards(true)}
+            onDragEnter={handleArchiveButtonDragEnter}
+            onDragOver={handleArchiveButtonDragOver}
+            onDragLeave={handleArchiveButtonDragLeave}
+            onDrop={handleArchiveButtonDrop}
+          >
+            Archived
+          </button>
         </section>
 
         {/* Week start */}
@@ -4753,6 +5010,42 @@ function SettingsModal({
         </div>
       </div>
     </Modal>
+    {showArchivedBoards && (
+      <Modal onClose={() => setShowArchivedBoards(false)} title="Archived boards">
+        {archivedBoards.length === 0 ? (
+          <div className="text-sm text-neutral-400">No archived boards.</div>
+        ) : (
+          <ul className="space-y-2">
+            {archivedBoards.map((b) => (
+              <li
+                key={b.id}
+                className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2 cursor-pointer hover:bg-neutral-700"
+                role="button"
+                tabIndex={0}
+                onClick={() => openArchivedBoard(b.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    openArchivedBoard(b.id);
+                  }
+                }}
+              >
+                <div className="flex-1 truncate">{b.name}</div>
+                <button
+                  className="pressable px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    unarchiveBoard(b.id);
+                  }}
+                >
+                  Unarchive
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
+    )}
     {manageBoard && (
       <Modal onClose={() => setManageBoardId(null)} title="Manage board">
         <input
@@ -4829,9 +5122,12 @@ function SettingsModal({
                     </>
                   )}
                   <div className="flex gap-2">
-                    <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onBoardChanged(manageBoard.id)}>Republish metadata</button>
+                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onBoardChanged(manageBoard.id)}>Republish metadata</button>
                   <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>{
-                    setBoards(prev => prev.map(b => b.id === manageBoard.id ? (b.kind === 'week' ? { id: b.id, name: b.name, kind: 'week' } as Board : { id: b.id, name: b.name, kind: 'lists', columns: b.columns } as Board) : b));
+                    setBoards(prev => prev.map(b => b.id === manageBoard.id ? (b.kind === 'week'
+                      ? { id: b.id, name: b.name, kind: 'week', archived: b.archived, hidden: b.hidden } as Board
+                      : { id: b.id, name: b.name, kind: 'lists', columns: b.columns, archived: b.archived, hidden: b.hidden } as Board
+                    ) : b));
                   }}>Stop sharing</button>
                 </div>
               </>
@@ -4863,7 +5159,30 @@ function SettingsModal({
                 <button className="block w-full px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={()=>{onShareBoard(manageBoard.id, showAdvanced ? relaysCsv : ""); setRelaysCsv('');}}>Share this board</button>
               </>
             )}
-            <button className="pressable block w-full px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
+            <div className="mt-4 flex gap-2">
+              <button
+                className="pressable flex-1 px-3 py-2 rounded-xl bg-neutral-700 hover:bg-neutral-600"
+                onClick={() => setBoardHidden(manageBoard.id, !manageBoard.hidden)}
+              >
+                {manageBoard.hidden ? "Unhide board" : "Hide board"}
+              </button>
+              {!manageBoard.archived ? (
+                <button
+                  className="pressable flex-1 px-3 py-2 rounded-xl bg-neutral-700 hover:bg-neutral-600"
+                  onClick={() => archiveBoard(manageBoard.id)}
+                >
+                  Archive board
+                </button>
+              ) : (
+                <button
+                  className="pressable flex-1 px-3 py-2 rounded-xl bg-neutral-700 hover:bg-neutral-600"
+                  onClick={() => unarchiveBoard(manageBoard.id)}
+                >
+                  Unarchive board
+                </button>
+              )}
+            </div>
+            <button className="pressable mt-2 block w-full px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
           </div>
         </div>
       </Modal>

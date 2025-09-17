@@ -109,6 +109,38 @@ type Settings = {
   accent: "green" | "blue";
 };
 
+const ACCENT_CHOICES = [
+  {
+    id: "blue",
+    label: "iMessage blue",
+    fill: "#0a84ff",
+    ring: "rgba(64, 156, 255, 0.32)",
+    border: "rgba(64, 156, 255, 0.38)",
+    borderActive: "rgba(64, 156, 255, 0.88)",
+    shadow: "0 12px 26px rgba(10, 132, 255, 0.32)",
+    shadowActive: "0 18px 34px rgba(10, 132, 255, 0.42)",
+  },
+  {
+    id: "green",
+    label: "Mint green",
+    fill: "#34c759",
+    ring: "rgba(52, 199, 89, 0.28)",
+    border: "rgba(52, 199, 89, 0.36)",
+    borderActive: "rgba(52, 199, 89, 0.86)",
+    shadow: "0 12px 24px rgba(52, 199, 89, 0.28)",
+    shadowActive: "0 18px 32px rgba(52, 199, 89, 0.38)",
+  },
+] satisfies Array<{
+  id: Settings["accent"];
+  label: string;
+  fill: string;
+  ring: string;
+  border: string;
+  borderActive: string;
+  shadow: string;
+  shadowActive: string;
+}>;
+
 const R_NONE: Recurrence = { type: "none" };
 const LS_TASKS = "taskify_tasks_v4";
 const LS_SETTINGS = "taskify_settings_v2";
@@ -485,7 +517,7 @@ function useSettings() {
           startBoardByDay[day as Weekday] = value;
         }
       }
-      const accent = parsed?.accent === "blue" ? "blue" : "green";
+      const accent = parsed?.accent === "green" ? "green" : "blue";
       return {
         weekStart: 0,
         newTaskPosition: "top",
@@ -510,7 +542,7 @@ function useSettings() {
         baseFontSize: null,
         theme: "dark",
         startBoardByDay: {},
-        accent: "green",
+        accent: "blue",
       };
     }
   });
@@ -754,7 +786,7 @@ export default function App() {
   useEffect(() => {
     try {
       const root = document.documentElement;
-      if (settings.accent === "blue") root.setAttribute("data-accent", "blue");
+      if (settings.accent === "green") root.setAttribute("data-accent", "green");
       else root.removeAttribute("data-accent");
     } catch {}
   }, [settings.accent]);
@@ -2930,11 +2962,11 @@ export default function App() {
                         </div>
                         <TaskMedia task={t} />
                         {t.subtasks?.length ? (
-                          <ul className="mt-1 space-y-1">
+                          <ul className="mt-1 space-y-1 text-xs">
                             {t.subtasks.map(st => (
-                              <li key={st.id} className="flex items-center gap-2 text-xs">
-                                <input type="checkbox" checked={!!st.completed} disabled/>
-                                <span className={st.completed ? 'line-through text-secondary' : ''}>{st.title}</span>
+                              <li key={st.id} className="subtask-row">
+                                <input type="checkbox" checked={!!st.completed} disabled className="subtask-row__checkbox" />
+                                <span className={`subtask-row__text ${st.completed ? 'line-through text-secondary' : ''}`}>{st.title}</span>
                               </li>
                             ))}
                           </ul>
@@ -2998,11 +3030,11 @@ export default function App() {
                       </div>
                       <TaskMedia task={t} />
                       {t.subtasks?.length ? (
-                        <ul className="mt-1 space-y-1">
+                        <ul className="mt-1 space-y-1 text-xs">
                           {t.subtasks.map(st => (
-                            <li key={st.id} className="flex items-center gap-2 text-xs">
-                              <input type="checkbox" checked={!!st.completed} disabled/>
-                              <span className={st.completed ? 'line-through text-secondary' : ''}>{st.title}</span>
+                            <li key={st.id} className="subtask-row">
+                              <input type="checkbox" checked={!!st.completed} disabled className="subtask-row__checkbox" />
+                              <span className={`subtask-row__text ${st.completed ? 'line-through text-secondary' : ''}`}>{st.title}</span>
                             </li>
                           ))}
                         </ul>
@@ -3411,7 +3443,7 @@ const DroppableColumn = React.forwardRef<HTMLDivElement, {
     <div
       ref={setRef}
       data-column-title={title}
-      className={`surface-panel w-[288px] shrink-0 p-4 ${scrollable ? 'flex h-[calc(100vh-12rem)] flex-col' : 'min-h-[320px]'}`}
+      className={`surface-panel w-[288px] shrink-0 p-4 ${scrollable ? 'flex max-h-[calc(100vh-11rem)] flex-col overflow-hidden' : 'min-h-[320px]'}`}
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
     >
@@ -3628,13 +3660,14 @@ function Card({
       {task.subtasks?.length ? (
         <ul className="task-card__details mt-2 space-y-1.5 text-xs text-secondary">
           {task.subtasks.map((st) => (
-            <li key={st.id} className="flex items-center gap-2">
+            <li key={st.id} className="subtask-row">
               <input
                 type="checkbox"
                 checked={!!st.completed}
                 onChange={() => onToggleSubtask(st.id)}
+                className="subtask-row__checkbox"
               />
-              <span className={st.completed ? 'line-through text-tertiary' : 'text-secondary'}>{st.title}</span>
+              <span className={`subtask-row__text ${st.completed ? 'line-through text-tertiary' : 'text-secondary'}`}>{st.title}</span>
             </li>
           ))}
         </ul>
@@ -5100,9 +5133,30 @@ function SettingsModal({
             <div className="mt-4 border-t border-neutral-800 pt-4 space-y-4">
               <div>
                 <div className="text-sm font-medium mb-2">Accent color</div>
-                <div className="flex gap-2">
-                  <button className={pillButtonClass(settings.accent === 'green')} onClick={() => setSettings({ accent: 'green' })}>Mint green</button>
-                  <button className={pillButtonClass(settings.accent === 'blue')} onClick={() => setSettings({ accent: 'blue' })}>iMessage blue</button>
+                <div className="flex gap-3">
+                  {ACCENT_CHOICES.map((choice) => {
+                    const active = settings.accent === choice.id;
+                    return (
+                      <button
+                        key={choice.id}
+                        type="button"
+                        className={`accent-swatch pressable ${active ? 'accent-swatch--active' : ''}`}
+                        style={{
+                          "--swatch-color": choice.fill,
+                          "--swatch-ring": choice.ring,
+                          "--swatch-border": choice.border,
+                          "--swatch-border-active": choice.borderActive,
+                          "--swatch-shadow": choice.shadow,
+                          "--swatch-active-shadow": choice.shadowActive,
+                        } as React.CSSProperties}
+                        aria-label={choice.label}
+                        aria-pressed={active}
+                        onClick={() => setSettings({ accent: choice.id })}
+                      >
+                        <span className="sr-only">{choice.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
                 <div className="text-xs text-secondary mt-2">Switch the highlight color used across buttons, badges, and focus states.</div>
               </div>

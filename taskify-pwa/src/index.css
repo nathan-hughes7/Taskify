@@ -446,12 +446,57 @@ html.light .accent-swatch--active {
   color: var(--accent);
 }
 
+/* ================= Board columns ================= */
+.board-column {
+  position: relative;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--surface-border-strong);
+  box-shadow:
+    var(--shadow-soft),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease,
+    background-image 180ms ease;
+}
+
+html.light .board-column {
+  background: linear-gradient(180deg, rgba(12, 24, 63, 0.08), rgba(12, 24, 63, 0.03));
+  box-shadow:
+    var(--shadow-soft),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.board-column::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.board-column--active,
+.board-column[data-drop-over="true"] {
+  border-color: var(--accent-border);
+  box-shadow:
+    0 0 0 1.5px var(--accent-soft),
+    var(--shadow-soft);
+  background: linear-gradient(180deg, var(--accent-soft), rgba(0, 0, 0, 0.06));
+}
+
+html.light .board-column.board-column--active,
+html.light .board-column[data-drop-over="true"] {
+  background: linear-gradient(180deg, var(--accent-soft), rgba(255, 255, 255, 0.6));
+}
+
 /* ================= Task cards ================= */
 .task-card {
   position: relative;
   width: 100%;
   background: var(--surface-raised);
-  border: 1px solid transparent;
+  border: 1px solid var(--surface-border);
   border-radius: var(--radius-pill);
   padding: 0.3rem 0.45rem;
   box-shadow: var(--shadow-soft);
@@ -537,7 +582,7 @@ html.light .accent-swatch--active {
 
 .task-card:hover {
   background: var(--surface-raised-hover);
-  border-color: var(--surface-border);
+  border-color: var(--surface-border-strong);
 }
 
 .task-card[data-state="completed"] {

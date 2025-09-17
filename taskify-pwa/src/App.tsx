@@ -2449,7 +2449,8 @@ export default function App() {
     <div className="min-h-screen px-4 py-4 sm:px-6 lg:px-8 text-primary">
       <div className="mx-auto max-w-7xl space-y-5">
         {/* Header */}
-        <header className="space-y-3">
+        <header className="relative space-y-3">
+          <div ref={confettiRef} className="pointer-events-none absolute inset-x-0 -top-2 z-20 h-0" />
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex flex-col gap-1 justify-end -translate-y-[2px]">
               <h1 className="text-3xl font-semibold tracking-tight">
@@ -2671,7 +2672,6 @@ export default function App() {
               )}
             </div>
           </div>
-          <div ref={confettiRef} className="relative h-0 w-full" />
         </header>
 
         {/* Animation overlay for fly effects (coins, etc.) */}
@@ -2764,11 +2764,12 @@ export default function App() {
         )}
 
         {/* Board/Completed */}
-        {view === "board" || !settings.completedTab ? (
-          !currentBoard ? (
-            <div className="surface-panel p-6 text-center text-sm text-secondary">No boards. Open Settings to create one.</div>
-          ) : currentBoard?.kind === "week" ? (
-            <>
+        <div className="relative">
+          {view === "board" || !settings.completedTab ? (
+            !currentBoard ? (
+              <div className="surface-panel p-6 text-center text-sm text-secondary">No boards. Open Settings to create one.</div>
+            ) : currentBoard?.kind === "week" ? (
+              <>
               {/* HORIZONTAL board: single row, side-scroll */}
               <div
                 ref={scrollerRef}
@@ -3018,6 +3019,7 @@ export default function App() {
             )}
           </div>
         )}
+        </div>
       </div>
 
       {/* Floating Upcoming Drawer Button */}

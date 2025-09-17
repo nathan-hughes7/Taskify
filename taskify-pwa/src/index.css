@@ -241,8 +241,8 @@ input[type="radio"] {
   color: #fff;
   border: 1px solid var(--accent-border);
   border-radius: var(--radius-pill);
-  padding: 0.55rem 1.2rem;
-  font-size: 0.95rem;
+  padding: 0.42rem 0.9rem;
+  font-size: 0.82rem;
   font-weight: 600;
   letter-spacing: -0.01em;
   box-shadow: var(--accent-glow);
@@ -304,8 +304,8 @@ html.light .accent-swatch--active {
   color: var(--text-primary);
   border: 1px solid var(--surface-border);
   border-radius: var(--radius-pill);
-  padding: 0.55rem 1.15rem;
-  font-size: 0.93rem;
+  padding: 0.42rem 0.9rem;
+  font-size: 0.82rem;
   font-weight: 500;
 }
 
@@ -515,8 +515,8 @@ html.light .accent-swatch--active {
 }
 
 .button-sm {
-  font-size: 0.82rem;
-  padding: 0.42rem 0.9rem;
+  font-size: 0.74rem;
+  padding: 0.32rem 0.75rem;
 }
 
 .task-card:hover {

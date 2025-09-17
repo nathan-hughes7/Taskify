@@ -2671,7 +2671,6 @@ export default function App() {
               )}
             </div>
           </div>
-          <div ref={confettiRef} className="relative h-0 w-full" />
         </header>
 
         {/* Animation overlay for fly effects (coins, etc.) */}
@@ -2764,11 +2763,13 @@ export default function App() {
         )}
 
         {/* Board/Completed */}
-        {view === "board" || !settings.completedTab ? (
-          !currentBoard ? (
-            <div className="surface-panel p-6 text-center text-sm text-secondary">No boards. Open Settings to create one.</div>
-          ) : currentBoard?.kind === "week" ? (
-            <>
+        <div className="relative">
+          <div ref={confettiRef} className="pointer-events-none absolute inset-x-0 top-0 z-20 h-0" />
+          {view === "board" || !settings.completedTab ? (
+            !currentBoard ? (
+              <div className="surface-panel p-6 text-center text-sm text-secondary">No boards. Open Settings to create one.</div>
+            ) : currentBoard?.kind === "week" ? (
+              <>
               {/* HORIZONTAL board: single row, side-scroll */}
               <div
                 ref={scrollerRef}
@@ -3018,6 +3019,7 @@ export default function App() {
             )}
           </div>
         )}
+        </div>
       </div>
 
       {/* Floating Upcoming Drawer Button */}

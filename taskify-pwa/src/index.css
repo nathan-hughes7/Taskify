@@ -86,13 +86,17 @@ body {
   padding-top: env(safe-area-inset-top);
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
   transition: background-color 280ms ease;
 }
 
 body::before {
   content: "";
   position: fixed;
-  inset: -32vmax;
+  top: calc(-32vmax - env(safe-area-inset-top));
+  right: calc(-32vmax - env(safe-area-inset-right));
+  bottom: calc(-32vmax - env(safe-area-inset-bottom));
+  left: calc(-32vmax - env(safe-area-inset-left));
   z-index: -1;
   pointer-events: none;
   background:

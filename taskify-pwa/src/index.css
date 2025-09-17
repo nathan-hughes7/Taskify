@@ -437,7 +437,7 @@ html.light .accent-swatch--active {
   background: var(--surface-raised);
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
-  padding: 0.4rem 0.65rem;
+  padding: 0.3rem 0.45rem;
   box-shadow: var(--shadow-soft);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);

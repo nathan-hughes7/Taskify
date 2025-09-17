@@ -505,7 +505,7 @@ function useSettings() {
   const [settings, setSettingsRaw] = useState<Settings>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}");
-      let baseFontSize =
+      const baseFontSize =
         typeof parsed.baseFontSize === "number" ? parsed.baseFontSize : null;
       const startBoardByDay: Partial<Record<Weekday, string>> = {};
       if (parsed && typeof parsed.startBoardByDay === "object" && parsed.startBoardByDay) {
@@ -2596,19 +2596,17 @@ export default function App() {
                     className="h-[18px] w-[18px]"
                     fill="none"
                     viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={1.8}
+                    stroke="#fff"
+                    strokeWidth={2.4}
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    <g transform="rotate(12 12 12)">
-                      <line x1="12" y1="4" x2="12" y2="20" />
-                      <line x1="9.25" y1="7.25" x2="14.75" y2="7.25" />
-                      <line x1="8.5" y1="12" x2="15.5" y2="12" />
-                      <line x1="9.25" y1="16.75" x2="14.75" y2="16.75" />
-                      <line x1="11.25" y1="5.5" x2="12.75" y2="5.5" />
-                      <line x1="11.25" y1="18.5" x2="12.75" y2="18.5" />
-                    </g>
+                    <line x1="12" y1="4" x2="12" y2="20" />
+                    <line x1="8" y1="8" x2="16" y2="8" />
+                    <line x1="7" y1="12" x2="17" y2="12" />
+                    <line x1="8" y1="16" x2="16" y2="16" />
+                    <line x1="12" y1="2.75" x2="12" y2="5.25" />
+                    <line x1="12" y1="18.75" x2="12" y2="21.25" />
                   </svg>
                 </button>
                 {settings.completedTab ? (

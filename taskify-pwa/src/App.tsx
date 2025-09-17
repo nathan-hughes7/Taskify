@@ -3471,7 +3471,7 @@ const DroppableColumn = React.forwardRef<HTMLDivElement, {
     <div
       ref={setRef}
       data-column-title={title}
-      className={`surface-panel w-[315px] shrink-0 p-4 ${scrollable ? 'flex h-[calc(100vh-15rem)] flex-col overflow-hidden' : 'min-h-[320px]'}`}
+      className={`surface-panel w-[325px] shrink-0 p-4 ${scrollable ? 'flex h-[calc(100vh-15rem)] flex-col overflow-hidden' : 'min-h-[320px]'}`}
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
     >
@@ -3492,7 +3492,7 @@ const DroppableColumn = React.forwardRef<HTMLDivElement, {
         {title}
       </div>
       <div className={scrollable ? 'flex-1 min-h-0 overflow-y-auto pr-1' : ''}>
-        <div className="space-y-1">{children}</div>
+        <div className="space-y-.75">{children}</div>
       </div>
       {scrollable && footer ? <div className="mt-auto flex-shrink-0 pt-2">{footer}</div> : null}
       {!scrollable && footer}

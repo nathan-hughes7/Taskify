@@ -3437,11 +3437,14 @@ const DroppableColumn = React.forwardRef<HTMLDivElement, {
     children,
     footer,
     scrollable,
+    className,
     ...props
   },
   forwardedRef
 ) => {
   const innerRef = useRef<HTMLDivElement | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragDepthRef = useRef(0);
   const setRef = useCallback((el: HTMLDivElement | null) => {
     innerRef.current = el;
     if (!forwardedRef) return;
@@ -3452,18 +3455,45 @@ const DroppableColumn = React.forwardRef<HTMLDivElement, {
   useEffect(() => {
     const el = innerRef.current;
     if (!el) return;
+    const isTaskDrag = (e: DragEvent) => {
+      const types = e.dataTransfer?.types;
+      if (!types) return false;
+      return Array.from(types).includes("text/task-id");
+    };
     const onDragOver = (e: DragEvent) => e.preventDefault();
     const onDrop = (e: DragEvent) => {
       e.preventDefault();
       const id = e.dataTransfer?.getData("text/task-id");
       if (id) onDropCard({ id });
       if (onDropEnd) onDropEnd();
+      dragDepthRef.current = 0;
+      setIsDragOver(false);
+    };
+    const onDragEnter = (e: DragEvent) => {
+      if (!isTaskDrag(e)) return;
+      dragDepthRef.current += 1;
+      setIsDragOver(true);
+    };
+    const onDragLeave = (e: DragEvent) => {
+      if (!isTaskDrag(e)) return;
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+      if (dragDepthRef.current === 0) setIsDragOver(false);
     };
     el.addEventListener("dragover", onDragOver);
     el.addEventListener("drop", onDrop);
+    el.addEventListener("dragenter", onDragEnter);
+    el.addEventListener("dragleave", onDragLeave);
+    const resetDragState = () => {
+      dragDepthRef.current = 0;
+      setIsDragOver(false);
+    };
+    document.addEventListener("dragend", resetDragState);
     return () => {
       el.removeEventListener("dragover", onDragOver);
       el.removeEventListener("drop", onDrop);
+      el.removeEventListener("dragenter", onDragEnter);
+      el.removeEventListener("dragleave", onDragLeave);
+      document.removeEventListener("dragend", resetDragState);
     };
   }, [onDropCard, onDropEnd]);
 
@@ -3471,7 +3501,8 @@ const DroppableColumn = React.forwardRef<HTMLDivElement, {
     <div
       ref={setRef}
       data-column-title={title}
-      className={`surface-panel w-[325px] shrink-0 p-2 ${scrollable ? 'flex h-[calc(100vh-15rem)] flex-col overflow-hidden' : 'min-h-[320px]'}`}
+      data-drop-over={isDragOver || undefined}
+      className={`board-column surface-panel w-[325px] shrink-0 p-2 ${scrollable ? 'flex h-[calc(100vh-15rem)] flex-col overflow-hidden' : 'min-h-[320px]'} ${isDragOver ? 'board-column--active' : ''} ${className ?? ''}`}
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
     >

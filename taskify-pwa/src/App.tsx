@@ -507,7 +507,6 @@ function useSettings() {
       const parsed = JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}");
       let baseFontSize =
         typeof parsed.baseFontSize === "number" ? parsed.baseFontSize : null;
-      if (baseFontSize === 18) baseFontSize = null; // default to system size
       const startBoardByDay: Partial<Record<Weekday, string>> = {};
       if (parsed && typeof parsed.startBoardByDay === "object" && parsed.startBoardByDay) {
         for (const [key, value] of Object.entries(parsed.startBoardByDay as Record<string, unknown>)) {
@@ -2602,12 +2601,14 @@ export default function App() {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    <circle cx="12" cy="12" r="8.25" />
-                    <path d="M11 7v10" />
-                    <path d="M9.5 8h3.75a2.25 2.25 0 0 1 0 4.5H9.5" />
-                    <path d="M9.5 12h3.9a2.25 2.25 0 1 1 0 4.5H9.5" />
-                    <path d="M8.75 9.5h2.5" />
-                    <path d="M8.75 14.5h2.5" />
+                    <g transform="rotate(12 12 12)">
+                      <line x1="12" y1="4" x2="12" y2="20" />
+                      <line x1="9.25" y1="7.25" x2="14.75" y2="7.25" />
+                      <line x1="8.5" y1="12" x2="15.5" y2="12" />
+                      <line x1="9.25" y1="16.75" x2="14.75" y2="16.75" />
+                      <line x1="11.25" y1="5.5" x2="12.75" y2="5.5" />
+                      <line x1="11.25" y1="18.5" x2="12.75" y2="18.5" />
+                    </g>
                   </svg>
                 </button>
                 {settings.completedTab ? (
@@ -5115,12 +5116,13 @@ function SettingsModal({
               <div className="text-sm font-medium mb-2">Font size</div>
               <div className="flex flex-wrap gap-2">
                 <button className={pillButtonClass(settings.baseFontSize == null)} onClick={() => setSettings({ baseFontSize: null })}>System</button>
-                <button className={pillButtonClass(settings.baseFontSize === 16)} onClick={() => setSettings({ baseFontSize: 16 })}>Small</button>
-                <button className={pillButtonClass(settings.baseFontSize === 18)} onClick={() => setSettings({ baseFontSize: 18 })}>Default</button>
-                <button className={pillButtonClass(settings.baseFontSize === 20)} onClick={() => setSettings({ baseFontSize: 20 })}>Large</button>
-                <button className={pillButtonClass(settings.baseFontSize === 22)} onClick={() => setSettings({ baseFontSize: 22 })}>X-Large</button>
+                <button className={pillButtonClass(settings.baseFontSize === 14)} onClick={() => setSettings({ baseFontSize: 14 })}>Small</button>
+                <button className={pillButtonClass(settings.baseFontSize === 16)} onClick={() => setSettings({ baseFontSize: 16 })}>Default</button>
+                <button className={pillButtonClass(settings.baseFontSize === 18)} onClick={() => setSettings({ baseFontSize: 18 })}>Large</button>
+                <button className={pillButtonClass(settings.baseFontSize === 20)} onClick={() => setSettings({ baseFontSize: 20 })}>X-Large</button>
+                <button className={pillButtonClass(settings.baseFontSize === 22)} onClick={() => setSettings({ baseFontSize: 22 })}>XX-Large</button>
               </div>
-              <div className="text-xs text-secondary mt-2">Scales the entire UI. Defaults to a larger reading size.</div>
+              <div className="text-xs text-secondary mt-2">Scales the entire UI. Defaults to a compact size.</div>
             </div>
             <div>
               <div className="text-sm font-medium mb-2">Add new tasks to</div>

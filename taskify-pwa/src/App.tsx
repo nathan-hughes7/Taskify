@@ -2421,7 +2421,8 @@ export default function App() {
               </h1>
               <div
                 ref={boardDropContainerRef}
-                className="relative min-w-[12rem]"
+                className="relative min-w-0 sm:min-w-[12rem]"
+                style={{ maxWidth: 'min(28rem, calc(100vw - 7.5rem))' }}
                 onDragOver={e => {
                   if (!draggingTaskId) return;
                   e.preventDefault();
@@ -2450,7 +2451,8 @@ export default function App() {
                   ref={boardSelectorRef}
                   value={currentBoardId}
                   onChange={handleBoardSelect}
-                  className="pill-select min-w-[12rem]"
+                  className="pill-select w-full min-w-0 truncate sm:w-auto sm:min-w-[12rem]"
+                  style={{ textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                   title="Boards"
                 >
                   {visibleBoards.length === 0 ? (

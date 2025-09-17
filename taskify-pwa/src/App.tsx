@@ -104,7 +104,6 @@ type Settings = {
   inlineAdd: boolean;
   // Base UI font size in pixels; null uses the OS preferred size
   baseFontSize: number | null;
-  theme: "system" | "light" | "dark";
   startBoardByDay: Partial<Record<Weekday, string>>;
   accent: "green" | "blue";
 };
@@ -517,6 +516,9 @@ function useSettings() {
         }
       }
       const accent = parsed?.accent === "green" ? "green" : "blue";
+      if (parsed && typeof parsed === "object") {
+        delete (parsed as Record<string, unknown>).theme;
+      }
       return {
         weekStart: 0,
         newTaskPosition: "top",
@@ -526,7 +528,6 @@ function useSettings() {
         inlineAdd: true,
         ...parsed,
         baseFontSize,
-        theme: typeof parsed.theme === "string" ? parsed.theme : "dark",
         startBoardByDay,
         accent,
       };
@@ -539,7 +540,6 @@ function useSettings() {
         showFullWeekRecurring: false,
         inlineAdd: true,
         baseFontSize: null,
-        theme: "dark",
         startBoardByDay: {},
         accent: "blue",
       };
@@ -757,30 +757,16 @@ export default function App() {
     } catch {}
   }, [settings.baseFontSize]);
 
-  // Apply theme to document
+  // Ensure the app always renders with the dark theme
   useEffect(() => {
     try {
-      const apply = () => {
-        let theme = settings.theme;
-        if (theme === "system") {
-          theme = window.matchMedia("(prefers-color-scheme: dark)").matches
-            ? "dark"
-            : "light";
-        }
-        const root = document.documentElement;
-        root.classList.remove("light", "dark");
-        root.classList.add(theme);
-        const meta = document.querySelector('meta[name="theme-color"]');
-        if (meta) meta.setAttribute("content", theme === "dark" ? "#0a0a0a" : "#fafafa");
-      };
-      apply();
-      if (settings.theme === "system") {
-        const mql = window.matchMedia("(prefers-color-scheme: dark)");
-        mql.addEventListener("change", apply);
-        return () => mql.removeEventListener("change", apply);
-      }
+      const root = document.documentElement;
+      root.classList.remove("light");
+      if (!root.classList.contains("dark")) root.classList.add("dark");
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", "#0a0a0a");
     } catch {}
-  }, [settings.theme]);
+  }, []);
 
   useEffect(() => {
     try {
@@ -5159,14 +5145,6 @@ function SettingsModal({
             </button>
           </div>
           <div className="space-y-4">
-            <div>
-              <div className="text-sm font-medium mb-2">Theme</div>
-              <div className="flex gap-2">
-                <button className={pillButtonClass(settings.theme === "system")} onClick={() => setSettings({ theme: "system" })}>System</button>
-                <button className={pillButtonClass(settings.theme === "light")} onClick={() => setSettings({ theme: "light" })}>Light</button>
-                <button className={pillButtonClass(settings.theme === "dark")} onClick={() => setSettings({ theme: "dark" })}>Dark</button>
-              </div>
-            </div>
             <div>
               <div className="text-sm font-medium mb-2">Font size</div>
               <div className="flex flex-wrap gap-2">

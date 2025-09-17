@@ -449,6 +449,7 @@ html.light .accent-swatch--active {
 /* ================= Task cards ================= */
 .task-card {
   position: relative;
+  width: 100%;
   background: var(--surface-raised);
   border: 1px solid transparent;
   border-radius: var(--radius-pill);

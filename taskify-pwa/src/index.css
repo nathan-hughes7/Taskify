@@ -188,7 +188,8 @@ button {
   border-radius: var(--radius-field);
   color: var(--text-primary);
   padding: 0.65rem 1rem;
-  font-size: 0.95rem;
+  font-size: max(16px, 0.95rem);
+  line-height: 1.35;
   box-shadow: var(--shadow-inner);
   backdrop-filter: var(--blur-backdrop);
   -webkit-backdrop-filter: var(--blur-backdrop);

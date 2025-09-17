@@ -1183,6 +1183,11 @@ export default function App() {
     const dotSize = 1.25 * rem; // 20px @ 16px base
     const dotFont = 0.875 * rem; // 14px @ 16px base
 
+    const rootStyles = getComputedStyle(document.documentElement);
+    const accent = rootStyles.getPropertyValue("--accent").trim() || "#34c759";
+    const accentSoft = rootStyles.getPropertyValue("--accent-soft").trim() || "rgba(52, 199, 89, 0.28)";
+    const accentOn = rootStyles.getPropertyValue("--accent-on").trim() || "#0a1f12";
+
     const dot = document.createElement('div');
     dot.style.position = 'fixed';
     dot.style.left = `${startX - dotSize / 2}px`;
@@ -1190,13 +1195,13 @@ export default function App() {
     dot.style.width = `${dotSize}px`;
     dot.style.height = `${dotSize}px`;
     dot.style.borderRadius = '9999px';
-    dot.style.background = '#10b981';
-    dot.style.color = 'white';
+    dot.style.background = accent;
+    dot.style.color = accentOn || '#ffffff';
     dot.style.display = 'grid';
     dot.style.placeItems = 'center';
     dot.style.fontSize = `${dotFont}px`;
     dot.style.lineHeight = `${dotSize}px`;
-    dot.style.boxShadow = '0 0 0 2px rgba(16,185,129,0.3), 0 6px 16px rgba(0,0,0,0.35)';
+    dot.style.boxShadow = `0 0 0 2px ${accentSoft || 'rgba(16,185,129,0.3)'}, 0 6px 16px rgba(0,0,0,0.35)`;
     dot.style.zIndex = '1000';
     dot.style.transform = 'translate(0, 0) scale(1)';
     dot.style.transition = 'transform 600ms cubic-bezier(.2,.7,.3,1), opacity 300ms ease 420ms';

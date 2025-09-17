@@ -106,6 +106,7 @@ type Settings = {
   baseFontSize: number | null;
   startBoardByDay: Partial<Record<Weekday, string>>;
   accent: "green" | "blue";
+  showMagnifier: boolean;
 };
 
 const ACCENT_CHOICES = [
@@ -516,6 +517,7 @@ function useSettings() {
         }
       }
       const accent = parsed?.accent === "green" ? "green" : "blue";
+      const showMagnifier = parsed?.showMagnifier === false ? false : true;
       if (parsed && typeof parsed === "object") {
         delete (parsed as Record<string, unknown>).theme;
       }
@@ -530,6 +532,7 @@ function useSettings() {
         baseFontSize,
         startBoardByDay,
         accent,
+        showMagnifier,
       };
     } catch {
       return {
@@ -542,6 +545,7 @@ function useSettings() {
         baseFontSize: null,
         startBoardByDay: {},
         accent: "blue",
+        showMagnifier: true,
       };
     }
   });
@@ -2427,6 +2431,25 @@ export default function App() {
 
   // horizontal scroller ref to enable iOS momentum scrolling
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const [boardZoomedOut, setBoardZoomedOut] = useState(false);
+  const boardZoomTargetClass = boardZoomedOut
+    ? "board-zoom-target board-zoom-target--out"
+    : "board-zoom-target";
+  const zoomButtonActiveStyle = boardZoomedOut
+    ? ({ borderColor: "var(--accent-border)", boxShadow: "var(--accent-glow)", color: "var(--accent)" } as React.CSSProperties)
+    : undefined;
+
+  useEffect(() => {
+    if (view !== "board") setBoardZoomedOut(false);
+  }, [view]);
+
+  useEffect(() => {
+    if (!settings.showMagnifier) setBoardZoomedOut(false);
+  }, [settings.showMagnifier]);
+
+  useEffect(() => {
+    setBoardZoomedOut(false);
+  }, [currentBoardId]);
 
   const currentTutorial = tutorialStep != null ? tutorialSteps[tutorialStep] : null;
   const totalTutorialSteps = tutorialSteps.length;
@@ -2762,7 +2785,7 @@ export default function App() {
                 className="overflow-x-auto pb-4 w-full"
                 style={{ WebkitOverflowScrolling: "touch" }} // fluid momentum scroll on iOS
               >
-                <div className="flex gap-4 min-w-max">
+                <div className={`flex gap-4 min-w-max ${boardZoomTargetClass}`}>
                   {Array.from({ length: 7 }, (_, i) => i as Weekday).map((day) => (
                     <DroppableColumn
                       ref={el => setColumnRef(`week-day-${day}`, el)}
@@ -2879,7 +2902,7 @@ export default function App() {
               className="overflow-x-auto pb-4 w-full"
               style={{ WebkitOverflowScrolling: "touch" }}
             >
-              <div className="flex gap-4 min-w-max">
+              <div className={`flex gap-4 min-w-max ${boardZoomTargetClass}`}>
                 {listColumns.map(col => (
                   <DroppableColumn
                     ref={el => setColumnRef(`list-${col.id}`, el)}
@@ -3007,6 +3030,32 @@ export default function App() {
         )}
         </div>
       </div>
+
+      {settings.showMagnifier && view === "board" && currentBoard && (
+        <button
+          type="button"
+          className="pressable fixed bottom-32 right-4 z-40 flex h-12 w-12 items-center justify-center rounded-full border border-surface bg-surface-muted text-primary shadow-lg transition-all"
+          aria-pressed={boardZoomedOut}
+          onClick={() => setBoardZoomedOut((prev) => !prev)}
+          title={boardZoomedOut ? "Zoom in" : "Zoom out"}
+          aria-label={boardZoomedOut ? "Zoom in to normal view" : "Zoom out to show two columns"}
+          style={zoomButtonActiveStyle}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-5 w-5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={1.9}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="11" cy="11" r="6" />
+            <line x1="16.5" y1="16.5" x2="21" y2="21" />
+          </svg>
+        </button>
+      )}
 
       {/* Floating Upcoming Drawer Button */}
       <button
@@ -5235,6 +5284,18 @@ function SettingsModal({
                   </button>
                 </div>
                 <div className="text-xs text-secondary mt-2">Hide the completed tab and show a Clear completed button instead.</div>
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">Board magnifier</div>
+                <div className="flex gap-2">
+                  <button
+                    className={pillButtonClass(settings.showMagnifier)}
+                    onClick={() => setSettings({ showMagnifier: !settings.showMagnifier })}
+                  >
+                    {settings.showMagnifier ? "On" : "Off"}
+                  </button>
+                </div>
+                <div className="text-xs text-secondary mt-2">Show or hide the floating zoom control above Upcoming.</div>
               </div>
               <div>
                 <div className="text-sm font-medium mb-2">Streaks</div>

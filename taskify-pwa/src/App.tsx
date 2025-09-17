@@ -3492,7 +3492,7 @@ const DroppableColumn = React.forwardRef<HTMLDivElement, {
         {title}
       </div>
       <div className={scrollable ? 'flex-1 min-h-0 overflow-y-auto pr-1' : ''}>
-        <div className="space-y-.75">{children}</div>
+        <div className="space-y-.25">{children}</div>
       </div>
       {scrollable && footer ? <div className="mt-auto flex-shrink-0 pt-2">{footer}</div> : null}
       {!scrollable && footer}

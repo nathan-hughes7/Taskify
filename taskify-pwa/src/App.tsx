@@ -2446,8 +2446,8 @@ export default function App() {
   const totalTutorialSteps = tutorialSteps.length;
 
   return (
-    <div className="min-h-screen px-4 py-4 sm:px-6 lg:px-8 text-primary">
-      <div className="mx-auto max-w-7xl space-y-5">
+    <div className="app-shell">
+      <div className="mx-auto max-w-7xl space-y-5 px-4 py-4 sm:px-6 lg:px-8 text-primary">
         {/* Header */}
         <header className="relative space-y-3">
           <div ref={confettiRef} className="pointer-events-none absolute inset-x-0 -top-2 z-20 h-0" />
@@ -3025,7 +3025,11 @@ export default function App() {
       {/* Floating Upcoming Drawer Button */}
       <button
         ref={upcomingButtonRef}
-        className={`fixed bottom-4 right-4 px-3 py-2 rounded-full bg-surface-muted border border-surface shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
+        className={`fixed px-3 py-2 rounded-full bg-surface-muted border border-surface shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
+        style={{
+          bottom: 'calc(1rem + var(--safe-bottom))',
+          right: 'calc(1rem + var(--safe-right))',
+        }}
         onClick={() => setShowUpcoming(true)}
         title="Upcoming (hidden) tasks"
         onDragOver={(e) => { e.preventDefault(); setUpcomingHover(true); }}
@@ -3107,7 +3111,11 @@ export default function App() {
       {/* Drag trash can */}
       {draggingTaskId && (
         <div
-          className="fixed bottom-4 left-4 z-50"
+          className="fixed z-50"
+          style={{
+            bottom: 'calc(1rem + var(--safe-bottom))',
+            left: 'calc(1rem + var(--safe-left))',
+          }}
           onDragOver={(e) => {
             e.preventDefault();
             setTrashHover(true);
@@ -3139,7 +3147,10 @@ export default function App() {
 
       {/* Undo Snackbar */}
       {undoTask && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-surface-muted border border-surface text-sm px-4 py-2 rounded-xl shadow-lg flex items-center gap-3">
+        <div
+          className="fixed left-1/2 -translate-x-1/2 bg-surface-muted border border-surface text-sm px-4 py-2 rounded-xl shadow-lg flex items-center gap-3"
+          style={{ bottom: 'calc(1rem + var(--safe-bottom))' }}
+        >
           Task deleted
           <button onClick={undoDelete} className="pressable px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500">Undo</button>
         </div>
@@ -3504,7 +3515,7 @@ const DroppableColumn = React.forwardRef<HTMLDivElement, {
       ref={setRef}
       data-column-title={title}
       data-drop-over={isDragOver || undefined}
-      className={`board-column surface-panel w-[325px] shrink-0 p-2 ${scrollable ? 'flex h-[calc(100vh-15rem)] flex-col overflow-hidden' : 'min-h-[320px]'} ${isDragOver ? 'board-column--active' : ''} ${className ?? ''}`}
+      className={`board-column surface-panel w-[325px] shrink-0 p-2 ${scrollable ? 'flex h-[calc(var(--app-safe-height)-15rem)] flex-col overflow-hidden' : 'min-h-[320px]'} ${isDragOver ? 'board-column--active' : ''} ${className ?? ''}`}
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
     >

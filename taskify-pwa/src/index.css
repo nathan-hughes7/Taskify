@@ -491,6 +491,16 @@ html.light .board-column[data-drop-over="true"] {
   background: linear-gradient(180deg, var(--accent-soft), rgba(255, 255, 255, 0.6));
 }
 
+.board-zoom-target {
+  transform-origin: top center;
+  transition: transform 220ms ease;
+  will-change: transform;
+}
+
+.board-zoom-target--out {
+  transform: scale(var(--board-zoom-scale, 0.78));
+}
+
 /* ================= Task cards ================= */
 .task-card {
   position: relative;

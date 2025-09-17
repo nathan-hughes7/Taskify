@@ -106,6 +106,7 @@ type Settings = {
   baseFontSize: number | null;
   startBoardByDay: Partial<Record<Weekday, string>>;
   accent: "green" | "blue";
+  showBoardMagnifier: boolean;
 };
 
 const ACCENT_CHOICES = [
@@ -516,6 +517,7 @@ function useSettings() {
         }
       }
       const accent = parsed?.accent === "green" ? "green" : "blue";
+      const showBoardMagnifier = parsed?.showBoardMagnifier !== false;
       if (parsed && typeof parsed === "object") {
         delete (parsed as Record<string, unknown>).theme;
       }
@@ -530,6 +532,7 @@ function useSettings() {
         baseFontSize,
         startBoardByDay,
         accent,
+        showBoardMagnifier,
       };
     } catch {
       return {
@@ -542,6 +545,7 @@ function useSettings() {
         baseFontSize: null,
         startBoardByDay: {},
         accent: "blue",
+        showBoardMagnifier: true,
       };
     }
   });
@@ -1105,6 +1109,11 @@ export default function App() {
 
   // upcoming drawer (out-of-the-way FAB)
   const [showUpcoming, setShowUpcoming] = useState(false);
+  const [showBoardOverview, setShowBoardOverview] = useState(false);
+
+  useEffect(() => {
+    if (!settings.showBoardMagnifier) setShowBoardOverview(false);
+  }, [settings.showBoardMagnifier]);
 
   // confetti
   const confettiRef = useRef<HTMLDivElement>(null);
@@ -3008,6 +3017,18 @@ export default function App() {
         </div>
       </div>
 
+      {settings.showBoardMagnifier && (
+        <button
+          className={`fixed bottom-36 right-4 flex h-12 w-12 items-center justify-center rounded-full border border-surface shadow-lg text-xl transition-colors pressable ${showBoardOverview ? 'bg-surface text-primary' : 'bg-surface-muted text-secondary hover:text-primary'}`}
+          onClick={() => setShowBoardOverview(prev => !prev)}
+          aria-pressed={showBoardOverview}
+          title={showBoardOverview ? 'Close board overview' : 'Board overview'}
+        >
+          <span aria-hidden="true">🔍</span>
+          <span className="sr-only">{showBoardOverview ? "Close board overview" : "Show two boards"}</span>
+        </button>
+      )}
+
       {/* Floating Upcoming Drawer Button */}
       <button
         ref={upcomingButtonRef}
@@ -3025,6 +3046,20 @@ export default function App() {
       >
         Upcoming {upcoming.length ? `(${upcoming.length})` : ""}
       </button>
+
+      {settings.showBoardMagnifier && showBoardOverview && (
+        <BoardZoomModal
+          boards={visibleBoards}
+          tasks={tasks}
+          settings={settings}
+          currentBoardId={currentBoardId}
+          onClose={() => setShowBoardOverview(false)}
+          onSelectBoard={(id) => {
+            setCurrentBoardId(id);
+            setShowBoardOverview(false);
+          }}
+        />
+      )}
 
       {/* Upcoming Drawer */}
       {showUpcoming && (
@@ -3739,6 +3774,232 @@ function Card({
     </div>
   );
 }
+
+
+type BoardZoomModalProps = {
+  boards: Board[];
+  tasks: Task[];
+  settings: Settings;
+  currentBoardId: string;
+  onSelectBoard: (id: string) => void;
+  onClose: () => void;
+};
+
+function BoardZoomModal({ boards, tasks, settings, currentBoardId, onSelectBoard, onClose }: BoardZoomModalProps) {
+  const boardsToShow = useMemo(() => {
+    if (!boards.length) return [] as Board[];
+    const ordered: Board[] = [];
+    const current = boards.find((b) => b.id === currentBoardId);
+    if (current) ordered.push(current);
+    for (const board of boards) {
+      if (ordered.length >= 2) break;
+      if (ordered.some((b) => b.id === board.id)) continue;
+      ordered.push(board);
+    }
+    return ordered.slice(0, 2);
+  }, [boards, currentBoardId]);
+
+  const handleSelect = useCallback(
+    (id: string) => {
+      onSelectBoard(id);
+      onClose();
+    },
+    [onClose, onSelectBoard],
+  );
+
+  return (
+    <Modal onClose={onClose} title="Board overview">
+      {boardsToShow.length ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          {boardsToShow.map((board) => (
+            <BoardPreview
+              key={board.id}
+              board={board}
+              settings={settings}
+              tasks={tasks.filter((t) => t.boardId === board.id)}
+              onSelect={handleSelect}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="text-sm text-secondary">No boards available yet.</div>
+      )}
+      <div className="mt-4 text-xs text-secondary">
+        {boards.length > 2
+          ? "Showing the current board alongside the next available board."
+          : "Showing all available boards."}
+      </div>
+    </Modal>
+  );
+}
+
+function BoardPreview({ board, tasks, settings, onSelect }: { board: Board; tasks: Task[]; settings: Settings; onSelect: (id: string) => void; }) {
+  const now = useMemo(() => new Date(), []);
+  const visibleTasks = useMemo(() => {
+    const pending = (t: Task) => t.completed && t.bounty && t.bounty.state !== "claimed";
+    return tasks
+      .filter((t) => (!t.completed || pending(t) || !settings.completedTab) && isVisibleNow(t, now))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }, [now, settings.completedTab, tasks]);
+  const upcomingTasks = useMemo(
+    () =>
+      tasks
+        .filter((t) => !t.completed && t.hiddenUntilISO && !isVisibleNow(t, now))
+        .sort((a, b) => (a.hiddenUntilISO || "").localeCompare(b.hiddenUntilISO || "")),
+    [now, tasks],
+  );
+
+  const MAX_PREVIEW_ITEMS = 5;
+
+  const weekByDay = useMemo(() => {
+    if (board.kind !== "week") return null;
+    const map = new Map<Weekday, Task[]>();
+    for (const t of visibleTasks) {
+      if (t.column === "bounties") continue;
+      const wd = new Date(t.dueISO).getDay() as Weekday;
+      if (!map.has(wd)) map.set(wd, []);
+      map.get(wd)!.push(t);
+    }
+    return map;
+  }, [board.kind, visibleTasks]);
+
+  const weekBounties = useMemo(() => {
+    if (board.kind !== "week") return [] as Task[];
+    return visibleTasks.filter((t) => t.column === "bounties");
+  }, [board.kind, visibleTasks]);
+
+  const listByColumn = useMemo(() => {
+    if (board.kind !== "lists") return null;
+    const map = new Map<string, Task[]>();
+    for (const col of board.columns) map.set(col.id, []);
+    for (const t of visibleTasks) {
+      if (!t.columnId) continue;
+      const arr = map.get(t.columnId);
+      if (arr) arr.push(t);
+    }
+    return map;
+  }, [board, visibleTasks]);
+
+  return (
+    <div className="surface-panel flex h-full flex-col overflow-hidden p-4">
+      <div className="flex items-center gap-2">
+        <div className="text-base font-semibold">{board.name}</div>
+        <button
+          type="button"
+          className="ghost-button button-sm pressable"
+          onClick={() => onSelect(board.id)}
+        >
+          Open
+        </button>
+      </div>
+      <div className="mt-2 text-xs uppercase tracking-wide text-secondary">
+        {board.kind === "week" ? "Week board" : "Multi-list board"}
+      </div>
+      <div className="mt-3 flex-1 space-y-3 overflow-y-auto pr-1">
+        {board.kind === "week" && weekByDay ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {WD_SHORT.map((label, idx) => {
+              const day = idx as Weekday;
+              const arr = weekByDay.get(day) ?? [];
+              const preview = arr.slice(0, MAX_PREVIEW_ITEMS);
+              const remaining = arr.length - preview.length;
+              return (
+                <div key={label} className="rounded-xl bg-surface-muted px-3 py-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-secondary">{label}</div>
+                  {preview.length ? (
+                    <ul className="mt-1 space-y-1 text-sm">
+                      {preview.map((t) => (
+                        <li key={t.id} className="truncate">{t.title}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="mt-1 text-xs text-tertiary">No tasks</div>
+                  )}
+                  {remaining > 0 && (
+                    <div className="mt-1 text-[0.7rem] text-tertiary">+{remaining} more</div>
+                  )}
+                </div>
+              );
+            })}
+            <div className="rounded-xl bg-surface-muted px-3 py-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-secondary">Bounties</div>
+              {weekBounties.length ? (
+                <ul className="mt-1 space-y-1 text-sm">
+                  {weekBounties.slice(0, MAX_PREVIEW_ITEMS).map((t) => (
+                    <li key={t.id} className="truncate">{t.title}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="mt-1 text-xs text-tertiary">No bounties</div>
+              )}
+              {weekBounties.length > MAX_PREVIEW_ITEMS && (
+                <div className="mt-1 text-[0.7rem] text-tertiary">
+                  +{weekBounties.length - MAX_PREVIEW_ITEMS} more
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {board.kind === "lists" && listByColumn ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {board.columns.map((col) => {
+              const arr = listByColumn.get(col.id) ?? [];
+              const preview = arr.slice(0, MAX_PREVIEW_ITEMS);
+              const remaining = arr.length - preview.length;
+              return (
+                <div key={col.id} className="rounded-xl bg-surface-muted px-3 py-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-secondary">{col.name}</div>
+                  {preview.length ? (
+                    <ul className="mt-1 space-y-1 text-sm">
+                      {preview.map((t) => (
+                        <li key={t.id} className="truncate">{t.title}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="mt-1 text-xs text-tertiary">No tasks</div>
+                  )}
+                  {remaining > 0 && (
+                    <div className="mt-1 text-[0.7rem] text-tertiary">+{remaining} more</div>
+                  )}
+                </div>
+              );
+            })}
+            {board.columns.length === 0 && (
+              <div className="rounded-xl bg-surface-muted px-3 py-2 text-xs text-tertiary">
+                No columns configured yet.
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {upcomingTasks.length ? (
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-secondary">Upcoming</div>
+            <ul className="mt-1 space-y-1 text-sm text-secondary">
+              {upcomingTasks.slice(0, MAX_PREVIEW_ITEMS).map((t) => (
+                <li key={t.id} className="truncate">
+                  {t.title}
+                  {t.hiddenUntilISO ? ` • ${new Date(t.hiddenUntilISO).toLocaleDateString()}` : ""}
+                </li>
+              ))}
+            </ul>
+            {upcomingTasks.length > MAX_PREVIEW_ITEMS && (
+              <div className="mt-1 text-[0.7rem] text-tertiary">
+                +{upcomingTasks.length - MAX_PREVIEW_ITEMS} more hidden tasks
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {!visibleTasks.length && !upcomingTasks.length && (
+          <div className="text-sm text-tertiary">No visible tasks yet.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 /* Small circular icon button */
 function IconButton({
@@ -5235,6 +5496,18 @@ function SettingsModal({
                   </button>
                 </div>
                 <div className="text-xs text-secondary mt-2">Hide the completed tab and show a Clear completed button instead.</div>
+              </div>
+              <div>
+                <div className="text-sm font-medium mb-2">Board magnifier</div>
+                <div className="flex gap-2">
+                  <button
+                    className={pillButtonClass(settings.showBoardMagnifier)}
+                    onClick={() => setSettings({ showBoardMagnifier: !settings.showBoardMagnifier })}
+                  >
+                    {settings.showBoardMagnifier ? "On" : "Off"}
+                  </button>
+                </div>
+                <div className="text-xs text-secondary mt-2">Show or hide the floating magnifier above the Upcoming drawer.</div>
               </div>
               <div>
                 <div className="text-sm font-medium mb-2">Streaks</div>

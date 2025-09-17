@@ -106,6 +106,7 @@ type Settings = {
   baseFontSize: number | null;
   theme: "system" | "light" | "dark";
   startBoardByDay: Partial<Record<Weekday, string>>;
+  accent: "green" | "blue";
 };
 
 const R_NONE: Recurrence = { type: "none" };
@@ -484,6 +485,7 @@ function useSettings() {
           startBoardByDay[day as Weekday] = value;
         }
       }
+      const accent = parsed?.accent === "blue" ? "blue" : "green";
       return {
         weekStart: 0,
         newTaskPosition: "top",
@@ -495,6 +497,7 @@ function useSettings() {
         baseFontSize,
         theme: typeof parsed.theme === "string" ? parsed.theme : "dark",
         startBoardByDay,
+        accent,
       };
     } catch {
       return {
@@ -507,6 +510,7 @@ function useSettings() {
         baseFontSize: null,
         theme: "dark",
         startBoardByDay: {},
+        accent: "green",
       };
     }
   });
@@ -747,6 +751,14 @@ export default function App() {
     } catch {}
   }, [settings.theme]);
 
+  useEffect(() => {
+    try {
+      const root = document.documentElement;
+      if (settings.accent === "blue") root.setAttribute("data-accent", "blue");
+      else root.removeAttribute("data-accent");
+    } catch {}
+  }, [settings.accent]);
+
   // Nostr pool + merge indexes
   const pool = useMemo(() => createNostrPool(), []);
   // In-app Nostr key (secp256k1/Schnorr) for signing
@@ -881,12 +893,12 @@ export default function App() {
               Taskify keeps your plans organized on boards. The default Week board groups tasks by day plus a Bounties
               lane for reward-backed work.
             </p>
-            <ul className="list-disc pl-5 space-y-1 text-neutral-300">
+            <ul className="list-disc pl-5 space-y-1 text-secondary">
               <li>Use the board switcher in the header to focus on different projects.</li>
               <li>Add more boards from Settings → Boards &amp; Lists, or paste a Board ID there to join a shared space.</li>
               <li>Open Manage board to copy its Board ID for teammates and tap the refresh icon to pull in shared updates.</li>
             </ul>
-            <p className="text-neutral-400">You can skip this tutorial at any time.</p>
+            <p className="text-secondary">You can skip this tutorial at any time.</p>
           </div>
         ),
       },
@@ -897,7 +909,7 @@ export default function App() {
             <p>
               Use the New Task bar to add items instantly, attach notes or images, and schedule them for specific days.
             </p>
-            <ul className="list-disc pl-5 space-y-1 text-neutral-300">
+            <ul className="list-disc pl-5 space-y-1 text-secondary">
               <li>Drag tasks to reorder them, move them between days and lists, or drop them on the Upcoming drawer.</li>
               <li>Upcoming keeps tasks hidden until you need them—future due dates pop onto the board at the start of that week.</li>
               <li>Open a task to set recurrence, manage subtasks, track streaks on repeats, or attach optional bounties.</li>
@@ -911,7 +923,7 @@ export default function App() {
         body: (
           <div className="space-y-3 text-sm text-neutral-200">
             <p>Dial in how Taskify feels so it matches the way you work.</p>
-            <ul className="list-disc pl-5 space-y-1 text-neutral-300">
+            <ul className="list-disc pl-5 space-y-1 text-secondary">
               <li>Choose between inline add boxes inside each list or the top New Task bar from Settings → Add tasks within lists.</li>
               <li>Adjust week start, default task position, and other layout options anytime from Settings.</li>
             </ul>
@@ -923,12 +935,12 @@ export default function App() {
         body: (
           <div className="space-y-3 text-sm text-neutral-200">
             <p>The 💰 button opens your built-in Cashu wallet. Even without tokens yet, it&apos;s ready for ecash.</p>
-            <ul className="list-disc pl-5 space-y-1 text-neutral-300">
+            <ul className="list-disc pl-5 space-y-1 text-secondary">
               <li>Receive to accept new ecash from a mint and store it securely on this device.</li>
               <li>Send to share tokens or fund task bounties when you&apos;re coordinating with others.</li>
               <li>History keeps track of every ecash transfer so you know where tokens went.</li>
             </ul>
-            <p className="text-neutral-400">Bounties on tasks will show any ecash rewards once you add them.</p>
+            <p className="text-secondary">Bounties on tasks will show any ecash rewards once you add them.</p>
           </div>
         ),
       },
@@ -949,7 +961,7 @@ export default function App() {
                 Copy my nsec
               </button>
             </div>
-            <p className="text-neutral-400">Skipping is okay—you can always copy it from Settings when you&apos;re ready.</p>
+            <p className="text-secondary">Skipping is okay—you can always copy it from Settings when you&apos;re ready.</p>
           </div>
         ),
       },
@@ -2398,54 +2410,18 @@ export default function App() {
   const totalTutorialSteps = tutorialSteps.length;
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen px-4 py-6 sm:px-6 lg:px-8 text-primary">
+      <div className="mx-auto max-w-7xl space-y-6">
         {/* Header */}
-        <header className="mb-4">
-          <div className="flex items-center mb-4">
-            <h1 className="text-2xl font-semibold tracking-tight">Taskify</h1>
-            <div className="ml-auto flex items-center gap-2">
-              {/* Refresh (if shared) */}
-              {currentBoard?.nostr?.boardId && (
-                <button
-                  className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                  onClick={() => setNostrRefresh(n => n + 1)}
-                  title="Refresh shared board"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="w-5 h-5 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <polyline points="23 4 23 10 17 10" />
-                    <polyline points="1 20 1 14 7 14" />
-                    <path d="M3.51 9a9 9 0 0114.13-3.36L23 10" />
-                    <path d="M20.49 15a9 9 0 01-14.13 3.36L1 14" />
-                  </svg>
-                </button>
-              )}
-              {/* Settings */}
-              <button
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                onClick={() => setShowSettings(true)}
-                title="Settings"
-              >
-                ⚙️
-              </button>
-            </div>
-          </div>
-          <div ref={confettiRef} className="relative h-0 w-full" />
-          <div className="flex items-center gap-3 w-full overflow-x-auto overflow-y-visible">
-            {/* Board switcher */}
-            <div className="flex items-center gap-2">
+        <header className="space-y-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1 justify-end">
+              <h1 className="text-3xl font-semibold tracking-tight">
+                Taskify
+              </h1>
               <div
                 ref={boardDropContainerRef}
-                className="relative"
+                className="relative min-w-[12rem]"
                 onDragOver={e => {
                   if (!draggingTaskId) return;
                   e.preventDefault();
@@ -2474,7 +2450,7 @@ export default function App() {
                   ref={boardSelectorRef}
                   value={currentBoardId}
                   onChange={handleBoardSelect}
-                  className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                  className="pill-select min-w-[12rem]"
                   title="Boards"
                 >
                   {visibleBoards.length === 0 ? (
@@ -2487,7 +2463,7 @@ export default function App() {
                   createPortal(
                     <div
                       ref={boardDropListRef}
-                      className="fixed w-48 rounded-xl border border-neutral-800 bg-neutral-900 z-50"
+                      className="surface-panel fixed z-50 w-56 p-2"
                       style={{ top: boardDropPos.top, left: boardDropPos.left }}
                       onDragOver={e => {
                         if (!draggingTaskId) return;
@@ -2500,12 +2476,14 @@ export default function App() {
                       }}
                     >
                       {visibleBoards.length === 0 ? (
-                        <div className="px-3 py-2 text-sm text-neutral-400">No boards</div>
+                        <div className="rounded-xl px-3 py-2 text-sm text-secondary">
+                          No boards
+                        </div>
                       ) : (
                         visibleBoards.map(b => (
                           <div
                             key={b.id}
-                            className="px-3 py-2 hover:bg-neutral-800"
+                            className="rounded-xl px-3 py-2 text-primary hover:bg-surface-muted"
                             onDragOver={e => { if (draggingTaskId) e.preventDefault(); }}
                             onDrop={e => {
                               if (!draggingTaskId) return;
@@ -2523,45 +2501,128 @@ export default function App() {
                   )}
               </div>
             </div>
-            <div className="ml-auto flex items-center gap-2 flex-shrink-0">
-              {/* Wallet */}
-              <button
-                ref={walletButtonRef}
-                className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
-                onClick={() => setShowWallet(true)}
-                title="Wallet"
-              >
-                <span className="wallet-icon">💰</span>
-              </button>
-              {settings.completedTab ? (
+            <div className="ml-auto">
+              <div className="control-matrix">
                 <button
-                  ref={completedTabRef}
-                  className={`flex h-7 w-7 items-center justify-center rounded-full border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 ${
-                    view === "completed"
-                      ? "bg-emerald-600 border-emerald-500 hover:bg-emerald-500"
-                      : "bg-neutral-900 border-neutral-800 hover:bg-neutral-800"
-                  }`}
-                  onClick={() => setView((prev) => (prev === "completed" ? "board" : "completed"))}
-                  aria-pressed={view === "completed"}
-                  aria-label={view === "completed" ? "Show board" : "Show completed tasks"}
-                  title={view === "completed" ? "Show board" : "Show completed tasks"}
+                  className="control-matrix__btn pressable"
+                  onClick={() => setNostrRefresh(n => n + 1)}
+                  title="Refresh shared board"
+                  aria-label="Refresh shared board"
+                  disabled={!currentBoard?.nostr?.boardId}
                 >
                   <svg
-                    aria-hidden
-                    viewBox="0 0 20 20"
-                    className="h-4 w-4 text-white"
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-[18px] w-[18px]"
                     fill="none"
+                    viewBox="0 0 24 24"
                     stroke="currentColor"
-                    strokeWidth="2"
+                    strokeWidth={1.8}
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    <polyline points="4 11 8 15 16 6" />
+                    <polyline points="23 4 23 10 17 10" />
+                    <polyline points="1 20 1 14 7 14" />
+                    <path d="M3.51 9a9 9 0 0114.13-3.36L23 10" />
+                    <path d="M20.49 15a9 9 0 01-14.13 3.36L1 14" />
                   </svg>
                 </button>
-              ) : (
                 <button
-                  className="px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 disabled:opacity-50"
+                  className="control-matrix__btn pressable"
+                  onClick={() => setShowSettings(true)}
+                  title="Settings"
+                  aria-label="Open settings"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-[18px] w-[18px]"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={1.8}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M10.325 4.317a1 1 0 011.35-.954 2.25 2.25 0 004.65 0 1 1 0 011.35.954l.126.758a1 1 0 00.83.83l.758.126a1 1 0 01.607 1.61 2.25 2.25 0 000 3.181 1 1 0 01-.607 1.61l-.758.126a1 1 0 00-.83.83l-.126.758a1 1 0 01-1.35.954 2.25 2.25 0 00-4.65 0 1 1 0 01-1.35-.954l-.126-.758a1 1 0 00-.83-.83l-.758-.126a1 1 0 01-.607-1.61 2.25 2.25 0 000-3.181 1 1 0 01.607-1.61l.758-.126a1 1 0 00.83-.83l.126-.758z" />
+                    <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </button>
+                <button
+                  ref={walletButtonRef}
+                  className="control-matrix__btn pressable"
+                  onClick={() => setShowWallet(true)}
+                  title="Wallet"
+                  aria-label="Open Cashu wallet"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-[18px] w-[18px]"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={1.8}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M4.5 8h15" />
+                    <path d="M3 9.5A1.5 1.5 0 014.5 8h15A1.5 1.5 0 0121 9.5v8A1.5 1.5 0 0119.5 19h-15A1.5 1.5 0 013 17.5z" />
+                    <path d="M7.5 8V5.5A2.5 2.5 0 0110 3h6a2.5 2.5 0 012.5 2.5V8" />
+                  </svg>
+                </button>
+                {settings.completedTab ? (
+                  <button
+                    ref={completedTabRef}
+                    className="control-matrix__btn pressable"
+                    data-active={view === "completed"}
+                    onClick={() => setView((prev) => (prev === "completed" ? "board" : "completed"))}
+                    aria-pressed={view === "completed"}
+                    aria-label={view === "completed" ? "Show board" : "Show completed tasks"}
+                    title={view === "completed" ? "Show board" : "Show completed tasks"}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-[18px] w-[18px]"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={1.8}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M4 7h16a1 1 0 011 1v8a1 1 0 01-1 1H4a1 1 0 01-1-1V8a1 1 0 011-1z" />
+                      <path d="M8 12l2.5 2.5L16 9" />
+                    </svg>
+                  </button>
+                ) : (
+                  <button
+                    ref={completedTabRef}
+                    className="control-matrix__btn pressable"
+                    onClick={clearCompleted}
+                    disabled={completed.length === 0}
+                    aria-label="Clear completed tasks"
+                    title="Clear completed tasks"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-[18px] w-[18px]"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={1.8}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M4 6h16" />
+                      <path d="M6 6v12a1 1 0 001 1h10a1 1 0 001-1V6" />
+                      <path d="M9 6V4h6v2" />
+                      <path d="M10 11l4 4" />
+                      <path d="M14 11l-4 4" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              {!settings.completedTab && (
+                <button
+                  className="ghost-button button-sm pressable mt-2 w-full disabled:opacity-50"
                   onClick={clearCompleted}
                   disabled={completed.length === 0}
                 >
@@ -2570,6 +2631,7 @@ export default function App() {
               )}
             </div>
           </div>
+          <div ref={confettiRef} className="relative h-0 w-full" />
         </header>
 
         {/* Animation overlay for fly effects (coins, etc.) */}
@@ -2590,12 +2652,12 @@ export default function App() {
                 }
               }}
               placeholder="New task…"
-              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 outline-none"
+              className="pill-input flex-1 min-w-0"
             />
             <button
               ref={addButtonRef}
               onClick={() => addTask()}
-              className="shrink-0 px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-medium"
+              className="accent-button shrink-0"
             >
               Add
             </button>
@@ -2617,7 +2679,7 @@ export default function App() {
                     setDayChoice(v === "bounties" ? "bounties" : (Number(v) as Weekday));
                     setScheduleDate("");
                   }}
-                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
+                  className="pill-select flex-1 min-w-0 truncate"
                 >
                   {WD_SHORT.map((d,i)=>(<option key={i} value={i}>{d}</option>))}
                   <option value="bounties">Bounties</option>
@@ -2626,7 +2688,7 @@ export default function App() {
                 <select
                   value={String(dayChoice)}
                   onChange={(e)=>setDayChoice(e.target.value)}
-                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 truncate"
+                  className="pill-select flex-1 min-w-0 truncate"
                 >
                   {listColumns.map(c => (<option key={c.id} value={c.id}>{c.name}</option>))}
                 </select>
@@ -2640,7 +2702,7 @@ export default function App() {
                   setQuickRule(v);
                   if (v === "custom") setShowAddAdvanced(true);
                 }}
-                className="shrink-0 w-fit px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                className="pill-select shrink-0 w-fit"
                 title="Recurrence"
               >
                 <option value="none">No recurrence</option>
@@ -2652,7 +2714,7 @@ export default function App() {
               </select>
 
               {quickRule === "custom" && addCustomRule.type !== "none" && (
-                <span className="flex-shrink-0 text-xs text-neutral-400">({labelOf(addCustomRule)})</span>
+                <span className="flex-shrink-0 text-xs text-secondary">({labelOf(addCustomRule)})</span>
               )}
             </div>
           </div>
@@ -2661,7 +2723,7 @@ export default function App() {
         {/* Board/Completed */}
         {view === "board" || !settings.completedTab ? (
           !currentBoard ? (
-            <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-6 text-center text-sm text-neutral-400">No boards. Open Settings to create one.</div>
+            <div className="surface-panel p-6 text-center text-sm text-secondary">No boards. Open Settings to create one.</div>
           ) : currentBoard?.kind === "week" ? (
             <>
               {/* HORIZONTAL board: single row, side-scroll */}
@@ -2690,10 +2752,10 @@ export default function App() {
                             ref={el => setInlineInputRef(String(day), el)}
                             value={inlineTitles[String(day)] || ""}
                             onChange={(e) => setInlineTitles(prev => ({ ...prev, [String(day)]: e.target.value }))}
-                            className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                            className="pill-input flex-1 min-w-0 text-sm"
                             placeholder="Add task"
                           />
-                          <button type="submit" className="rounded-xl bg-emerald-600 hover:bg-emerald-500">+</button>
+                          <button type="submit" className="accent-button button-sm pressable">+</button>
                         </form>
                       ) : undefined}
                     >
@@ -2736,10 +2798,10 @@ export default function App() {
                           ref={el => setInlineInputRef("bounties", el)}
                           value={inlineTitles["bounties"] || ""}
                           onChange={(e) => setInlineTitles(prev => ({ ...prev, bounties: e.target.value }))}
-                          className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                          className="pill-input flex-1 min-w-0 text-sm"
                           placeholder="Add task"
                         />
-                        <button type="submit" className="rounded-xl bg-emerald-600 hover:bg-emerald-500">+</button>
+                        <button type="submit" className="accent-button button-sm pressable">+</button>
                       </form>
                     ) : undefined}
                   >
@@ -2792,10 +2854,10 @@ export default function App() {
                           ref={el => setInlineInputRef(col.id, el)}
                           value={inlineTitles[col.id] || ""}
                           onChange={(e) => setInlineTitles(prev => ({ ...prev, [col.id]: e.target.value }))}
-                          className="flex-1 min-w-0 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                          className="pill-input flex-1 min-w-0 text-sm"
                           placeholder="Add task"
                         />
-                        <button type="submit" className="rounded-xl bg-emerald-600 hover:bg-emerald-500">+</button>
+                        <button type="submit" className="accent-button button-sm pressable">+</button>
                       </form>
                     ) : undefined}
                   >
@@ -2825,12 +2887,12 @@ export default function App() {
           )
         ) : (
           // Completed view
-          <div className="rounded-2xl bg-neutral-900/60 border border-neutral-800 p-4">
+          <div className="surface-panel p-4">
             <div className="flex items-center gap-2 mb-3">
               <div className="text-lg font-semibold">Completed</div>
               <div className="ml-auto">
                 <button
-                  className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600"
+                  className="ghost-button button-sm pressable text-rose-400"
                   onClick={clearCompleted}
                 >
                   Clear completed
@@ -2838,17 +2900,19 @@ export default function App() {
               </div>
             </div>
             {completed.length === 0 ? (
-              <div className="text-neutral-400 text-sm">No completed tasks yet.</div>
+              <div className="text-secondary text-sm">No completed tasks yet.</div>
             ) : (
               <ul className="space-y-2">
-                {completed.map((t) => (
-                  <li key={t.id} className="task px-3 rounded-xl bg-neutral-800 border border-neutral-700">
+                {completed.map((t) => {
+                  const hasDetail = !!t.note?.trim() || (t.images && t.images.length > 0) || (t.subtasks && t.subtasks.length > 0) || !!t.bounty;
+                  return (
+                  <li key={t.id} className="task-card space-y-2" data-state="completed" data-form={hasDetail ? 'stacked' : 'pill'}>
                     <div className="flex items-start gap-2">
                       <div className="flex-1">
                       <div className="text-sm font-medium leading-[1.15]">
                           {renderTitleWithLink(t.title, t.note)}
                         </div>
-                        <div className="text-xs text-neutral-400">
+                        <div className="text-xs text-secondary">
                           {currentBoard?.kind === "week"
                             ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
                             : "Completed item"}
@@ -2865,15 +2929,15 @@ export default function App() {
                           <ul className="mt-1 space-y-1">
                             {t.subtasks.map(st => (
                               <li key={st.id} className="flex items-center gap-2 text-xs">
-                                <input type="checkbox" checked={!!st.completed} disabled className="accent-emerald-600"/>
-                                <span className={st.completed ? 'line-through text-neutral-400' : ''}>{st.title}</span>
+                                <input type="checkbox" checked={!!st.completed} disabled/>
+                                <span className={st.completed ? 'line-through text-secondary' : ''}>{st.title}</span>
                               </li>
                             ))}
                           </ul>
                         ) : null}
                         {t.bounty && (
                           <div className="mt-1">
-                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border ${t.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : t.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : t.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
+                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border ${t.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : t.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : t.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-surface-muted border-surface'}`}>
                               Bounty {typeof t.bounty.amount==='number' ? `• ${t.bounty.amount} sats` : ''} • {t.bounty.state}
                             </span>
                           </div>
@@ -2885,7 +2949,7 @@ export default function App() {
                       </div>
                     </div>
                   </li>
-                ))}
+                );})}
               </ul>
             )}
           </div>
@@ -2895,7 +2959,7 @@ export default function App() {
       {/* Floating Upcoming Drawer Button */}
       <button
         ref={upcomingButtonRef}
-        className={`fixed bottom-4 right-4 px-3 py-2 rounded-full bg-neutral-800 border border-neutral-700 shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
+        className={`fixed bottom-4 right-4 px-3 py-2 rounded-full bg-surface-muted border border-surface shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
         onClick={() => setShowUpcoming(true)}
         title="Upcoming (hidden) tasks"
         onDragOver={(e) => { e.preventDefault(); setUpcomingHover(true); }}
@@ -2914,15 +2978,17 @@ export default function App() {
       {showUpcoming && (
         <SideDrawer title="Upcoming" onClose={() => setShowUpcoming(false)}>
           {upcoming.length === 0 ? (
-            <div className="text-sm text-neutral-400">No upcoming tasks.</div>
+            <div className="text-sm text-secondary">No upcoming tasks.</div>
           ) : (
             <ul className="space-y-2">
-              {upcoming.map((t) => (
-                <li key={t.id} className="task px-3 rounded-xl bg-neutral-900 border border-neutral-800">
+              {upcoming.map((t) => {
+                const hasDetail = !!t.note?.trim() || (t.images && t.images.length > 0) || (t.subtasks && t.subtasks.length > 0) || !!t.bounty;
+                return (
+                <li key={t.id} className="task-card space-y-2" data-form={hasDetail ? 'stacked' : 'pill'}>
                   <div className="flex items-start gap-2">
                     <div className="flex-1">
                       <div className="text-sm font-medium leading-[1.15]">{renderTitleWithLink(t.title, t.note)}</div>
-                      <div className="text-xs text-neutral-400">
+                      <div className="text-xs text-secondary">
                         {currentBoard?.kind === "week"
                           ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
                           : "Hidden item"}
@@ -2933,8 +2999,8 @@ export default function App() {
                         <ul className="mt-1 space-y-1">
                           {t.subtasks.map(st => (
                             <li key={st.id} className="flex items-center gap-2 text-xs">
-                              <input type="checkbox" checked={!!st.completed} disabled className="accent-emerald-600"/>
-                              <span className={st.completed ? 'line-through text-neutral-400' : ''}>{st.title}</span>
+                              <input type="checkbox" checked={!!st.completed} disabled/>
+                              <span className={st.completed ? 'line-through text-secondary' : ''}>{st.title}</span>
                             </li>
                           ))}
                         </ul>
@@ -2943,7 +3009,7 @@ export default function App() {
                   </div>
                   <div className="mt-2 flex gap-2">
                     <button
-                      className="px-3 py-1 rounded-full bg-emerald-600 hover:bg-emerald-500 text-sm"
+                      className="accent-button button-sm pressable"
                       onClick={() =>
                         setTasks((prev) =>
                           prev.map((x) =>
@@ -2955,20 +3021,20 @@ export default function App() {
                       Reveal now
                     </button>
                     <button
-                      className="px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600 text-sm"
+                      className="ghost-button button-sm pressable"
                       onClick={() => { setEditing(t); setShowUpcoming(false); }}
                     >
                       Edit
                     </button>
                     <button
-                      className="px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600 text-sm"
+                      className="ghost-button button-sm pressable text-rose-400"
                       onClick={() => deleteTask(t.id)}
                     >
                       Delete
                     </button>
                   </div>
                 </li>
-              ))}
+              );})}
             </ul>
           )}
         </SideDrawer>
@@ -2991,7 +3057,7 @@ export default function App() {
           }}
         >
           <div
-            className={`w-14 h-14 rounded-full bg-neutral-900 border border-neutral-700 flex items-center justify-center text-neutral-400 transition-transform ${trashHover ? 'scale-110' : ''}`}
+            className={`w-14 h-14 rounded-full bg-neutral-900 border border-neutral-700 flex items-center justify-center text-secondary transition-transform ${trashHover ? 'scale-110' : ''}`}
           >
             <svg
               width="24"
@@ -3009,7 +3075,7 @@ export default function App() {
 
       {/* Undo Snackbar */}
       {undoTask && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-neutral-800 border border-neutral-700 text-sm px-4 py-2 rounded-xl shadow-lg flex items-center gap-3">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-surface-muted border border-surface text-sm px-4 py-2 rounded-xl shadow-lg flex items-center gap-3">
           Task deleted
           <button onClick={undoDelete} className="pressable px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500">Undo</button>
         </div>
@@ -3051,13 +3117,13 @@ export default function App() {
           showClose={false}
         >
           <div className="space-y-4">
-            <div className="text-xs uppercase tracking-wide text-neutral-400">
+            <div className="text-xs uppercase tracking-wide text-secondary">
               Step {tutorialStep + 1} of {totalTutorialSteps}
             </div>
             {currentTutorial.body}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
               <button
-                className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-sm"
+                className="px-3 py-2 rounded-xl bg-surface-muted text-sm"
                 onClick={handleSkipTutorial}
               >
                 Skip tutorial
@@ -3065,7 +3131,7 @@ export default function App() {
               <div className="flex gap-2">
                 {tutorialStep > 0 && (
                   <button
-                    className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-sm"
+                    className="px-3 py-2 rounded-xl bg-surface-muted text-sm"
                     onClick={handlePrevTutorial}
                   >
                     Back
@@ -3162,7 +3228,7 @@ function renderTitleWithLink(title: string, note?: string) {
   const url = firstUrl(note || "");
   if (!url) return title;
   return (
-    <a href={url} target="_blank" rel="noopener noreferrer" className="underline decoration-neutral-500 hover:decoration-emerald-500">
+    <a href={url} target="_blank" rel="noopener noreferrer" className="link-accent">
       {title}
     </a>
   );
@@ -3178,7 +3244,7 @@ function autolink(text: string) {
     <>
       {parts.map((p, i) =>
         /^https?:\/\//i.test(p) ? (
-          <a key={i} href={p} target="_blank" rel="noopener noreferrer" className="underline decoration-neutral-500 hover:decoration-emerald-500 break-words">
+          <a key={i} href={p} target="_blank" rel="noopener noreferrer" className="link-accent break-words">
             {p}
           </a>
         ) : (
@@ -3244,13 +3310,16 @@ function UrlPreview({ text }: { text: string }) {
       href={data.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="block w-full border border-neutral-700 rounded-lg overflow-hidden mt-1"
+      className="mt-2 block w-full overflow-hidden rounded-2xl border border-surface bg-surface-muted"
     >
       {data.image && <img src={data.image} className="w-full h-40 object-cover" />}
-      <div className="p-2 text-xs">
-        <div className="font-medium truncate">{data.title}</div>
+      <div className="space-y-1 p-3 text-xs text-secondary">
+        <div className="truncate font-medium text-primary">{data.title}</div>
         {data.description && (
-          <div className="text-neutral-400 overflow-hidden text-ellipsis" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+          <div
+            className="text-tertiary overflow-hidden text-ellipsis"
+            style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}
+          >
             {data.description}
           </div>
         )}
@@ -3265,7 +3334,7 @@ function TaskMedia({ task }: { task: Task }) {
     <>
       {noteText && (
         <div
-          className="text-xs text-neutral-400 mt-0.5 break-words"
+          className="mt-1 text-xs text-secondary break-words"
           style={{ display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}
         >
           {autolink(noteText)}
@@ -3274,7 +3343,7 @@ function TaskMedia({ task }: { task: Task }) {
       {task.images?.length ? (
         <div className="mt-1.5 space-y-2">
           {task.images.map((img, i) => (
-            <img key={i} src={img} className="max-h-40 w-full object-contain rounded-lg" />
+            <img key={i} src={img} className="max-h-40 w-full rounded-2xl object-contain" />
           ))}
         </div>
       ) : null}
@@ -3335,12 +3404,12 @@ const DroppableColumn = React.forwardRef<HTMLDivElement, {
     <div
       ref={setRef}
       data-column-title={title}
-      className={`rounded-2xl bg-neutral-900/60 border border-neutral-800 p-3 w-[288px] shrink-0 ${scrollable ? 'h-[calc(100vh-13rem)] flex flex-col' : 'min-h-[288px]'}`}
+      className={`surface-panel w-[288px] shrink-0 p-4 ${scrollable ? 'flex h-[calc(100vh-12rem)] flex-col' : 'min-h-[320px]'}`}
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
     >
       <div
-        className={`font-semibold mb-2 ${onTitleClick ? 'cursor-pointer hover:underline' : ''}`}
+        className={`mb-3 text-sm font-semibold tracking-wide text-secondary ${onTitleClick ? 'cursor-pointer hover:text-primary transition-colors' : ''}`}
         onClick={onTitleClick}
         role={onTitleClick ? 'button' : undefined}
         tabIndex={onTitleClick ? 0 : undefined}
@@ -3383,11 +3452,51 @@ function Card({
   onDragEnd: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
+  const [isStacked, setIsStacked] = useState(false);
+  const iconSizeStyle = useMemo(() => ({ '--icon-size': '2.2rem' } as React.CSSProperties), []);
+
+  const hasDetail = !!task.note?.trim() || (task.images && task.images.length > 0) || (task.subtasks && task.subtasks.length > 0) || !!task.bounty;
+
+  useEffect(() => {
+    const el = titleRef.current;
+    if (!el) return;
+
+    let raf = 0;
+    const compute = () => {
+      const styles = window.getComputedStyle(el);
+      const lineHeight = parseFloat(styles.lineHeight || '0');
+      if (!lineHeight) {
+        setIsStacked(false);
+        return;
+      }
+      const lines = Math.round(el.scrollHeight / lineHeight);
+      setIsStacked(lines > 1);
+    };
+
+    compute();
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(compute);
+      });
+      observer.observe(el);
+    }
+
+    window.addEventListener('resize', compute);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', compute);
+      cancelAnimationFrame(raf);
+    };
+  }, [task.title, task.note, task.images?.length, task.subtasks?.length]);
 
   function handleDragStart(e: React.DragEvent) {
-    e.dataTransfer.setData("text/task-id", task.id);
-    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData('text/task-id', task.id);
+    e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setDragImage(e.currentTarget as HTMLElement, 0, 0);
     onDragStart(task.id);
   }
@@ -3399,20 +3508,45 @@ function Card({
   }
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
-    const dragId = e.dataTransfer.getData("text/task-id");
+    const dragId = e.dataTransfer.getData('text/task-id');
     if (dragId) onDropBefore(dragId);
     setOverBefore(false);
     onDragEnd();
   }
-  function handleDragLeave() { setOverBefore(false); }
-  function handleDragEnd() { onDragEnd(); }
+  function handleDragLeave() {
+    setOverBefore(false);
+  }
+  function handleDragEnd() {
+    onDragEnd();
+  }
+
+  function handleCompleteClick(e: React.MouseEvent<HTMLButtonElement>) {
+    const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+    if (!task.completed) {
+      try { onFlyToCompleted(rect); } catch {}
+    }
+    onComplete(rect);
+  }
+
+  const bountyClass = task.bounty
+    ? task.bounty.state === 'unlocked'
+      ? 'chip chip-accent'
+      : task.bounty.state === 'revoked'
+        ? 'chip chip-danger'
+        : task.bounty.state === 'claimed'
+          ? 'chip chip-warn'
+          : 'chip'
+    : '';
+
+  const stackedForm = isStacked || hasDetail;
 
   return (
     <div
       ref={cardRef}
-      className="task group relative px-2 rounded-xl bg-neutral-800 border border-neutral-700 select-none"
-      // Allow horizontal swiping across columns on mobile
-      style={{ touchAction: "auto" }}
+      className="task-card group relative select-none"
+      data-state={task.completed ? 'completed' : undefined}
+      data-form={stackedForm ? 'stacked' : 'pill'}
+      style={{ touchAction: 'auto' }}
       draggable
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
@@ -3420,88 +3554,95 @@ function Card({
       onDrop={handleDrop}
       onDragLeave={handleDragLeave}
     >
-      {/* insert-before indicator */}
       {overBefore && (
-        <div className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] bg-emerald-500 rounded-full" />
+        <div
+          className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] rounded-full"
+          style={{ background: 'var(--accent)' }}
+        />
       )}
 
-      <div className="flex items-center gap-2">
-        {task.completed ? (
-          <button
-            onClick={(e) => {
-              const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-              onComplete(rect);
-            }}
-            aria-label="Mark incomplete"
-            title="Mark incomplete"
-            className="flex items-center justify-center w-8 h-8 rounded-full text-emerald-500"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none">
-              <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
-              <path d="M8 12l2.5 2.5L16 9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <div className="flex items-start gap-3">
+        <button
+          onClick={handleCompleteClick}
+          aria-label={task.completed ? 'Mark incomplete' : 'Complete task'}
+          title={task.completed ? 'Mark incomplete' : 'Mark complete'}
+          className="icon-button pressable flex-shrink-0"
+          style={iconSizeStyle}
+          data-active={task.completed}
+        >
+          {task.completed ? (
+            <svg width="18" height="18" viewBox="0 0 24 24" className="pointer-events-none">
+              <path
+                d="M20.285 6.707l-10.09 10.09-4.48-4.48"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
-          </button>
-        ) : (
-          <button
-            onClick={(e) => {
-              const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-              try { onFlyToCompleted(rect); } catch {}
-              onComplete(rect);
-            }}
-            aria-label="Complete task"
-            title="Mark complete"
-            className="flex items-center justify-center w-8 h-8 rounded-full text-neutral-300 hover:text-emerald-500 transition"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" className="pointer-events-none">
-              <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 24 24" className="pointer-events-none">
+              <path
+                d="M6 12l3.5 3.5L18 7"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.9}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
-          </button>
-        )}
+          )}
+        </button>
 
-        {/* Title (hyperlinked if note contains a URL) */}
-        <div className="flex-1 min-w-0 cursor-pointer" onClick={onEdit}>
-          <div className={`text-sm font-medium leading-[1.15] break-words ${task.completed ? 'line-through text-neutral-400' : ''}`}>
+        <div className="flex-1 min-w-0 cursor-pointer space-y-1" onClick={onEdit}>
+          <div
+            ref={titleRef}
+            className={`task-card__title ${task.completed ? 'task-card__title--done' : ''}`}
+          >
             {renderTitleWithLink(task.title, task.note)}
           </div>
           {showStreaks &&
             task.recurrence &&
-            (task.recurrence.type === "daily" || task.recurrence.type === "weekly") &&
-            typeof task.streak === "number" && task.streak > 0 && (
-              <div className="text-xs text-amber-400 mt-0.5 flex items-center gap-1">
-                <span>🔥</span>
+            (task.recurrence.type === 'daily' || task.recurrence.type === 'weekly') &&
+            typeof task.streak === 'number' && task.streak > 0 && (
+              <div className="flex items-center gap-1 text-xs text-secondary">
+                <span role="img" aria-hidden>
+                  🔥
+                </span>
                 <span>{task.streak}</span>
               </div>
             )}
         </div>
-
       </div>
 
       <TaskMedia task={task} />
+
       {task.subtasks?.length ? (
-        <ul className="mt-1 space-y-1">
+        <ul className="mt-2 space-y-1.5 text-xs text-secondary">
           {task.subtasks.map((st) => (
-            <li key={st.id} className="flex items-center gap-2 text-xs">
+            <li key={st.id} className="flex items-center gap-2">
               <input
                 type="checkbox"
                 checked={!!st.completed}
                 onChange={() => onToggleSubtask(st.id)}
-                className="accent-emerald-600"
               />
-              <span className={st.completed ? "line-through text-neutral-400" : ""}>{st.title}</span>
+              <span className={st.completed ? 'line-through text-tertiary' : 'text-secondary'}>{st.title}</span>
             </li>
           ))}
         </ul>
       ) : null}
+
       {task.completed && task.bounty && task.bounty.state !== 'claimed' && (
-        <div className="mt-1 text-xs text-emerald-400">
+        <div className="mt-2 text-xs text-secondary">
           {task.bounty.state === 'unlocked' ? 'Bounty unlocked!' : 'Complete! - Unlock bounty'}
         </div>
       )}
-      {/* Bounty badge */}
+
       {task.bounty && (
-        <div className="mt-1">
-          <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>
-            Bounty {typeof task.bounty.amount==='number' ? `• ${task.bounty.amount} sats` : ''} • {task.bounty.state}
+        <div className="mt-2">
+          <span className={bountyClass}>
+            Bounty {typeof task.bounty.amount === 'number' ? `• ${task.bounty.amount} sats` : ''} • {task.bounty.state}
           </span>
         </div>
       )}
@@ -3513,11 +3654,20 @@ function Card({
 function IconButton({
   children, onClick, label, intent, buttonRef
 }: React.PropsWithChildren<{ onClick: ()=>void; label: string; intent?: "danger"|"success"; buttonRef?: React.Ref<HTMLButtonElement> }>) {
-  const base = "w-9 h-9 rounded-full inline-flex items-center justify-center text-sm border border-transparent bg-neutral-700/40 hover:bg-neutral-700/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500";
-  const danger = " border-rose-700";
-  const success = " bg-emerald-700/30 hover:bg-emerald-700/50";
-  const cls = base + (intent==="danger" ? danger : intent==="success" ? success : "");
-  return <button ref={buttonRef} aria-label={label} title={label} className={cls} onClick={onClick}>{children}</button>;
+  const cls = `icon-button pressable ${intent === 'danger' ? 'icon-button--danger' : intent === 'success' ? 'icon-button--success' : ''}`;
+  const style = { '--icon-size': '2.35rem' } as React.CSSProperties;
+  return (
+    <button
+      ref={buttonRef}
+      aria-label={label}
+      title={label}
+      className={cls}
+      style={style}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
 }
 
 /* ---------- Recurrence helpers & UI ---------- */
@@ -3627,7 +3777,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
       title="Edit task"
       actions={
         <button
-          className="pressable px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500"
+          className="accent-button button-sm pressable"
           onClick={() => save()}
         >
           Save
@@ -3636,9 +3786,9 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
     >
       <div className="space-y-4">
         <input value={title} onChange={e=>setTitle(e.target.value)}
-               className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="Title"/>
+               className="pill-input w-full" placeholder="Title"/>
         <textarea value={note} onChange={e=>setNote(e.target.value)} onPaste={handlePaste}
-                  className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" rows={3}
+                  className="pill-textarea w-full" rows={3}
                   placeholder="Notes (optional)"/>
         {images.length > 0 && (
           <div className="flex flex-wrap gap-2">
@@ -3661,10 +3811,10 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                 type="checkbox"
                 checked={!!st.completed}
                 onChange={() => setSubtasks(prev => prev.map(s => s.id === st.id ? { ...s, completed: !s.completed } : s))}
-                className="accent-emerald-600"
+               
               />
               <input
-                className="flex-1 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+                className="pill-input flex-1 text-sm"
                 value={st.title}
                 onChange={(e) => setSubtasks(prev => prev.map(s => s.id === st.id ? { ...s, title: e.target.value } : s))}
                 placeholder="Subtask"
@@ -3685,11 +3835,11 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
               onChange={e=>setNewSubtask(e.target.value)}
               onKeyDown={e=>{ if (e.key === "Enter") { e.preventDefault(); addSubtask(true); } }}
               placeholder="New subtask…"
-              className="flex-1 px-2 py-1 rounded-xl bg-neutral-900 border border-neutral-800 text-sm"
+              className="pill-input flex-1 text-sm"
             />
             <button
               type="button"
-              className="text-sm px-2 py-1 rounded bg-neutral-800"
+              className="ghost-button button-sm pressable"
               onClick={() => addSubtask()}
             >
               Add
@@ -3704,36 +3854,36 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
             type="date"
             value={scheduledDate}
             onChange={e=>setScheduledDate(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+            className="pill-input w-full"
             title="Scheduled date"
           />
         </div>
 
         {/* Recurrence section */}
-        <div className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+        <div className="wallet-section space-y-3">
           <div className="flex items-center gap-2">
             <div className="text-sm font-medium">Recurrence</div>
-            <div className="ml-auto text-xs text-neutral-400">{labelOf(rule)}</div>
+            <div className="ml-auto text-xs text-secondary">{labelOf(rule)}</div>
           </div>
           <div className="mt-2 flex gap-2 flex-wrap">
-            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule(R_NONE)}>None</button>
-            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "daily" })}>Daily</button>
-            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "weekly", days: [1,2,3,4,5] })}>Mon–Fri</button>
-            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setRule({ type: "weekly", days: [0,6] })}>Weekends</button>
-            <button className="pressable ml-auto px-3 py-2 rounded-xl bg-neutral-800" onClick={() => setShowAdvanced(true)} title="Advanced recurrence…">Advanced…</button>
+            <button className="ghost-button button-sm pressable" onClick={() => setRule(R_NONE)}>None</button>
+            <button className="ghost-button button-sm pressable" onClick={() => setRule({ type: "daily" })}>Daily</button>
+            <button className="ghost-button button-sm pressable" onClick={() => setRule({ type: "weekly", days: [1,2,3,4,5] })}>Mon–Fri</button>
+            <button className="ghost-button button-sm pressable" onClick={() => setRule({ type: "weekly", days: [0,6] })}>Weekends</button>
+            <button className="ghost-button button-sm pressable ml-auto" onClick={() => setShowAdvanced(true)} title="Advanced recurrence…">Advanced…</button>
           </div>
         </div>
 
         {/* Bounty (ecash) */}
-        <div className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+        <div className="wallet-section space-y-3">
           <div className="flex items-center gap-2">
             <div className="text-sm font-medium">Bounty (ecash)</div>
             {task.bounty && (
               <div className="ml-auto flex items-center gap-2 text-[0.6875rem]">
-                <span className={`px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-neutral-700/30 border-neutral-600'}`}>{task.bounty.state}</span>
-                {task.createdBy && (window as any).nostrPK === task.createdBy && <span className="px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700" title="You created the task">owner: you</span>}
-                {task.bounty.sender && (window as any).nostrPK === task.bounty.sender && <span className="px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700" title="You funded the bounty">funder: you</span>}
-                {task.bounty.receiver && (window as any).nostrPK === task.bounty.receiver && <span className="px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700" title="You are the recipient">recipient: you</span>}
+                <span className={`px-2 py-0.5 rounded-full border ${task.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : task.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : task.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-surface-muted border-surface'}`}>{task.bounty.state}</span>
+                {task.createdBy && (window as any).nostrPK === task.createdBy && <span className="px-2 py-0.5 rounded-full bg-surface-muted border border-surface" title="You created the task">owner: you</span>}
+                {task.bounty.sender && (window as any).nostrPK === task.bounty.sender && <span className="px-2 py-0.5 rounded-full bg-surface-muted border border-surface" title="You funded the bounty">funder: you</span>}
+                {task.bounty.receiver && (window as any).nostrPK === task.bounty.receiver && <span className="px-2 py-0.5 rounded-full bg-surface-muted border border-surface" title="You are the recipient">recipient: you</span>}
               </div>
             )}
           </div>
@@ -3743,8 +3893,8 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                 <input type="number" min={1} value={bountyAmount as number || ""}
                        onChange={(e)=>setBountyAmount(e.target.value ? parseInt(e.target.value,10) : "")}
                        placeholder="Amount (sats)"
-                       className="w-40 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                <button className="pressable px-3 py-2 rounded-xl bg-neutral-800"
+                       className="pill-input w-40"/>
+                <button className="accent-button button-sm pressable"
                         onClick={async () => {
                           if (typeof bountyAmount !== 'number' || bountyAmount <= 0) return;
                           try {
@@ -3804,7 +3954,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                 >Attach</button>
               </div>
               <div className="flex flex-col gap-2">
-                <label className="flex items-center gap-2 text-xs text-neutral-300">
+                <label className="flex items-center gap-2 text-xs text-secondary">
                   <input
                     type="checkbox"
                     checked={encryptWhenAttach && !lockToRecipient}
@@ -3814,7 +3964,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                   Hide/encrypt token until I reveal (uses your local key)
                 </label>
                 <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-2 text-xs text-neutral-300">
+                  <label className="flex items-center gap-2 text-xs text-secondary">
                     <input
                       type="checkbox"
                       checked={lockToRecipient}
@@ -3824,7 +3974,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                   </label>
                   {task.createdBy && (
                     <button
-                      className="px-2 py-1 rounded-lg bg-neutral-800 text-xs"
+                      className="ghost-button button-sm pressable"
                       onClick={()=>{ setRecipientInput(task.createdBy!); setLockToRecipient(true); setEncryptWhenAttach(false);} }
                       title="Use task owner"
                     >Use owner</button>
@@ -3835,33 +3985,33 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                   placeholder="npub1... or 64-hex pubkey"
                   value={recipientInput}
                   onChange={(e)=> setRecipientInput(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-xs"
+                  className="pill-input w-full text-xs"
                   disabled={!lockToRecipient}
                 />
               </div>
             </div>
           ) : (
             <div className="mt-2 space-y-2">
-              <div className="text-xs text-neutral-400">Amount</div>
+              <div className="text-xs text-secondary">Amount</div>
               <input type="number" min={1} value={(bountyAmount as number) || task.bounty?.amount || ""}
                      onChange={(e)=>setBountyAmount(e.target.value ? parseInt(e.target.value,10) : "")}
-                     className="w-40 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-              <div className="text-xs text-neutral-400">Token</div>
+                     className="pill-input w-40"/>
+              <div className="text-xs text-secondary">Token</div>
               {task.bounty.enc && !task.bounty.token ? (
-                <div className="rounded-lg border border-neutral-800 p-2 text-xs text-neutral-300 bg-neutral-900/60">
+                <div className="bg-surface-muted border border-surface rounded-2xl p-3 text-xs text-secondary">
                   {((task.bounty.enc as any).alg === 'aes-gcm-256')
                     ? 'Hidden (encrypted by funder). Only the funder can reveal.'
                     : 'Locked to recipient\'s Nostr key (nip04). Only the recipient can decrypt.'}
                 </div>
               ) : (
                 <textarea readOnly value={task.bounty.token || ""}
-                          className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" rows={3}/>
+                          className="pill-textarea w-full" rows={3}/>
               )}
               <div className="flex gap-2 flex-wrap">
                 {task.bounty.token && (
                   task.bounty.state === 'unlocked' ? (
                     <button
-                      className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                      className="accent-button button-sm pressable"
                       onClick={async (e) => {
                         const fromRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                         try {
@@ -3892,7 +4042,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                     </button>
                   ) : (
                     <button
-                      className="pressable px-3 py-2 rounded-xl bg-neutral-800"
+                      className="ghost-button button-sm pressable"
                       onClick={async () => { try { await navigator.clipboard?.writeText(task.bounty!.token!); } catch {} }}
                     >
                       Copy token
@@ -3903,7 +4053,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                   ((task.bounty.enc as any).alg === 'aes-gcm-256' && task.bounty.sender === (window as any).nostrPK) ||
                   ((task.bounty.enc as any).alg === 'nip04' && task.bounty.receiver === (window as any).nostrPK)
                 ) && (
-                  <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                  <button className="accent-button button-sm pressable"
                           onClick={async () => {
                             try {
                               await revealBounty(task.id);
@@ -3911,7 +4061,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                           }}>Reveal (decrypt)</button>
                 )}
                 <button
-                  className={`px-3 py-2 rounded-xl ${task.bounty.token ? 'bg-neutral-800' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}`}
+                  className={`ghost-button button-sm pressable ${task.bounty.token ? '' : 'opacity-50 cursor-not-allowed'}`}
                   disabled={!task.bounty.token}
                   onClick={() => {
                     if (!task.bounty.token) return;
@@ -3923,7 +4073,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                 </button>
                 {task.bounty.state === 'locked' && (
                   <>
-                    <button className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                    <button className="accent-button button-sm pressable"
                             onClick={() => {
                               // Placeholder unlock: trust user has reissued unlocked token externally
                               const newTok = prompt('Paste unlocked token (after you reissued in your wallet):');
@@ -3979,12 +4129,12 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
               : "(not set)";
             const canCopy = !!display;
             return (
-              <div className="flex items-center justify-between text-[0.6875rem] text-neutral-400">
+              <div className="flex items-center justify-between text-[0.6875rem] text-secondary">
                 <div>
-                  Created by: <span className="font-mono text-neutral-300">{short}</span>
+                  Created by: <span className="font-mono text-secondary">{short}</span>
                 </div>
                 <button
-                  className={`px-2 py-1 rounded-lg bg-neutral-800 ${canCopy ? '' : 'opacity-50 cursor-not-allowed'} text-xs`}
+                  className={`ghost-button button-sm pressable ${canCopy ? '' : 'opacity-50 cursor-not-allowed'}`}
                   title={canCopy ? 'Copy creator key (hex)' : 'No key to copy'}
                   onClick={async () => { if (canCopy) { try { await navigator.clipboard?.writeText(display); } catch {} } }}
                   disabled={!canCopy}
@@ -4019,12 +4169,12 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                 : "(not set)";
               const canCopy = !!display;
               return (
-                <div className="flex items-center justify-between text-[0.6875rem] text-neutral-400">
+                <div className="flex items-center justify-between text-[0.6875rem] text-secondary">
                   <div>
-                    Completed by: <span className="font-mono text-neutral-300">{short}</span>
+                    Completed by: <span className="font-mono text-secondary">{short}</span>
                   </div>
                   <button
-                    className={`px-2 py-1 rounded-lg bg-neutral-800 ${canCopy ? '' : 'opacity-50 cursor-not-allowed'} text-xs`}
+                    className={`ghost-button button-sm pressable ${canCopy ? '' : 'opacity-50 cursor-not-allowed'}`}
                     title={canCopy ? 'Copy completer key (hex)' : 'No key to copy'}
                     onClick={async () => { if (canCopy) { try { await navigator.clipboard?.writeText(display); } catch {} } }}
                     disabled={!canCopy}
@@ -4040,8 +4190,8 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
         <div className="pt-2 flex justify-between">
           <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
           <div className="flex gap-2">
-            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={copyCurrent}>Copy</button>
-            <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={onCancel}>Cancel</button>
+            <button className="ghost-button button-sm pressable" onClick={copyCurrent}>Copy</button>
+            <button className="ghost-button button-sm pressable" onClick={onCancel}>Cancel</button>
           </div>
         </div>
       </div>
@@ -4080,13 +4230,13 @@ function RecurrenceModal({
       actions={
         <>
           <button
-            className="pressable px-3 py-1 rounded bg-neutral-800"
+            className="ghost-button button-sm pressable"
             onClick={onClose}
           >
             Cancel
           </button>
           <button
-            className="pressable px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500"
+            className="accent-button button-sm pressable"
             onClick={() =>
               onApply(
                 value,
@@ -4107,7 +4257,7 @@ function RecurrenceModal({
             type="date"
             value={schedule}
             onChange={(e) => setSchedule(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+            className="pill-input w-full"
             title="Scheduled date"
           />
         </div>
@@ -4152,67 +4302,74 @@ function RecurrencePicker({ value, onChange }: { value: Recurrence; onChange: (r
   function applyMonthly() { onChange(withEnd({ type:"monthlyDay", day: Math.min(28, Math.max(1, monthDay)) })); }
 
   return (
-    <div className="space-y-5">
-      <section>
-        <div className="text-sm font-medium mb-2">Preset</div>
-        <div className="flex gap-2">
-          <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={setNone}>None</button>
-          <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={setDaily}>Daily</button>
+    <div className="space-y-4">
+      <div className="wallet-section space-y-3">
+        <div className="text-sm font-medium">Preset</div>
+        <div className="flex flex-wrap gap-2">
+          <button className="ghost-button button-sm pressable" onClick={setNone}>None</button>
+          <button className="ghost-button button-sm pressable" onClick={setDaily}>Daily</button>
         </div>
-      </section>
+      </div>
 
-      <section>
-        <div className="text-sm font-medium mb-2">Weekly</div>
-        <div className="grid grid-cols-3 gap-2">
+      <div className="wallet-section space-y-3">
+        <div className="text-sm font-medium">Weekly</div>
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-7">
           {Array.from({length:7},(_,i)=>i as Weekday).map(d=>{
             const on = weekly.has(d);
+            const cls = on ? 'accent-button button-sm pressable w-full justify-center' : 'ghost-button button-sm pressable w-full justify-center';
             return (
-              <button key={d} onClick={()=>toggleDay(d)}
-                      className={`px-2 py-2 rounded-xl ${on ? "bg-emerald-600":"bg-neutral-800"}`}>
+              <button key={d} onClick={()=>toggleDay(d)} className={cls}>
                 {WD_SHORT[d]}
               </button>
             );
           })}
         </div>
-      </section>
+      </div>
 
-      <section>
-        <div className="text-sm font-medium mb-2">Every N</div>
-        <div className="flex items-center gap-2">
-          <input type="number" min={1} max={30} value={everyN}
-                 onChange={e=>setEveryN(parseInt(e.target.value || "1",10))}
-                 className="w-20 px-2 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
+      <div className="wallet-section space-y-3">
+        <div className="text-sm font-medium">Every N</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={30}
+            value={everyN}
+            onChange={e=>setEveryN(parseInt(e.target.value || "1",10))}
+            className="pill-input w-24 text-center"
+          />
           <select value={unit} onChange={e=>setUnit(e.target.value as "day"|"week")}
-                  className="px-2 py-2 rounded-xl bg-neutral-900 border border-neutral-800">
+                  className="pill-select w-28">
             <option value="day">Days</option>
             <option value="week">Weeks</option>
           </select>
-          <button className="ml-2 px-3 py-2 rounded-xl bg-neutral-800" onClick={applyEvery}>Apply</button>
+          <button className="accent-button button-sm pressable" onClick={applyEvery}>Apply</button>
         </div>
-      </section>
+      </div>
 
-      <section>
-        <div className="text-sm font-medium mb-2">Monthly</div>
+      <div className="wallet-section space-y-3">
+        <div className="text-sm font-medium">Monthly</div>
         <div className="flex items-center gap-2">
-          <select value={monthDay} onChange={e=>setMonthDay(parseInt(e.target.value,10))}
-                  className="px-2 py-2 rounded-xl bg-neutral-900 border border-neutral-800" size={5}>
-            {Array.from({length:28},(_,i)=>i+1).map(d=>(
-              <option key={d} value={d}>Day {d}</option>
-            ))}
-          </select>
-          <button className="ml-2 px-3 py-2 rounded-xl bg-neutral-800" onClick={applyMonthly}>Apply</button>
+          <input
+            type="number"
+            min={1}
+            max={28}
+            value={monthDay}
+            onChange={e=>setMonthDay(parseInt(e.target.value || '1',10))}
+            className="pill-input w-24 text-center"
+          />
+          <button className="accent-button button-sm pressable" onClick={applyMonthly}>Apply</button>
         </div>
-      </section>
+      </div>
 
-      <section>
-        <div className="text-sm font-medium mb-2">End date</div>
+      <div className="wallet-section space-y-3">
+        <div className="text-sm font-medium">End date</div>
         <input
           type="date"
           value={end}
           onChange={e=>{ const v = e.target.value; setEnd(v); onChange({ ...value, untilISO: v ? new Date(v).toISOString() : undefined }); }}
-          className="px-2 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+          className="pill-input w-full"
         />
-      </section>
+      </div>
     </div>
   );
 }
@@ -4220,20 +4377,24 @@ function RecurrencePicker({ value, onChange }: { value: Recurrence; onChange: (r
 /* Generic modal */
 function Modal({ children, onClose, title, actions, showClose = true }: React.PropsWithChildren<{ onClose: ()=>void; title?: React.ReactNode; actions?: React.ReactNode; showClose?: boolean }>) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-[min(45rem,92vw)] max-h-[80vh] overflow-y-auto overflow-x-hidden bg-neutral-900 border border-neutral-700 rounded-2xl p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="text-lg font-semibold">{title}</div>
-          <div className="ml-auto flex items-center gap-2">
-            {actions}
-            {showClose && (
-              <button className="pressable px-3 py-1 rounded bg-neutral-800" onClick={onClose}>
-                Close
-              </button>
+    <div className="modal-backdrop">
+      <div className="modal-panel">
+        {(title || actions || showClose) && (
+          <div className="modal-panel__header">
+            {title && <div className="text-lg font-semibold text-primary">{title}</div>}
+            {(actions || showClose) && (
+              <div className="ml-auto flex items-center gap-2">
+                {actions}
+                {showClose && (
+                  <button className="ghost-button button-sm pressable" onClick={onClose}>
+                    Close
+                  </button>
+                )}
+              </div>
             )}
           </div>
-        </div>
-        {children}
+        )}
+        <div className="modal-panel__body">{children}</div>
       </div>
     </div>
   );
@@ -4242,14 +4403,13 @@ function Modal({ children, onClose, title, actions, showClose = true }: React.Pr
 /* Side drawer (right) */
 function SideDrawer({ title, onClose, children }: React.PropsWithChildren<{ title?: string; onClose: ()=>void }>) {
   return (
-    <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="absolute right-0 top-0 bottom-0 w-[min(23.75rem,92vw)] bg-neutral-900 border-l border-neutral-800 p-4 shadow-2xl">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="text-lg font-semibold">{title}</div>
-          <button className="pressable ml-auto px-3 py-1 rounded bg-neutral-800" onClick={onClose}>Close</button>
+    <div className="drawer-backdrop" onClick={onClose}>
+      <div className="drawer-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="drawer-panel__header">
+          {title && <div className="text-lg font-semibold text-primary">{title}</div>}
+          <button className="ghost-button button-sm pressable ml-auto" onClick={onClose}>Close</button>
         </div>
-        <div className="overflow-y-auto max-h-[calc(100vh-80px)]">{children}</div>
+        {children}
       </div>
     </div>
   );
@@ -4318,6 +4478,7 @@ function SettingsModal({
   const [donateComment, setDonateComment] = useState("");
   const [donateState, setDonateState] = useState<"idle" | "sending" | "done" | "error">("idle");
   const [donateMsg, setDonateMsg] = useState("");
+  const pillButtonClass = useCallback((active: boolean) => `${active ? "accent-button" : "ghost-button"} pressable`, []);
 
   useEffect(() => {
     const listEl = boardListRef.current;
@@ -4655,7 +4816,7 @@ function SettingsModal({
   function HiddenBoardIcon() {
     return (
       <svg
-        className="w-4 h-4 text-neutral-400"
+        className="w-4 h-4 text-secondary"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -4715,11 +4876,11 @@ function SettingsModal({
       onPrimaryAction();
     }
     const buttonClasses = hidden
-      ? "flex-1 text-left min-w-0 text-neutral-300 hover:text-neutral-100 transition-colors"
+      ? "flex-1 text-left min-w-0 text-secondary hover:text-primary transition-colors"
       : "flex-1 text-left min-w-0";
     return (
       <li
-        className="relative p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2"
+        className="relative p-2 rounded-lg bg-surface-muted border border-surface flex items-center gap-2"
         draggable
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
@@ -4728,7 +4889,7 @@ function SettingsModal({
         onDragEnd={handleDragEnd}
       >
         {overBefore && (
-          <div className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] bg-emerald-500 rounded-full" />
+          <div className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] rounded-full" style={{ background: "var(--accent)" }} />
         )}
         <button type="button" className={buttonClasses} onClick={handleClick}>
           <span className="flex items-center gap-2">
@@ -4744,7 +4905,7 @@ function SettingsModal({
         {hidden && onEdit && (
           <button
             type="button"
-            className="px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600"
+            className="ghost-button button-sm pressable"
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -4780,7 +4941,7 @@ function SettingsModal({
     function handleDragLeave() { setOverBefore(false); }
     return (
       <li
-        className="relative p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2"
+        className="relative p-2 rounded-lg bg-surface-muted border border-surface flex items-center gap-2"
         draggable
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
@@ -4788,12 +4949,12 @@ function SettingsModal({
         onDragLeave={handleDragLeave}
       >
         {overBefore && (
-          <div className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] bg-emerald-500 rounded-full" />
+          <div className="absolute -top-[0.125rem] left-0 right-0 h-[0.1875rem] rounded-full" style={{ background: "var(--accent)" }} />
         )}
         <div className="flex-1">{column.name}</div>
         <div className="flex gap-1">
-          <button className="px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600" onClick={()=>renameColumn(boardId, column.id)}>Rename</button>
-          <button className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteColumn(boardId, column.id)}>Delete</button>
+          <button className="ghost-button button-sm pressable" onClick={()=>renameColumn(boardId, column.id)}>Rename</button>
+          <button className="ghost-button button-sm pressable text-rose-400" onClick={()=>deleteColumn(boardId, column.id)}>Delete</button>
         </div>
       </li>
     );
@@ -4835,7 +4996,7 @@ function SettingsModal({
       <div className="space-y-6">
 
         {/* Boards & Columns */}
-        <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+        <section className="wallet-section space-y-3">
           <div className="flex items-center gap-2 mb-3">
             <div className="text-sm font-medium">Boards & Lists</div>
           </div>
@@ -4860,17 +5021,17 @@ function SettingsModal({
               value={newBoardName}
               onChange={e=>setNewBoardName(e.target.value)}
               placeholder="Board name or ID"
-              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              className="pill-input flex-1 min-w-0"
             />
             <button
-              className="pressable px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 shrink-0"
+              className="accent-button pressable shrink-0"
               onClick={addBoard}
             >
               Create/Join
             </button>
           </div>
           <button
-            className={`pressable mt-2 px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 transition ${archiveDropActive ? "ring-2 ring-emerald-500" : ""}`}
+            className={`pressable mt-2 px-3 py-2 rounded-xl bg-surface-muted transition ${archiveDropActive ? "ring-2 ring-emerald-500" : ""}`}
             onClick={() => setShowArchivedBoards(true)}
             onDragEnter={handleArchiveButtonDragEnter}
             onDragOver={handleArchiveButtonDragOver}
@@ -4882,12 +5043,12 @@ function SettingsModal({
         </section>
 
         {/* View */}
-        <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+        <section className="wallet-section space-y-3">
           <div className="flex items-center gap-2 mb-3">
             <div className="text-sm font-medium">View</div>
             <div className="ml-auto" />
             <button
-              className="px-3 py-1 rounded-lg bg-neutral-800 text-xs"
+              className="ghost-button button-sm pressable"
               onClick={() => setShowViewAdvanced((v) => !v)}
             >
               {showViewAdvanced ? "Hide advanced" : "Advanced"}
@@ -4897,107 +5058,100 @@ function SettingsModal({
             <div>
               <div className="text-sm font-medium mb-2">Theme</div>
               <div className="flex gap-2">
-                <button className={`px-3 py-2 rounded-xl ${settings.theme === "system" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "system" })}>System</button>
-                <button className={`px-3 py-2 rounded-xl ${settings.theme === "light" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "light" })}>Light</button>
-                <button className={`px-3 py-2 rounded-xl ${settings.theme === "dark" ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ theme: "dark" })}>Dark</button>
+                <button className={pillButtonClass(settings.theme === "system")} onClick={() => setSettings({ theme: "system" })}>System</button>
+                <button className={pillButtonClass(settings.theme === "light")} onClick={() => setSettings({ theme: "light" })}>Light</button>
+                <button className={pillButtonClass(settings.theme === "dark")} onClick={() => setSettings({ theme: "dark" })}>Dark</button>
               </div>
             </div>
             <div>
               <div className="text-sm font-medium mb-2">Font size</div>
-              <div className="flex gap-2 flex-wrap">
-                <button
-                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize == null ? "bg-emerald-600" : "bg-neutral-800"}`}
-                  onClick={() => setSettings({ baseFontSize: null })}
-                >System</button>
-                <button
-                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 16 ? "bg-emerald-600" : "bg-neutral-800"}`}
-                  onClick={() => setSettings({ baseFontSize: 16 })}
-                >Small</button>
-                <button
-                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 18 ? "bg-emerald-600" : "bg-neutral-800"}`}
-                  onClick={() => setSettings({ baseFontSize: 18 })}
-                >Default</button>
-                <button
-                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 20 ? "bg-emerald-600" : "bg-neutral-800"}`}
-                  onClick={() => setSettings({ baseFontSize: 20 })}
-                >Large</button>
-                <button
-                  className={`px-3 py-2 rounded-xl ${settings.baseFontSize === 22 ? "bg-emerald-600" : "bg-neutral-800"}`}
-                  onClick={() => setSettings({ baseFontSize: 22 })}
-                >X-Large</button>
+              <div className="flex flex-wrap gap-2">
+                <button className={pillButtonClass(settings.baseFontSize == null)} onClick={() => setSettings({ baseFontSize: null })}>System</button>
+                <button className={pillButtonClass(settings.baseFontSize === 16)} onClick={() => setSettings({ baseFontSize: 16 })}>Small</button>
+                <button className={pillButtonClass(settings.baseFontSize === 18)} onClick={() => setSettings({ baseFontSize: 18 })}>Default</button>
+                <button className={pillButtonClass(settings.baseFontSize === 20)} onClick={() => setSettings({ baseFontSize: 20 })}>Large</button>
+                <button className={pillButtonClass(settings.baseFontSize === 22)} onClick={() => setSettings({ baseFontSize: 22 })}>X-Large</button>
               </div>
-              <div className="text-xs text-neutral-400 mt-2">Scales the entire UI. Defaults to a larger reading size.</div>
+              <div className="text-xs text-secondary mt-2">Scales the entire UI. Defaults to a larger reading size.</div>
             </div>
             <div>
               <div className="text-sm font-medium mb-2">Add new tasks to</div>
               <div className="flex gap-2">
-                <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'top' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'top' })}>Top</button>
-                <button className={`px-3 py-2 rounded-xl ${settings.newTaskPosition === 'bottom' ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ newTaskPosition: 'bottom' })}>Bottom</button>
+                <button className={pillButtonClass(settings.newTaskPosition === 'top')} onClick={() => setSettings({ newTaskPosition: 'top' })}>Top</button>
+                <button className={pillButtonClass(settings.newTaskPosition === 'bottom')} onClick={() => setSettings({ newTaskPosition: 'bottom' })}>Bottom</button>
               </div>
             </div>
             <div>
               <div className="text-sm font-medium mb-2">Add tasks within lists</div>
               <div className="flex gap-2">
-                <button className={`px-3 py-2 rounded-xl ${settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: true })}>Inline</button>
-                <button className={`px-3 py-2 rounded-xl ${!settings.inlineAdd ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ inlineAdd: false })}>Top bar</button>
+                <button className={pillButtonClass(settings.inlineAdd)} onClick={() => setSettings({ inlineAdd: true })}>Inline</button>
+                <button className={pillButtonClass(!settings.inlineAdd)} onClick={() => setSettings({ inlineAdd: false })}>Top bar</button>
               </div>
             </div>
           </div>
           {showViewAdvanced && (
             <div className="mt-4 border-t border-neutral-800 pt-4 space-y-4">
               <div>
+                <div className="text-sm font-medium mb-2">Accent color</div>
+                <div className="flex gap-2">
+                  <button className={pillButtonClass(settings.accent === 'green')} onClick={() => setSettings({ accent: 'green' })}>Mint green</button>
+                  <button className={pillButtonClass(settings.accent === 'blue')} onClick={() => setSettings({ accent: 'blue' })}>iMessage blue</button>
+                </div>
+                <div className="text-xs text-secondary mt-2">Switch the highlight color used across buttons, badges, and focus states.</div>
+              </div>
+              <div>
                 <div className="text-sm font-medium mb-2">Week starts on</div>
                 <div className="flex gap-2">
-                  <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 6 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 6 })}>Saturday</button>
-                  <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 0 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 0 })}>Sunday</button>
-                  <button className={`px-3 py-2 rounded-xl ${settings.weekStart === 1 ? "bg-emerald-600" : "bg-neutral-800"}`} onClick={() => setSettings({ weekStart: 1 })}>Monday</button>
+                  <button className={pillButtonClass(settings.weekStart === 6)} onClick={() => setSettings({ weekStart: 6 })}>Saturday</button>
+                  <button className={pillButtonClass(settings.weekStart === 0)} onClick={() => setSettings({ weekStart: 0 })}>Sunday</button>
+                  <button className={pillButtonClass(settings.weekStart === 1)} onClick={() => setSettings({ weekStart: 1 })}>Monday</button>
                 </div>
-                <div className="text-xs text-neutral-400 mt-2">Affects when weekly recurring tasks re-appear.</div>
+                <div className="text-xs text-secondary mt-2">Affects when weekly recurring tasks re-appear.</div>
               </div>
               <div>
                 <div className="text-sm font-medium mb-2">Show full week for recurring tasks</div>
                 <div className="flex gap-2">
                   <button
-                    className={`px-3 py-2 rounded-xl ${settings.showFullWeekRecurring ? "bg-emerald-600" : "bg-neutral-800"}`}
+                    className={pillButtonClass(settings.showFullWeekRecurring)}
                     onClick={() => setSettings({ showFullWeekRecurring: !settings.showFullWeekRecurring })}
                   >
                     {settings.showFullWeekRecurring ? "On" : "Off"}
                   </button>
                 </div>
-                <div className="text-xs text-neutral-400 mt-2">Display all occurrences for the current week at once.</div>
+                <div className="text-xs text-secondary mt-2">Display all occurrences for the current week at once.</div>
               </div>
               <div>
                 <div className="text-sm font-medium mb-2">Completed tab</div>
                 <div className="flex gap-2">
                   <button
-                    className={`px-3 py-2 rounded-xl ${settings.completedTab ? "bg-emerald-600" : "bg-neutral-800"}`}
+                    className={pillButtonClass(settings.completedTab)}
                     onClick={() => setSettings({ completedTab: !settings.completedTab })}
                   >
                     {settings.completedTab ? "On" : "Off"}
                   </button>
                 </div>
-                <div className="text-xs text-neutral-400 mt-2">Hide the completed tab and show a Clear completed button instead.</div>
+                <div className="text-xs text-secondary mt-2">Hide the completed tab and show a Clear completed button instead.</div>
               </div>
               <div>
                 <div className="text-sm font-medium mb-2">Streaks</div>
                 <div className="flex gap-2">
                   <button
-                    className={`px-3 py-2 rounded-xl ${settings.streaksEnabled ? "bg-emerald-600" : "bg-neutral-800"}`}
+                    className={pillButtonClass(settings.streaksEnabled)}
                     onClick={() => setSettings({ streaksEnabled: !settings.streaksEnabled })}
                   >
                     {settings.streaksEnabled ? "On" : "Off"}
                   </button>
                 </div>
-                <div className="text-xs text-neutral-400 mt-2">Track consecutive completions on recurring tasks.</div>
+                <div className="text-xs text-secondary mt-2">Track consecutive completions on recurring tasks.</div>
               </div>
               <div>
                 <div className="text-sm font-medium mb-2">Board on app start</div>
                 <div className="space-y-2">
                   {WD_FULL.map((label, idx) => (
                     <div key={label} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-                      <div className="text-xs uppercase tracking-wide text-neutral-400 sm:w-28">{label}</div>
+                      <div className="text-xs uppercase tracking-wide text-secondary sm:w-28">{label}</div>
                       <select
-                        className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                        className="pill-input flex-1"
                         value={settings.startBoardByDay[idx as Weekday] ?? ""}
                         onChange={(e) => handleDailyStartBoardChange(idx as Weekday, e.target.value)}
                       >
@@ -5011,7 +5165,7 @@ function SettingsModal({
                     </div>
                   ))}
                 </div>
-                <div className="text-xs text-neutral-400 mt-2">
+                <div className="text-xs text-secondary mt-2">
                   Choose which board opens first for each day. Perfect for work boards on weekdays and personal lists on weekends.
                 </div>
               </div>
@@ -5020,19 +5174,19 @@ function SettingsModal({
         </section>
 
         {/* Nostr */}
-        <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+        <section className="wallet-section space-y-3">
           <div className="flex items-center gap-2 mb-3">
             <div className="text-sm font-medium">Nostr</div>
             <div className="ml-auto" />
             <button
-              className="px-3 py-1 rounded-lg bg-neutral-800 text-xs"
+              className="ghost-button button-sm pressable"
               onClick={()=>setShowAdvanced(a=>!a)}
             >{showAdvanced ? "Hide advanced" : "Advanced"}</button>
           </div>
           {/* Quick actions available outside Advanced */}
           <div className="mb-3 flex gap-2">
             <button
-              className="px-3 py-2 rounded-xl bg-neutral-800"
+              className="ghost-button button-sm pressable"
               onClick={async ()=>{
                 try {
                   const sk = localStorage.getItem(LS_NOSTR_SK) || "";
@@ -5050,7 +5204,7 @@ function SettingsModal({
               }}
             >Copy nsec</button>
             <button
-              className="px-3 py-2 rounded-xl bg-neutral-800"
+              className="ghost-button button-sm pressable"
               onClick={()=>setDefaultRelays(DEFAULT_RELAYS.slice())}
             >Reload default relays</button>
           </div>
@@ -5058,26 +5212,26 @@ function SettingsModal({
             <>
               {/* Public key */}
               <div className="mb-3">
-                <div className="text-xs text-neutral-400 mb-1">Your Nostr public key (hex)</div>
+                <div className="text-xs text-secondary mb-1">Your Nostr public key (hex)</div>
                 <div className="flex gap-2 items-center">
                   <input readOnly value={pubkeyHex || "(generating…)"}
-                         className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ if(pubkeyHex) { try { await navigator.clipboard?.writeText(pubkeyHex); } catch {} } }}>Copy</button>
+                         className="pill-input flex-1"/>
+                  <button className="ghost-button button-sm pressable" onClick={async ()=>{ if(pubkeyHex) { try { await navigator.clipboard?.writeText(pubkeyHex); } catch {} } }}>Copy</button>
                 </div>
               </div>
 
               {/* Private key options */}
               <div className="mb-3 space-y-2">
-                <div className="text-xs text-neutral-400 mb-1">Custom Nostr private key (hex or nsec)</div>
+                <div className="text-xs text-secondary mb-1">Custom Nostr private key (hex or nsec)</div>
                 <div className="flex gap-2 items-center">
                   <input value={customSk} onChange={e=>setCustomSk(e.target.value)}
-                         className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800" placeholder="nsec or hex"/>
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{onSetKey(customSk); setCustomSk('');}}>Use</button>
+                         className="pill-input flex-1" placeholder="nsec or hex"/>
+                  <button className="ghost-button button-sm pressable" onClick={()=>{onSetKey(customSk); setCustomSk('');}}>Use</button>
                 </div>
                 <div className="flex gap-2">
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={onGenerateKey}>Generate new key</button>
+                  <button className="ghost-button button-sm pressable" onClick={onGenerateKey}>Generate new key</button>
                   <button
-                    className="px-3 py-2 rounded-xl bg-neutral-800"
+                    className="ghost-button button-sm pressable"
                     onClick={async ()=>{
                       try {
                         const sk = localStorage.getItem(LS_NOSTR_SK) || "";
@@ -5099,31 +5253,31 @@ function SettingsModal({
 
               {/* Default relays */}
               <div className="mb-3">
-                <div className="text-xs text-neutral-400 mb-1">Default relays</div>
+                <div className="text-xs text-secondary mb-1">Default relays</div>
                 <div className="flex gap-2 mb-2">
                   <input
                     value={newDefaultRelay}
                     onChange={(e)=>setNewDefaultRelay(e.target.value)}
                     onKeyDown={(e)=>{ if (e.key === 'Enter') { const v = newDefaultRelay.trim(); if (v && !defaultRelays.includes(v)) { setDefaultRelays([...defaultRelays, v]); setNewDefaultRelay(""); } } }}
-                    className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                    className="pill-input flex-1"
                     placeholder="wss://relay.example"
                   />
                   <button
-                    className="px-3 py-2 rounded-xl bg-neutral-800"
+                    className="ghost-button button-sm pressable"
                     onClick={()=>{ const v = newDefaultRelay.trim(); if (v && !defaultRelays.includes(v)) { setDefaultRelays([...defaultRelays, v]); setNewDefaultRelay(""); } }}
                   >Add</button>
                 </div>
                 <ul className="space-y-2">
                   {defaultRelays.map((r) => (
-                    <li key={r} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
+                    <li key={r} className="p-2 rounded-lg bg-surface-muted border border-surface flex items-center gap-2">
                       <div className="flex-1 truncate">{r}</div>
-                      <button className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>setDefaultRelays(defaultRelays.filter(x => x !== r))}>Delete</button>
+                      <button className="ghost-button button-sm pressable text-rose-400" onClick={()=>setDefaultRelays(defaultRelays.filter(x => x !== r))}>Delete</button>
                     </li>
                   ))}
                 </ul>
                 <div className="mt-2 flex gap-2">
                   <button
-                    className="px-3 py-2 rounded-xl bg-neutral-800"
+                    className="ghost-button button-sm pressable"
                     onClick={()=>setDefaultRelays(DEFAULT_RELAYS.slice())}
                   >Reload defaults</button>
                 </div>
@@ -5135,11 +5289,11 @@ function SettingsModal({
         {/* Cashu mint: moved into Wallet → Mint balances */}
 
         {/* Backup & Restore */}
-        <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
-          <div className="text-sm font-medium mb-3">Backup</div>
-          <div className="flex gap-2">
-            <button className="flex-1 px-3 py-2 rounded-xl bg-neutral-800" onClick={backupData}>Download backup</button>
-            <label className="flex-1 px-3 py-2 rounded-xl bg-neutral-800 text-center cursor-pointer">
+        <section className="wallet-section space-y-3">
+          <div className="text-sm font-medium">Backup</div>
+          <div className="flex flex-wrap gap-2">
+            <button className="accent-button button-sm pressable flex-1" onClick={backupData}>Download backup</button>
+            <label className="ghost-button button-sm pressable flex-1 justify-center cursor-pointer">
               Restore from backup
               <input type="file" accept="application/json" className="hidden" onChange={restoreFromBackup} />
             </label>
@@ -5147,80 +5301,75 @@ function SettingsModal({
         </section>
 
         {/* Tutorial */}
-        <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+        <section className="wallet-section space-y-3">
           <div className="text-sm font-medium mb-2">Tutorial</div>
-          <div className="text-xs text-neutral-400 mb-3">
+          <div className="text-xs text-secondary mb-3">
             Replay the guided tour to refresh how Taskify works.
           </div>
-          <button
-            className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700"
-            onClick={onRestartTutorial}
-          >
-            View tutorial again
-          </button>
+          <button className="accent-button button-sm pressable" onClick={onRestartTutorial}>View tutorial again</button>
         </section>
 
         {/* Development donation */}
-        <section className="rounded-xl border border-neutral-800 p-3 bg-neutral-900/60">
+        <section className="wallet-section space-y-3">
           <div className="text-sm font-medium mb-2">Support development</div>
-          <div className="text-xs text-neutral-400 mb-3">Donate from your internal wallet to dev@solife.me</div>
+          <div className="text-xs text-secondary mb-3">Donate from your internal wallet to dev@solife.me</div>
           <div className="flex gap-2 mb-2 w-full">
             <input
-              className="min-w-[7rem] flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+              className="pill-input flex-1 min-w-[7rem]"
               placeholder="Amount (sats)"
               value={donateAmt}
               onChange={(e)=>setDonateAmt(e.target.value)}
               inputMode="numeric"
             />
             <button
-              className="shrink-0 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 whitespace-nowrap"
+              className="accent-button button-sm pressable shrink-0 whitespace-nowrap"
               onClick={handleDonate}
               disabled={!mintUrl || donateState === 'sending'}
-            >Donate Now</button>
+            >Donate now</button>
           </div>
           <input
-            className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+            className="pill-input w-full"
             placeholder="Comment (optional)"
             value={donateComment}
             onChange={(e)=>setDonateComment(e.target.value)}
           />
-          <div className="mt-2 text-xs">
+          <div className="mt-2 text-xs text-secondary">
             {donateState === 'sending' && <span>Sending…</span>}
-            {donateState === 'done' && <span className="text-emerald-400">{donateMsg}</span>}
+            {donateState === 'done' && <span className="text-accent">{donateMsg}</span>}
             {donateState === 'error' && <span className="text-rose-400">{donateMsg}</span>}
           </div>
         </section>
 
         {/* Feedback / Feature requests */}
-        <section>
-          <div className="text-xs text-neutral-400">
-            Please submit any feedback or feature requests to{' '}
+        <section className="wallet-section space-y-2 text-xs text-secondary">
+          <div>
+            Please submit feedback or feature requests to{' '}
             <button
-              className="underline text-emerald-400"
+              className="link-accent"
               onClick={async ()=>{ try { await navigator.clipboard?.writeText('dev@solife.me'); showToast('Copied dev@solife.me'); } catch {} }}
-            >dev@solife.me</button>{' '}or Board ID{' '}
+            >dev@solife.me</button>{' '}or share Board ID{' '}
             <button
-              className="underline text-emerald-400"
+              className="link-accent"
               onClick={async ()=>{ try { await navigator.clipboard?.writeText('c3db0d84-ee89-43df-a31e-edb4c75be32b'); showToast('Copied Board ID'); } catch {} }}
             >c3db0d84-ee89-43df-a31e-edb4c75be32b</button>
           </div>
         </section>
 
         <div className="flex justify-end">
-          <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={handleClose}>Close</button>
+          <button className="ghost-button button-sm pressable" onClick={handleClose}>Close</button>
         </div>
       </div>
     </Modal>
     {showArchivedBoards && (
       <Modal onClose={() => setShowArchivedBoards(false)} title="Archived boards">
         {archivedBoards.length === 0 ? (
-          <div className="text-sm text-neutral-400">No archived boards.</div>
+          <div className="text-sm text-secondary">No archived boards.</div>
         ) : (
           <ul className="space-y-2">
             {archivedBoards.map((b) => (
               <li
                 key={b.id}
-                className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2 cursor-pointer hover:bg-neutral-700"
+                className="bg-surface-muted border border-surface rounded-2xl p-3 flex items-center gap-2 cursor-pointer transition hover:bg-surface-highlight"
                 role="button"
                 tabIndex={0}
                 onClick={() => openArchivedBoard(b.id)}
@@ -5234,7 +5383,7 @@ function SettingsModal({
                 <div className="flex-1 truncate">{b.name}</div>
                 <div className="flex gap-2">
                   <button
-                    className="pressable px-3 py-1 rounded-full bg-neutral-700 hover:bg-neutral-600"
+                    className="accent-button button-sm pressable"
                     onClick={(e) => {
                       e.stopPropagation();
                       unarchiveBoard(b.id);
@@ -5243,7 +5392,7 @@ function SettingsModal({
                     Unarchive
                   </button>
                   <button
-                    className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600"
+                    className="ghost-button button-sm pressable text-rose-400"
                     onClick={(e) => {
                       e.stopPropagation();
                       deleteBoard(b.id);
@@ -5263,7 +5412,7 @@ function SettingsModal({
         <input
           value={manageBoard.name}
           onChange={e => renameBoard(manageBoard.id, e.target.value)}
-          className="w-full mb-4 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+          className="pill-input w-full mb-4"
         />
         {manageBoard.kind === "lists" ? (
           <>
@@ -5273,12 +5422,12 @@ function SettingsModal({
               ))}
             </ul>
             <div className="mt-2">
-              <button className="pressable px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>addColumn(manageBoard.id)}>Add list</button>
+              <button className="accent-button button-sm pressable" onClick={()=>addColumn(manageBoard.id)}>Add list</button>
             </div>
-            <div className="text-xs text-neutral-400 mt-2">Tasks can be dragged between lists directly on the board.</div>
+            <div className="text-xs text-secondary mt-2">Tasks can be dragged between lists directly on the board.</div>
           </>
         ) : (
-          <div className="text-xs text-neutral-400">The Week board has fixed columns (Sun–Sat, Bounties).</div>
+          <div className="text-xs text-secondary">The Week board has fixed columns (Sun–Sat, Bounties).</div>
         )}
 
         <div className="mt-6">
@@ -5286,41 +5435,41 @@ function SettingsModal({
             <div className="text-sm font-medium">Sharing</div>
             <div className="ml-auto" />
             <button
-              className="px-3 py-1 rounded-lg bg-neutral-800 text-xs"
+              className="ghost-button button-sm pressable"
               onClick={()=>setShowAdvanced(a=>!a)}
             >{showAdvanced ? "Hide advanced" : "Advanced"}</button>
           </div>
           <div className="space-y-2">
             {manageBoard.nostr ? (
               <>
-                <div className="text-xs text-neutral-400">Board ID</div>
+                <div className="text-xs text-secondary">Board ID</div>
                 <div className="flex gap-2 items-center">
                   <input readOnly value={manageBoard.nostr.boardId}
-                         className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"/>
-                  <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={async ()=>{ try { await navigator.clipboard?.writeText(manageBoard.nostr!.boardId); } catch {} }}>Copy</button>
+                         className="pill-input flex-1 min-w-0"/>
+                  <button className="ghost-button button-sm pressable" onClick={async ()=>{ try { await navigator.clipboard?.writeText(manageBoard.nostr!.boardId); } catch {} }}>Copy</button>
                 </div>
                   {showAdvanced && (
                     <>
-                      <div className="text-xs text-neutral-400">Relays</div>
+                      <div className="text-xs text-secondary">Relays</div>
                       <div className="flex gap-2 mb-2">
                         <input
                           value={newBoardRelay}
                           onChange={(e)=>setNewBoardRelay(e.target.value)}
                           onKeyDown={(e)=>{ if (e.key === 'Enter' && manageBoard?.nostr) { const v = newBoardRelay.trim(); if (v && !(manageBoard.nostr.relays || []).includes(v)) { setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays: [...(manageBoard.nostr!.relays || []), v] } }) : b)); setNewBoardRelay(""); } } }}
-                          className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                          className="pill-input flex-1"
                           placeholder="wss://relay.example"
                         />
                         <button
-                          className="px-3 py-2 rounded-xl bg-neutral-800"
+                          className="ghost-button button-sm pressable"
                           onClick={()=>{ if (!manageBoard?.nostr) return; const v = newBoardRelay.trim(); if (v && !(manageBoard.nostr.relays || []).includes(v)) { setBoards(prev => prev.map(b => b.id === manageBoard.id ? ({...b, nostr: { boardId: manageBoard.nostr!.boardId, relays: [...(manageBoard.nostr!.relays || []), v] } }) : b)); setNewBoardRelay(""); } }}
                         >Add</button>
                       </div>
                       <ul className="space-y-2 mb-2">
                         {(manageBoard.nostr.relays || []).map((r) => (
-                          <li key={r} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
+                          <li key={r} className="p-2 rounded-lg bg-surface-muted border border-surface flex items-center gap-2">
                             <div className="flex-1 truncate">{r}</div>
                             <button
-                              className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600"
+                              className="ghost-button button-sm pressable text-rose-400"
                               onClick={()=>{
                                 if (!manageBoard?.nostr) return;
                                 const relays = (manageBoard.nostr.relays || []).filter(x => x !== r);
@@ -5330,15 +5479,15 @@ function SettingsModal({
                           </li>
                         ))}
                       </ul>
-                      <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>onRegenerateBoardId(manageBoard.id)}>Generate new board ID</button>
+                      <button className="ghost-button button-sm pressable" onClick={()=>onRegenerateBoardId(manageBoard.id)}>Generate new board ID</button>
                     </>
                   )}
                   <div className="flex gap-2">
                   <button
-                    className="px-3 py-2 rounded-xl bg-neutral-800"
+                    className="ghost-button button-sm pressable"
                     onClick={()=>onBoardChanged(manageBoard.id, { republishTasks: true })}
                   >Republish metadata</button>
-                  <button className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>{
+                  <button className="ghost-button button-sm pressable text-rose-400" onClick={()=>{
                     setBoards(prev => prev.map(b => b.id === manageBoard.id ? (b.kind === 'week'
                       ? { id: b.id, name: b.name, kind: 'week', archived: b.archived, hidden: b.hidden } as Board
                       : { id: b.id, name: b.name, kind: 'lists', columns: b.columns, archived: b.archived, hidden: b.hidden } as Board
@@ -5350,54 +5499,54 @@ function SettingsModal({
               <>
                 {showAdvanced && (
                   <>
-                    <div className="text-xs text-neutral-400">Relays override (optional)</div>
+                    <div className="text-xs text-secondary">Relays override (optional)</div>
                     <div className="flex gap-2 mb-2">
                       <input
                         value={newOverrideRelay}
                         onChange={(e)=>setNewOverrideRelay(e.target.value)}
                         onKeyDown={(e)=>{ if (e.key === 'Enter') { const v = newOverrideRelay.trim(); if (v) { setRelaysCsv(addRelayToCsv(relaysCsv, v)); setNewOverrideRelay(""); } } }}
-                        className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                        className="pill-input flex-1"
                         placeholder="wss://relay.example"
                       />
-                      <button className="px-3 py-2 rounded-xl bg-neutral-800" onClick={()=>{ const v = newOverrideRelay.trim(); if (v) { setRelaysCsv(addRelayToCsv(relaysCsv, v)); setNewOverrideRelay(""); } }}>Add</button>
+                      <button className="ghost-button button-sm pressable" onClick={()=>{ const v = newOverrideRelay.trim(); if (v) { setRelaysCsv(addRelayToCsv(relaysCsv, v)); setNewOverrideRelay(""); } }}>Add</button>
                     </div>
                     <ul className="space-y-2 mb-2">
                       {parseCsv(relaysCsv).map((r) => (
-                        <li key={r} className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center gap-2">
+                        <li key={r} className="p-2 rounded-lg bg-surface-muted border border-surface flex items-center gap-2">
                           <div className="flex-1 truncate">{r}</div>
-                          <button className="pressable px-3 py-1 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={()=>setRelaysCsv(removeRelayFromCsv(relaysCsv, r))}>Delete</button>
+                          <button className="ghost-button button-sm pressable text-rose-400" onClick={()=>setRelaysCsv(removeRelayFromCsv(relaysCsv, r))}>Delete</button>
                         </li>
                       ))}
                     </ul>
                   </>
                 )}
-                <button className="block w-full px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500" onClick={()=>{onShareBoard(manageBoard.id, showAdvanced ? relaysCsv : ""); setRelaysCsv('');}}>Share this board</button>
+                <button className="accent-button button-sm pressable w-full justify-center" onClick={()=>{onShareBoard(manageBoard.id, showAdvanced ? relaysCsv : ""); setRelaysCsv('');}}>Share this board</button>
               </>
             )}
             <div className="mt-4 flex gap-2">
               <button
-                className="pressable flex-1 px-3 py-2 rounded-xl bg-neutral-700 hover:bg-neutral-600"
+                className="ghost-button button-sm pressable flex-1 justify-center"
                 onClick={() => setBoardHidden(manageBoard.id, !manageBoard.hidden)}
               >
                 {manageBoard.hidden ? "Unhide board" : "Hide board"}
               </button>
               {!manageBoard.archived ? (
                 <button
-                  className="pressable flex-1 px-3 py-2 rounded-xl bg-neutral-700 hover:bg-neutral-600"
+                  className="ghost-button button-sm pressable flex-1 justify-center"
                   onClick={() => archiveBoard(manageBoard.id)}
                 >
                   Archive board
                 </button>
               ) : (
                 <button
-                  className="pressable flex-1 px-3 py-2 rounded-xl bg-neutral-700 hover:bg-neutral-600"
+                  className="ghost-button button-sm pressable flex-1 justify-center"
                   onClick={() => unarchiveBoard(manageBoard.id)}
                 >
                   Unarchive board
                 </button>
               )}
             </div>
-            <button className="pressable mt-2 block w-full px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
+            <button className="ghost-button button-sm pressable text-rose-400 mt-2 w-full justify-center" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
           </div>
         </div>
       </Modal>

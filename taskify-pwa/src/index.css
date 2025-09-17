@@ -195,6 +195,12 @@ button {
   -webkit-backdrop-filter: var(--blur-backdrop);
 }
 
+.pill-input--compact {
+  min-height: 44px;
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+
 .pill-textarea {
   border-radius: var(--radius-card);
   resize: vertical;
@@ -246,6 +252,15 @@ input[type="radio"] {
   font-weight: 600;
   letter-spacing: -0.01em;
   box-shadow: var(--accent-glow);
+}
+
+.accent-button--circle {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 1.35rem;
+  line-height: 1;
 }
 
 .accent-button:hover {

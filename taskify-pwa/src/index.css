@@ -10,6 +10,12 @@
   -webkit-text-size-adjust: 100%;
   color-scheme: dark;
 
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --app-height: 100dvh;
+
   --accent: #0a84ff;
   --accent-hover: #409cff;
   --accent-active: #0060df;
@@ -68,12 +74,20 @@ html.light {
 }
 
 html,
+body {
+  height: 100%;
+}
+
+html,
 body,
 #root {
-  height: 100%;
   margin: 0;
   padding: 0;
   overflow-x: hidden;
+}
+
+#root {
+  min-height: 100%;
 }
 
 body {
@@ -83,10 +97,16 @@ body {
   font-family: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont,
     "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   letter-spacing: -0.01em;
-  padding-top: env(safe-area-inset-top);
-  padding-left: env(safe-area-inset-left);
-  padding-right: env(safe-area-inset-right);
   transition: background-color 280ms ease;
+}
+
+.app-shell {
+  min-height: calc(var(--app-height, 100dvh) - var(--safe-top) - var(--safe-bottom));
+  padding-top: var(--safe-top);
+  padding-right: var(--safe-right);
+  padding-bottom: var(--safe-bottom);
+  padding-left: var(--safe-left);
+  box-sizing: border-box;
 }
 
 body::before {
@@ -886,6 +906,10 @@ html.light .board-column[data-drop-over="true"] {
   border: 1px solid var(--surface-border);
   box-shadow: var(--shadow-soft);
   padding: 1.25rem;
+  padding-top: calc(1.25rem + var(--safe-top));
+  padding-right: calc(1.25rem + var(--safe-right));
+  padding-bottom: calc(1.25rem + var(--safe-bottom));
+  padding-left: calc(1.25rem + var(--safe-left));
   max-height: 80%;
   overflow-y: auto;
 }
@@ -903,12 +927,15 @@ html.light .board-column[data-drop-over="true"] {
 }
 
 .drawer-panel {
-  width: min(24rem, 92vw);
-  height: 100vh;
+  width: min(24rem, calc(92vw - var(--safe-left) - var(--safe-right)));
+  height: calc(var(--app-height, 100dvh) - var(--safe-top) - var(--safe-bottom));
   background: rgba(17, 18, 24, 0.96);
   border-left: 1px solid var(--surface-border);
   box-shadow: var(--shadow-soft);
-  padding: 1rem 1.25rem;
+  padding-top: calc(1rem + var(--safe-top));
+  padding-right: calc(1.25rem + var(--safe-right));
+  padding-bottom: calc(1rem + var(--safe-bottom));
+  padding-left: calc(1.25rem + var(--safe-left));
   overflow-y: auto;
 }
 

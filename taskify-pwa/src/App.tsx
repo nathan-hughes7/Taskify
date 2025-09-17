@@ -2415,7 +2415,7 @@ export default function App() {
         {/* Header */}
         <header className="space-y-4">
           <div className="flex flex-wrap items-end gap-3">
-            <div className="flex flex-col gap-1 justify-end">
+            <div className="flex flex-col gap-1 justify-end -translate-y-1">
               <h1 className="text-3xl font-semibold tracking-tight">
                 Taskify
               </h1>
@@ -2542,8 +2542,8 @@ export default function App() {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    <path d="M10.325 4.317a1 1 0 011.35-.954 2.25 2.25 0 004.65 0 1 1 0 011.35.954l.126.758a1 1 0 00.83.83l.758.126a1 1 0 01.607 1.61 2.25 2.25 0 000 3.181 1 1 0 01-.607 1.61l-.758.126a1 1 0 00-.83.83l-.126.758a1 1 0 01-1.35.954 2.25 2.25 0 00-4.65 0 1 1 0 01-1.35-.954l-.126-.758a1 1 0 00-.83-.83l-.758-.126a1 1 0 01-.607-1.61 2.25 2.25 0 000-3.181 1 1 0 01.607-1.61l.758-.126a1 1 0 00.83-.83l.126-.758z" />
-                    <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2h-.34a2 2 0 0 1-2-2v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2h.34a2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                   </svg>
                 </button>
                 <button
@@ -2563,9 +2563,12 @@ export default function App() {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    <path d="M4.5 8h15" />
-                    <path d="M3 9.5A1.5 1.5 0 014.5 8h15A1.5 1.5 0 0121 9.5v8A1.5 1.5 0 0119.5 19h-15A1.5 1.5 0 013 17.5z" />
-                    <path d="M7.5 8V5.5A2.5 2.5 0 0110 3h6a2.5 2.5 0 012.5 2.5V8" />
+                    <circle cx="12" cy="12" r="8.25" />
+                    <path d="M11 7v10" />
+                    <path d="M9.5 8h3.75a2.25 2.25 0 0 1 0 4.5H9.5" />
+                    <path d="M9.5 12h3.9a2.25 2.25 0 1 1 0 4.5H9.5" />
+                    <path d="M8.75 9.5h2.5" />
+                    <path d="M8.75 14.5h2.5" />
                   </svg>
                 </button>
                 {settings.completedTab ? (
@@ -2588,8 +2591,7 @@ export default function App() {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     >
-                      <path d="M4 7h16a1 1 0 011 1v8a1 1 0 01-1 1H4a1 1 0 01-1-1V8a1 1 0 011-1z" />
-                      <path d="M8 12l2.5 2.5L16 9" />
+                      <path d="M6 12.5l3.75 3.75L18 8.5" />
                     </svg>
                   </button>
                 ) : (
@@ -2981,10 +2983,8 @@ export default function App() {
             <div className="text-sm text-secondary">No upcoming tasks.</div>
           ) : (
             <ul className="space-y-2">
-              {upcoming.map((t) => {
-                const hasDetail = !!t.note?.trim() || (t.images && t.images.length > 0) || (t.subtasks && t.subtasks.length > 0) || !!t.bounty;
-                return (
-                <li key={t.id} className="task-card space-y-2" data-form={hasDetail ? 'stacked' : 'pill'}>
+              {upcoming.map((t) => (
+                <li key={t.id} className="task-card space-y-2" data-form="stacked">
                   <div className="flex items-start gap-2">
                     <div className="flex-1">
                       <div className="text-sm font-medium leading-[1.15]">{renderTitleWithLink(t.title, t.note)}</div>
@@ -3034,7 +3034,7 @@ export default function App() {
                     </button>
                   </div>
                 </li>
-              );})}
+              ))}
             </ul>
           )}
         </SideDrawer>
@@ -3328,27 +3328,32 @@ function UrlPreview({ text }: { text: string }) {
   );
 }
 
-function TaskMedia({ task }: { task: Task }) {
+function TaskMedia({ task, indent = false }: { task: Task; indent?: boolean }) {
   const noteText = task.note?.replace(/https?:\/\/[^\s)]+/gi, "").trim();
+  const hasImages = !!(task.images && task.images.length);
+  const previewSource = `${task.title} ${task.note || ""}`;
+  const hasUrl = /https?:\/\//i.test(previewSource);
+  if (!noteText && !hasImages && !hasUrl) return null;
+  const wrapperClasses = `${indent ? "task-card__details " : ""}space-y-1.5 mt-2`;
   return (
-    <>
+    <div className={wrapperClasses}>
       {noteText && (
         <div
-          className="mt-1 text-xs text-secondary break-words"
+          className="text-xs text-secondary break-words"
           style={{ display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}
         >
           {autolink(noteText)}
         </div>
       )}
-      {task.images?.length ? (
-        <div className="mt-1.5 space-y-2">
-          {task.images.map((img, i) => (
+      {hasImages ? (
+        <div className="space-y-2">
+          {task.images!.map((img, i) => (
             <img key={i} src={img} className="max-h-40 w-full rounded-2xl object-contain" />
           ))}
         </div>
       ) : null}
-      <UrlPreview text={`${task.title} ${task.note || ""}`} />
-    </>
+      {hasUrl && <UrlPreview text={previewSource} />}
+    </div>
   );
 }
 
@@ -3616,10 +3621,10 @@ function Card({
         </div>
       </div>
 
-      <TaskMedia task={task} />
+      <TaskMedia task={task} indent />
 
       {task.subtasks?.length ? (
-        <ul className="mt-2 space-y-1.5 text-xs text-secondary">
+        <ul className="task-card__details mt-2 space-y-1.5 text-xs text-secondary">
           {task.subtasks.map((st) => (
             <li key={st.id} className="flex items-center gap-2">
               <input
@@ -3634,13 +3639,13 @@ function Card({
       ) : null}
 
       {task.completed && task.bounty && task.bounty.state !== 'claimed' && (
-        <div className="mt-2 text-xs text-secondary">
+        <div className="task-card__details mt-2 text-xs text-secondary">
           {task.bounty.state === 'unlocked' ? 'Bounty unlocked!' : 'Complete! - Unlock bounty'}
         </div>
       )}
 
       {task.bounty && (
-        <div className="mt-2">
+        <div className="task-card__details mt-2">
           <span className={bountyClass}>
             Bounty {typeof task.bounty.amount === 'number' ? `• ${task.bounty.amount} sats` : ''} • {task.bounty.state}
           </span>
@@ -4880,7 +4885,7 @@ function SettingsModal({
       : "flex-1 text-left min-w-0";
     return (
       <li
-        className="relative p-2 rounded-lg bg-surface-muted border border-surface flex items-center gap-2"
+        className="board-list-item"
         draggable
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
@@ -5408,7 +5413,69 @@ function SettingsModal({
       </Modal>
     )}
     {manageBoard && (
-      <Modal onClose={() => setManageBoardId(null)} title="Manage board">
+      <Modal
+        onClose={() => setManageBoardId(null)}
+        title="Manage board"
+        actions={(
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              className="icon-button pressable"
+              style={{ '--icon-size': '2.2rem' } as React.CSSProperties}
+              data-active={manageBoard.hidden}
+              aria-pressed={manageBoard.hidden}
+              aria-label={manageBoard.hidden ? 'Unhide board' : 'Hide board'}
+              title={manageBoard.hidden ? 'Unhide board' : 'Hide board'}
+              onClick={() => setBoardHidden(manageBoard.id, !manageBoard.hidden)}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-[16px] w-[16px]"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M4 12.5c2.4-3 5.4-4.5 8-4.5s5.6 1.5 8 4.5" />
+                <path d="M6.5 15l1.6-1.6" />
+                <path d="M12 15.5v-2.1" />
+                <path d="M17.5 15l-1.6-1.6" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="icon-button pressable"
+              style={{ '--icon-size': '2.2rem' } as React.CSSProperties}
+              data-active={manageBoard.archived}
+              aria-pressed={manageBoard.archived}
+              aria-label={manageBoard.archived ? 'Unarchive board' : 'Archive board'}
+              title={manageBoard.archived ? 'Unarchive board' : 'Archive board'}
+              onClick={() => {
+                if (manageBoard.archived) unarchiveBoard(manageBoard.id);
+                else archiveBoard(manageBoard.id);
+              }}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-[16px] w-[16px]"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M4.5 7h15" />
+                <rect x="5" y="7" width="14" height="12" rx="2" />
+                <path d="M12 11v4" />
+                <path d="M10.5 13.5L12 15l1.5-1.5" />
+              </svg>
+            </button>
+          </div>
+        )}
+      >
         <input
           value={manageBoard.name}
           onChange={e => renameBoard(manageBoard.id, e.target.value)}
@@ -5523,29 +5590,6 @@ function SettingsModal({
                 <button className="accent-button button-sm pressable w-full justify-center" onClick={()=>{onShareBoard(manageBoard.id, showAdvanced ? relaysCsv : ""); setRelaysCsv('');}}>Share this board</button>
               </>
             )}
-            <div className="mt-4 flex gap-2">
-              <button
-                className="ghost-button button-sm pressable flex-1 justify-center"
-                onClick={() => setBoardHidden(manageBoard.id, !manageBoard.hidden)}
-              >
-                {manageBoard.hidden ? "Unhide board" : "Hide board"}
-              </button>
-              {!manageBoard.archived ? (
-                <button
-                  className="ghost-button button-sm pressable flex-1 justify-center"
-                  onClick={() => archiveBoard(manageBoard.id)}
-                >
-                  Archive board
-                </button>
-              ) : (
-                <button
-                  className="ghost-button button-sm pressable flex-1 justify-center"
-                  onClick={() => unarchiveBoard(manageBoard.id)}
-                >
-                  Unarchive board
-                </button>
-              )}
-            </div>
             <button className="ghost-button button-sm pressable text-rose-400 mt-2 w-full justify-center" onClick={()=>deleteBoard(manageBoard.id)}>Delete board</button>
           </div>
         </div>

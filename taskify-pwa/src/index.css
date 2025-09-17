@@ -461,6 +461,28 @@ input[type="radio"] {
   border-radius: var(--radius-card);
 }
 
+.task-card__details {
+  margin-left: calc(var(--icon-size, 2.2rem) + 0.75rem);
+}
+
+.board-list-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  border: 1px solid var(--surface-border);
+  box-shadow: var(--shadow-soft);
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.board-list-item:hover {
+  background: var(--surface-highlight);
+  border-color: var(--surface-border-strong);
+}
+
 .task-card__title {
   font-weight: 600;
   font-size: 0.95rem;

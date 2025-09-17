@@ -2656,12 +2656,12 @@ export default function App() {
                 }
               }}
               placeholder="New task…"
-              className="pill-input flex-1 min-w-0"
+              className="pill-input add-bar-input flex-1 min-w-0"
             />
             <button
               ref={addButtonRef}
               onClick={() => addTask()}
-              className="accent-button shrink-0"
+              className="accent-button add-bar-button shrink-0"
             >
               Add
             </button>

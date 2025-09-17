@@ -199,6 +199,14 @@ button {
   color: var(--text-secondary);
 }
 
+.add-bar-input {
+  padding: 0.45rem 0.9rem;
+}
+
+.add-bar-button {
+  padding: 0.45rem 1rem;
+}
+
 select.pill-select {
   appearance: none;
   background-image: linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%),

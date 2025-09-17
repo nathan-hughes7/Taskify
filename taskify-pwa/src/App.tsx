@@ -2692,14 +2692,17 @@ export default function App() {
                 }
               }}
               placeholder="New task…"
-              className="pill-input flex-1 min-w-0"
+              className="pill-input pill-input--compact flex-1 min-w-0"
             />
             <button
               ref={addButtonRef}
               onClick={() => addTask()}
-              className="accent-button shrink-0"
+              className="accent-button accent-button--circle pressable shrink-0"
+              type="button"
+              aria-label="Add task"
             >
-              Add
+              <span aria-hidden="true">+</span>
+              <span className="sr-only">Add task</span>
             </button>
             {newImages.length > 0 && (
               <div className="w-full flex gap-2 mt-2">
@@ -2792,10 +2795,17 @@ export default function App() {
                             ref={el => setInlineInputRef(String(day), el)}
                             value={inlineTitles[String(day)] || ""}
                             onChange={(e) => setInlineTitles(prev => ({ ...prev, [String(day)]: e.target.value }))}
-                            className="pill-input flex-1 min-w-0 text-sm"
+                            className="pill-input pill-input--compact flex-1 min-w-0"
                             placeholder="Add task"
                           />
-                          <button type="submit" className="accent-button button-sm pressable">+</button>
+                          <button
+                            type="submit"
+                            className="accent-button accent-button--circle pressable shrink-0"
+                            aria-label="Add task"
+                          >
+                            <span aria-hidden="true">+</span>
+                            <span className="sr-only">Add task</span>
+                          </button>
                         </form>
                       ) : undefined}
                     >
@@ -2834,14 +2844,21 @@ export default function App() {
                         className="mt-2 flex gap-1"
                         onSubmit={(e) => { e.preventDefault(); addInlineTask("bounties"); }}
                       >
-                        <input
-                          ref={el => setInlineInputRef("bounties", el)}
-                          value={inlineTitles["bounties"] || ""}
-                          onChange={(e) => setInlineTitles(prev => ({ ...prev, bounties: e.target.value }))}
-                          className="pill-input flex-1 min-w-0 text-sm"
-                          placeholder="Add task"
-                        />
-                        <button type="submit" className="accent-button button-sm pressable">+</button>
+                          <input
+                            ref={el => setInlineInputRef("bounties", el)}
+                            value={inlineTitles["bounties"] || ""}
+                            onChange={(e) => setInlineTitles(prev => ({ ...prev, bounties: e.target.value }))}
+                            className="pill-input pill-input--compact flex-1 min-w-0"
+                            placeholder="Add task"
+                          />
+                          <button
+                            type="submit"
+                            className="accent-button accent-button--circle pressable shrink-0"
+                            aria-label="Add task"
+                          >
+                            <span aria-hidden="true">+</span>
+                            <span className="sr-only">Add task</span>
+                          </button>
                       </form>
                     ) : undefined}
                   >
@@ -2890,14 +2907,21 @@ export default function App() {
                         className="mt-2 flex gap-1"
                         onSubmit={(e) => { e.preventDefault(); addInlineTask(col.id); }}
                       >
-                        <input
-                          ref={el => setInlineInputRef(col.id, el)}
-                          value={inlineTitles[col.id] || ""}
-                          onChange={(e) => setInlineTitles(prev => ({ ...prev, [col.id]: e.target.value }))}
-                          className="pill-input flex-1 min-w-0 text-sm"
-                          placeholder="Add task"
-                        />
-                        <button type="submit" className="accent-button button-sm pressable">+</button>
+                          <input
+                            ref={el => setInlineInputRef(col.id, el)}
+                            value={inlineTitles[col.id] || ""}
+                            onChange={(e) => setInlineTitles(prev => ({ ...prev, [col.id]: e.target.value }))}
+                            className="pill-input pill-input--compact flex-1 min-w-0"
+                            placeholder="Add task"
+                          />
+                          <button
+                            type="submit"
+                            className="accent-button accent-button--circle pressable shrink-0"
+                            aria-label="Add task"
+                          >
+                            <span aria-hidden="true">+</span>
+                            <span className="sr-only">Add task</span>
+                          </button>
                       </form>
                     ) : undefined}
                   >

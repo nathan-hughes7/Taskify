@@ -2438,7 +2438,7 @@ export default function App() {
         <header className="relative space-y-3">
           <div ref={confettiRef} className="pointer-events-none absolute inset-x-0 -top-2 z-20 h-0" />
           <div className="flex flex-wrap items-end gap-3">
-            <div className="flex flex-col gap-1 justify-end -translate-y-[2px]">
+            <div className="flex flex-col gap-1 justify-end -translate-y-2">
               <h1 className="text-3xl font-semibold tracking-tight">
                 Taskify
               </h1>

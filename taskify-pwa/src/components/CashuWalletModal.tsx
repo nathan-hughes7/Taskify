@@ -216,134 +216,160 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-neutral-950 text-white">
-      <div className="flex items-center justify-between p-4">
-        <button className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" onClick={onClose}>Close</button>
-        <div className="text-sm font-medium">{info?.unit?.toUpperCase() || "SAT"}</div>
-        <button className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" onClick={()=>setShowHistory(true)}>History</button>
+    <div className="wallet-modal">
+      <div className="wallet-modal__header">
+        <button className="ghost-button button-sm pressable" onClick={onClose}>Close</button>
+        <div className="wallet-modal__unit chip chip-accent">{info?.unit?.toUpperCase() || "SAT"}</div>
+        <button className="ghost-button button-sm pressable" onClick={()=>setShowHistory(true)}>History</button>
       </div>
-      <div className="px-4 -mt-2 mb-2 flex justify-end">
-        <button className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" onClick={()=>setShowMintBalances(true)}>Mint balances</button>
+      <div className="wallet-modal__toolbar">
+        <button className="ghost-button button-sm pressable" onClick={()=>setShowMintBalances(true)}>Mint balances</button>
       </div>
-      <div className="flex-1 flex flex-col items-center justify-center">
-        <div className="text-5xl font-semibold mb-1">{balance} sat</div>
-        <div className="text-neutral-400 text-xs">{headerInfo}</div>
-      </div>
-      <div className="p-4 flex gap-3">
-        <button className="flex-1 py-3 rounded-full bg-neutral-100 text-neutral-900 font-semibold" onClick={()=>setShowReceiveOptions(true)}>RECEIVE</button>
-        <button className="flex-1 py-3 rounded-full bg-neutral-100 text-neutral-900 font-semibold" onClick={()=>setShowSendOptions(true)}>SEND</button>
+      <div className="wallet-modal__content">
+        <div className="wallet-balance-card">
+          <div className="wallet-balance-card__amount">{balance} sat</div>
+          <div className="wallet-balance-card__meta">{headerInfo}</div>
+        </div>
+        <div className="wallet-modal__cta">
+          <button className="accent-button pressable" onClick={()=>setShowReceiveOptions(true)}>Receive</button>
+          <button className="ghost-button pressable" onClick={()=>setShowSendOptions(true)}>Send</button>
+        </div>
       </div>
 
       {/* Receive options */}
       <ActionSheet open={showReceiveOptions && receiveMode === null} onClose={()=>setShowReceiveOptions(false)} title="Receive">
-        <div className="grid gap-2">
-          <button className="w-full px-4 py-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-left" onClick={()=>setReceiveMode("ecash")}>ECASH</button>
-          <button className="w-full px-4 py-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-left" onClick={()=>setReceiveMode("lightning")}>LIGHTNING</button>
+        <div className="wallet-section space-y-2 text-sm">
+          <button className="ghost-button button-sm pressable w-full justify-between" onClick={()=>setReceiveMode("ecash")}>
+            <span>eCash token</span>
+            <span className="text-tertiary">→</span>
+          </button>
+          <button className="ghost-button button-sm pressable w-full justify-between" onClick={()=>setReceiveMode("lightning")}>
+            <span>Lightning invoice</span>
+            <span className="text-tertiary">→</span>
+          </button>
         </div>
       </ActionSheet>
 
       <ActionSheet open={receiveMode === "ecash"} onClose={()=>{setReceiveMode(null); setShowReceiveOptions(false); setRecvTokenStr(""); setRecvMsg("");}} title="Receive eCash">
-        <textarea ref={recvRef} className="w-full h-24 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Paste Cashu token (cashuA...)" value={recvTokenStr} onChange={(e)=>setRecvTokenStr(e.target.value)} />
-        <div className="mt-2 flex gap-2 items-center">
-          <button
-            className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700"
-            onClick={async ()=>{
-              try {
-                const t = (await navigator.clipboard.readText())?.trim();
-                if (t) setRecvTokenStr(t);
-              } catch {
-                alert('Unable to read clipboard. Please paste manually.');
-              }
-            }}
-          >Paste</button>
-          <button className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700" onClick={handleReceive} disabled={!mintUrl || !recvTokenStr}>Redeem</button>
-          {recvMsg && <div className="text-xs">{recvMsg}</div>}
+        <div className="wallet-section space-y-3">
+          <textarea ref={recvRef} className="pill-textarea wallet-textarea" placeholder="Paste Cashu token (cashuA...)" value={recvTokenStr} onChange={(e)=>setRecvTokenStr(e.target.value)} />
+          <div className="flex flex-wrap items-center gap-2 text-xs text-secondary">
+            <button
+              className="ghost-button button-sm pressable"
+              onClick={async ()=>{
+                try {
+                  const t = (await navigator.clipboard.readText())?.trim();
+                  if (t) setRecvTokenStr(t);
+                } catch {
+                  alert('Unable to read clipboard. Please paste manually.');
+                }
+              }}
+            >Paste</button>
+            <button className="accent-button button-sm pressable" onClick={handleReceive} disabled={!mintUrl || !recvTokenStr}>Redeem</button>
+            {recvMsg && <span className="text-xs">{recvMsg}</span>}
+          </div>
         </div>
       </ActionSheet>
 
       <ActionSheet open={receiveMode === "lightning"} onClose={()=>{setReceiveMode(null); setShowReceiveOptions(false);}} title="Mint via Lightning">
-        <div className="flex gap-2 mb-2">
-          <input className="flex-1 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Amount (sats)" value={mintAmt} onChange={(e)=>setMintAmt(e.target.value)} />
-          <button className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700" onClick={handleCreateInvoice} disabled={!mintUrl}>Get Invoice</button>
-        </div>
-        {mintQuote && (
-          <div className="text-xs bg-neutral-950 border border-neutral-800 rounded-xl p-2">
-            <div className="mb-1">Invoice:</div>
-            <textarea readOnly className="w-full h-20 bg-transparent outline-none" value={mintQuote.request} />
-            <div className="flex gap-2 mt-2">
-              <a className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700" href={`lightning:${mintQuote.request}`}>Open Wallet</a>
-              <button
-                className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700"
-                onClick={async ()=>{ try { await navigator.clipboard.writeText(mintQuote.request); } catch {} }}
-              >Copy</button>
-            </div>
-            <div className="mt-2 text-xs">Status: {mintStatus}</div>
-            {mintError && <div className="mt-1 text-xs text-rose-400">{mintError}</div>}
+        <div className="wallet-section space-y-3">
+          <div className="flex gap-2">
+            <input className="pill-input flex-1" placeholder="Amount (sats)" value={mintAmt} onChange={(e)=>setMintAmt(e.target.value)} />
+            <button className="accent-button button-sm pressable" onClick={handleCreateInvoice} disabled={!mintUrl}>Get invoice</button>
           </div>
-        )}
+          {mintQuote && (
+            <div className="bg-surface-muted border border-surface rounded-2xl p-3 text-xs space-y-2">
+              <div className="text-secondary uppercase tracking-wide text-[0.68rem]">Invoice</div>
+              <textarea readOnly className="pill-textarea wallet-textarea" value={mintQuote.request} />
+              <div className="flex flex-wrap gap-2">
+                <a className="ghost-button button-sm pressable" href={`lightning:${mintQuote.request}`}>Open wallet</a>
+                <button
+                  className="ghost-button button-sm pressable"
+                  onClick={async ()=>{ try { await navigator.clipboard.writeText(mintQuote.request); } catch {} }}
+                >Copy</button>
+              </div>
+              <div className="text-xs text-secondary">Status: {mintStatus}</div>
+              {mintError && <div className="text-xs text-rose-400">{mintError}</div>}
+            </div>
+          )}
+        </div>
       </ActionSheet>
 
       {/* Send options */}
       <ActionSheet open={showSendOptions && sendMode === null} onClose={()=>setShowSendOptions(false)} title="Send">
-        <div className="grid gap-2">
-          <button className="w-full px-4 py-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-left" onClick={()=>setSendMode("ecash")}>ECASH</button>
-          <button className="w-full px-4 py-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-left" onClick={()=>setSendMode("lightning")}>LIGHTNING</button>
+        <div className="wallet-section space-y-2 text-sm">
+          <button className="ghost-button button-sm pressable w-full justify-between" onClick={()=>setSendMode("ecash")}>
+            <span>Create eCash token</span>
+            <span className="text-tertiary">→</span>
+          </button>
+          <button className="ghost-button button-sm pressable w-full justify-between" onClick={()=>setSendMode("lightning")}>
+            <span>Pay lightning invoice</span>
+            <span className="text-tertiary">→</span>
+          </button>
         </div>
       </ActionSheet>
 
       <ActionSheet open={sendMode === "ecash"} onClose={()=>{setSendMode(null); setShowSendOptions(false);}} title="Send eCash">
-        <div className="flex gap-2 mb-2">
-          <input className="flex-1 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Amount (sats)" value={sendAmt} onChange={(e)=>setSendAmt(e.target.value)} />
-          <button className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700" onClick={handleCreateSendToken} disabled={!mintUrl}>Create Token</button>
-        </div>
-        {sendTokenStr && (
-          <div className="text-xs bg-neutral-950 border border-neutral-800 rounded-xl p-2">
-            <textarea readOnly className="w-full h-24 bg-transparent outline-none" value={sendTokenStr} />
-            <div className="mt-2">
-              <button
-                className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700"
-                onClick={async ()=>{ try { await navigator.clipboard.writeText(sendTokenStr); } catch {} }}
-              >Copy</button>
-            </div>
+        <div className="wallet-section space-y-3">
+          <div className="flex gap-2">
+            <input className="pill-input flex-1" placeholder="Amount (sats)" value={sendAmt} onChange={(e)=>setSendAmt(e.target.value)} />
+            <button className="accent-button button-sm pressable" onClick={handleCreateSendToken} disabled={!mintUrl}>Create token</button>
           </div>
-        )}
+          {sendTokenStr && (
+            <div className="bg-surface-muted border border-surface rounded-2xl p-3 space-y-2 text-xs">
+              <div className="text-secondary uppercase tracking-wide text-[0.68rem]">Token</div>
+              <textarea readOnly className="pill-textarea wallet-textarea" value={sendTokenStr} />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="ghost-button button-sm pressable"
+                  onClick={async ()=>{ try { await navigator.clipboard.writeText(sendTokenStr); } catch {} }}
+                >Copy</button>
+              </div>
+            </div>
+          )}
+        </div>
       </ActionSheet>
 
       <ActionSheet open={sendMode === "lightning"} onClose={()=>{setSendMode(null); setShowSendOptions(false); setLnInput(""); setLnAddrAmt(""); setLnState("idle"); setLnError("");}} title="Pay Lightning Invoice">
-        <textarea ref={lnRef} className="w-full h-20 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Paste BOLT11 invoice or enter lightning address" value={lnInput} onChange={(e)=>setLnInput(e.target.value)} />
-        {isLnAddress && (
-          <input className="mt-2 w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800" placeholder="Amount (sats)" value={lnAddrAmt} onChange={(e)=>setLnAddrAmt(e.target.value)} />
-        )}
-        <div className="mt-2 flex gap-2">
-          <button
-            className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700"
-            onClick={async ()=>{
-              try {
-                const t = (await navigator.clipboard.readText())?.trim();
-                if (t) setLnInput(t);
-              } catch {
-                alert('Unable to read clipboard. Please paste manually.');
-              }
-            }}
-          >Paste</button>
-          <button className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700" onClick={handlePayInvoice} disabled={!mintUrl || !lnInput || (isLnAddress && !lnAddrAmt)}>Pay</button>
-          {lnState === "sending" && <div className="text-xs">Paying…</div>}
-          {lnState === "done" && <div className="text-xs text-emerald-400">Paid</div>}
-          {lnState === "error" && <div className="text-xs text-rose-400">{lnError}</div>}
+        <div className="wallet-section space-y-3">
+          <textarea ref={lnRef} className="pill-textarea wallet-textarea" placeholder="Paste BOLT11 invoice or enter lightning address" value={lnInput} onChange={(e)=>setLnInput(e.target.value)} />
+          {isLnAddress && (
+            <input className="pill-input" placeholder="Amount (sats)" value={lnAddrAmt} onChange={(e)=>setLnAddrAmt(e.target.value)} />
+          )}
+          <div className="flex flex-wrap gap-2 items-center text-xs text-secondary">
+            <button
+              className="ghost-button button-sm pressable"
+              onClick={async ()=>{
+                try {
+                  const t = (await navigator.clipboard.readText())?.trim();
+                  if (t) setLnInput(t);
+                } catch {
+                  alert('Unable to read clipboard. Please paste manually.');
+                }
+              }}
+            >Paste</button>
+            <button className="accent-button button-sm pressable" onClick={handlePayInvoice} disabled={!mintUrl || !lnInput || (isLnAddress && !lnAddrAmt)}>Pay</button>
+            {lnState === "sending" && <span className="text-xs">Paying…</span>}
+            {lnState === "done" && <span className="text-xs text-accent">Paid</span>}
+            {lnState === "error" && <span className="text-xs text-rose-400">{lnError}</span>}
+          </div>
         </div>
       </ActionSheet>
 
       <ActionSheet open={showHistory} onClose={()=>{setShowHistory(false); setExpandedIdx(null);}} title="History">
         {history.length ? (
-          <ul className="text-sm space-y-2">
+          <ul className="space-y-2 text-sm">
             {history.map((h, i) => (
-              <li key={h.id}>
-                <button className="w-full text-left" onClick={()=>setExpandedIdx(expandedIdx===i?null:i)}>{h.summary}</button>
+              <li key={h.id} className="wallet-section space-y-2">
+                <button className="ghost-button button-sm pressable w-full justify-between" onClick={()=>setExpandedIdx(expandedIdx===i?null:i)}>
+                  <span>{h.summary}</span>
+                  <span className="text-tertiary">{expandedIdx===i ? '−' : '+'}</span>
+                </button>
                 {expandedIdx === i && h.detail && (
-                  <div className="mt-1">
-                    <textarea readOnly className="w-full h-24 bg-neutral-950 border border-neutral-800 rounded-xl p-2" value={h.detail} />
+                  <div className="space-y-2 text-xs">
+                    <textarea readOnly className="pill-textarea wallet-textarea" value={h.detail} />
                     <button
-                      className="mt-1 px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700"
+                      className="ghost-button button-sm pressable"
                       onClick={async ()=>{ try { await navigator.clipboard.writeText(h.detail!); } catch {} }}
                     >Copy</button>
                   </div>
@@ -352,57 +378,59 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
             ))}
           </ul>
         ) : (
-          <div className="text-sm">No history yet</div>
+          <div className="wallet-section text-sm text-secondary">No history yet</div>
         )}
       </ActionSheet>
 
       {/* Mint balances */}
       <ActionSheet open={showMintBalances} onClose={()=>setShowMintBalances(false)} title="Mint balances">
         <div className="space-y-4 text-sm">
-          <div>
-            <div className="text-xs text-neutral-400 mb-1">Active mint</div>
+          <div className="wallet-section space-y-3">
+            <div className="text-xs text-secondary uppercase tracking-wide">Active mint</div>
             <div className="flex gap-2 items-center">
               <input
-                className="flex-1 px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800"
+                className="pill-input flex-1"
                 value={mintInputSheet}
                 onChange={(e)=>setMintInputSheet(e.target.value)}
                 placeholder="https://mint.minibits.cash/Bitcoin"
               />
               <button
-                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
+                className="accent-button button-sm pressable"
                 onClick={async ()=>{ try { await setMintUrl(mintInputSheet.trim()); refreshMintEntries(); } catch (e: any) { alert(e?.message || String(e)); } }}
               >Save</button>
             </div>
-            <div className="text-xs text-neutral-400 mt-2">Current: {mintUrl}</div>
+            <div className="text-xs text-secondary">Current: {mintUrl}</div>
           </div>
 
-          <div>
-            <div className="text-xs text-neutral-400 mb-1">Mints with stored ecash</div>
+          <div className="wallet-section space-y-3">
+            <div className="text-xs text-secondary uppercase tracking-wide">Mints with stored ecash</div>
             {mintEntries.length === 0 ? (
-              <div className="text-neutral-400">No ecash stored yet.</div>
+              <div className="text-secondary">No ecash stored yet.</div>
             ) : (
               <div className="space-y-2">
                 {mintEntries.map(m => (
-                  <div key={m.url} className="flex items-center gap-2 border border-neutral-800 rounded-xl p-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs text-neutral-400">{m.url === mintUrl ? 'Active' : 'Mint'}</div>
-                      <div
-                        className="truncate"
+                  <div key={m.url} className="bg-surface-muted border border-surface rounded-2xl p-3 flex flex-wrap items-center gap-3">
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="text-xs text-secondary">{m.url === mintUrl ? 'Active' : 'Mint'}</div>
+                      <button
+                        className="text-left text-primary underline decoration-dotted decoration-surface-border break-all"
                         title={m.url}
                         onClick={async ()=>{ try { await navigator.clipboard?.writeText(m.url); } catch {} }}
-                      >{m.url}</div>
+                      >{m.url}</button>
                     </div>
-                    <div className="text-right mr-2">
-                      <div className="text-xs text-neutral-400">Balance</div>
+                    <div className="text-right space-y-1">
+                      <div className="text-xs text-secondary">Balance</div>
                       <div className="font-semibold">{m.balance} sat</div>
                     </div>
-                    <button
-                      className="px-2 py-1 rounded bg-neutral-800 text-xs"
-                      onClick={async ()=>{ try { await navigator.clipboard?.writeText(m.url); } catch {} }}
-                    >Copy</button>
-                    {m.url !== mintUrl && (
-                      <button className="px-2 py-1 rounded bg-emerald-700/70 hover:bg-emerald-600 text-xs" onClick={async ()=>{ try { await setMintUrl(m.url); refreshMintEntries(); } catch (e: any) { alert(e?.message || String(e)); } }}>Set active</button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="ghost-button button-sm pressable"
+                        onClick={async ()=>{ try { await navigator.clipboard?.writeText(m.url); } catch {} }}
+                      >Copy</button>
+                      {m.url !== mintUrl && (
+                        <button className="accent-button button-sm pressable" onClick={async ()=>{ try { await setMintUrl(m.url); refreshMintEntries(); } catch (e: any) { alert(e?.message || String(e)); } }}>Set active</button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

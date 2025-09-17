@@ -2441,13 +2441,68 @@ export default function App() {
 
   // horizontal scroller ref to enable iOS momentum scrolling
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const appShellRef = useRef<HTMLDivElement>(null);
+  const boardAreaRef = useRef<HTMLDivElement>(null);
 
   const currentTutorial = tutorialStep != null ? tutorialSteps[tutorialStep] : null;
   const totalTutorialSteps = tutorialSteps.length;
 
+  useEffect(() => {
+    const rootEl = document.documentElement;
+    if (view !== "board" && settings.completedTab) {
+      rootEl.style.removeProperty("--board-column-height");
+      return;
+    }
+
+    if (!boardAreaRef.current) {
+      rootEl.style.removeProperty("--board-column-height");
+      return;
+    }
+
+    let raf = 0;
+    const parsePx = (value: string) => {
+      const parsed = parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const scheduleUpdate = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const frame = boardAreaRef.current;
+        if (!frame) return;
+        const rect = frame.getBoundingClientRect();
+        const styles = getComputedStyle(rootEl);
+        const safeBottom = parsePx(styles.getPropertyValue("--safe-bottom"));
+        const available = window.innerHeight - rect.top - safeBottom;
+        const height = Math.max(available, 320);
+        rootEl.style.setProperty("--board-column-height", `${height}px`);
+      });
+    };
+
+    scheduleUpdate();
+
+    const handleResize = () => scheduleUpdate();
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("orientationchange", handleResize);
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => scheduleUpdate());
+      if (boardAreaRef.current) resizeObserver.observe(boardAreaRef.current);
+      if (appShellRef.current) resizeObserver.observe(appShellRef.current);
+    }
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("orientationchange", handleResize);
+      resizeObserver?.disconnect();
+    };
+  }, [view, settings.completedTab, currentBoardId, currentBoard?.kind, settings.inlineAdd]);
+
   return (
-    <div className="min-h-screen px-4 py-4 sm:px-6 lg:px-8 text-primary">
-      <div className="mx-auto max-w-7xl space-y-5">
+    <div ref={appShellRef} className="app-shell">
+      <div className="mx-auto max-w-7xl space-y-5 px-4 py-4 sm:px-6 lg:px-8 text-primary">
         {/* Header */}
         <header className="relative space-y-3">
           <div ref={confettiRef} className="pointer-events-none absolute inset-x-0 -top-2 z-20 h-0" />
@@ -2764,7 +2819,7 @@ export default function App() {
         )}
 
         {/* Board/Completed */}
-        <div className="relative">
+        <div ref={boardAreaRef} className="relative">
           {view === "board" || !settings.completedTab ? (
             !currentBoard ? (
               <div className="surface-panel p-6 text-center text-sm text-secondary">No boards. Open Settings to create one.</div>
@@ -3025,7 +3080,11 @@ export default function App() {
       {/* Floating Upcoming Drawer Button */}
       <button
         ref={upcomingButtonRef}
-        className={`fixed bottom-4 right-4 px-3 py-2 rounded-full bg-surface-muted border border-surface shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
+        className={`fixed px-3 py-2 rounded-full bg-surface-muted border border-surface shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
+        style={{
+          bottom: 'calc(1rem + var(--safe-bottom))',
+          right: 'calc(1rem + var(--safe-right))',
+        }}
         onClick={() => setShowUpcoming(true)}
         title="Upcoming (hidden) tasks"
         onDragOver={(e) => { e.preventDefault(); setUpcomingHover(true); }}
@@ -3107,7 +3166,11 @@ export default function App() {
       {/* Drag trash can */}
       {draggingTaskId && (
         <div
-          className="fixed bottom-4 left-4 z-50"
+          className="fixed z-50"
+          style={{
+            bottom: 'calc(1rem + var(--safe-bottom))',
+            left: 'calc(1rem + var(--safe-left))',
+          }}
           onDragOver={(e) => {
             e.preventDefault();
             setTrashHover(true);
@@ -3139,7 +3202,10 @@ export default function App() {
 
       {/* Undo Snackbar */}
       {undoTask && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-surface-muted border border-surface text-sm px-4 py-2 rounded-xl shadow-lg flex items-center gap-3">
+        <div
+          className="fixed left-1/2 -translate-x-1/2 bg-surface-muted border border-surface text-sm px-4 py-2 rounded-xl shadow-lg flex items-center gap-3"
+          style={{ bottom: 'calc(1rem + var(--safe-bottom))' }}
+        >
           Task deleted
           <button onClick={undoDelete} className="pressable px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500">Undo</button>
         </div>
@@ -3440,6 +3506,7 @@ const DroppableColumn = React.forwardRef<HTMLDivElement, {
     footer,
     scrollable,
     className,
+    style,
     ...props
   },
   forwardedRef
@@ -3499,12 +3566,24 @@ const DroppableColumn = React.forwardRef<HTMLDivElement, {
     };
   }, [onDropCard, onDropEnd]);
 
+  const columnStyle = scrollable
+    ? {
+        minHeight: "320px",
+        height: "var(--board-column-height, calc(var(--app-safe-height) - 12rem))",
+        ...style,
+      }
+    : {
+        minHeight: "var(--board-column-height, 320px)",
+        ...style,
+      };
+
   return (
     <div
       ref={setRef}
       data-column-title={title}
       data-drop-over={isDragOver || undefined}
-      className={`board-column surface-panel w-[325px] shrink-0 p-2 ${scrollable ? 'flex h-[calc(100vh-15rem)] flex-col overflow-hidden' : 'min-h-[320px]'} ${isDragOver ? 'board-column--active' : ''} ${className ?? ''}`}
+      className={`board-column surface-panel w-[325px] shrink-0 p-2 ${scrollable ? 'flex flex-col overflow-hidden' : ''} ${isDragOver ? 'board-column--active' : ''} ${className ?? ''}`}
+      style={columnStyle}
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
     >

@@ -2966,7 +2966,7 @@ export default function App() {
             {completed.length === 0 ? (
               <div className="text-secondary text-sm">No completed tasks yet.</div>
             ) : (
-              <ul className="space-y-2">
+              <ul className="space-y-1.5">
                 {completed.map((t) => {
                   const hasDetail = !!t.note?.trim() || (t.images && t.images.length > 0) || (t.subtasks && t.subtasks.length > 0) || !!t.bounty;
                   return (
@@ -3044,7 +3044,7 @@ export default function App() {
           {upcoming.length === 0 ? (
             <div className="text-sm text-secondary">No upcoming tasks.</div>
           ) : (
-            <ul className="space-y-2">
+            <ul className="space-y-1.5">
               {upcoming.map((t) => (
                 <li key={t.id} className="task-card space-y-2" data-form="stacked">
                   <div className="flex items-start gap-2">
@@ -3471,7 +3471,7 @@ const DroppableColumn = React.forwardRef<HTMLDivElement, {
     <div
       ref={setRef}
       data-column-title={title}
-      className={`surface-panel w-[288px] shrink-0 p-4 ${scrollable ? 'flex h-[calc(100vh-15rem)] flex-col overflow-hidden' : 'min-h-[320px]'}`}
+      className={`surface-panel w-[304px] shrink-0 p-4 ${scrollable ? 'flex h-[calc(100vh-15rem)] flex-col overflow-hidden' : 'min-h-[320px]'}`}
       // No touchAction lock so horizontal scrolling stays fluid
       {...props}
     >
@@ -3492,7 +3492,7 @@ const DroppableColumn = React.forwardRef<HTMLDivElement, {
         {title}
       </div>
       <div className={scrollable ? 'flex-1 min-h-0 overflow-y-auto pr-1' : ''}>
-        <div className="space-y-2">{children}</div>
+        <div className="space-y-1.5">{children}</div>
       </div>
       {scrollable && footer ? <div className="mt-auto flex-shrink-0 pt-2">{footer}</div> : null}
       {!scrollable && footer}
@@ -5571,7 +5571,7 @@ function SettingsModal({
         />
         {manageBoard.kind === "lists" ? (
           <>
-            <ul className="space-y-2">
+              <ul className="space-y-2">
               {manageBoard.columns.map(col => (
                 <ColumnItem key={col.id} boardId={manageBoard.id} column={col} />
               ))}

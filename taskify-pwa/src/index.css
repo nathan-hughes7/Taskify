@@ -389,7 +389,7 @@ input[type="radio"] {
   background: var(--surface-raised);
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
-  padding: 0.5rem 0.75rem;
+  padding: 0.4rem 0.65rem;
   box-shadow: var(--shadow-soft);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
@@ -436,6 +436,11 @@ input[type="radio"] {
   background: rgba(255, 92, 143, 0.14);
   color: #ff5c8f;
   border-color: rgba(255, 92, 143, 0.38);
+}
+
+.task-card .icon-button {
+  --icon-size: 2.1rem;
+  padding: 0.25rem;
 }
 
 .icon-button--danger:hover {

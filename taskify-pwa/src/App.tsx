@@ -772,7 +772,14 @@ export default function App() {
         root.classList.remove("light", "dark");
         root.classList.add(theme);
         const meta = document.querySelector('meta[name="theme-color"]');
-        if (meta) meta.setAttribute("content", theme === "dark" ? "#0a0a0a" : "#fafafa");
+        if (meta) {
+          let baseColor = theme === "dark" ? "#081026" : "#fafafa";
+          try {
+            const styles = getComputedStyle(root);
+            baseColor = styles.getPropertyValue("--surface-base").trim() || baseColor;
+          } catch {}
+          meta.setAttribute("content", baseColor);
+        }
       };
       apply();
       if (settings.theme === "system") {
@@ -1180,6 +1187,13 @@ export default function App() {
     const rem = (() => {
       try { return parseFloat(getComputedStyle(document.documentElement).fontSize) || 16; } catch { return 16; }
     })();
+    const styles = (() => {
+      try { return getComputedStyle(document.documentElement); } catch { return null; }
+    })();
+    const accent = styles?.getPropertyValue("--accent").trim() || "#0a84ff";
+    const accentSoft = styles?.getPropertyValue("--accent-soft").trim() || "rgba(64, 156, 255, 0.24)";
+    const accentOn = styles?.getPropertyValue("--accent-on").trim() || "#fff";
+    const accentBorder = styles?.getPropertyValue("--accent-border").trim() || accent;
     const dotSize = 1.25 * rem; // 20px @ 16px base
     const dotFont = 0.875 * rem; // 14px @ 16px base
 
@@ -1190,13 +1204,14 @@ export default function App() {
     dot.style.width = `${dotSize}px`;
     dot.style.height = `${dotSize}px`;
     dot.style.borderRadius = '9999px';
-    dot.style.background = '#10b981';
-    dot.style.color = 'white';
+    dot.style.background = accent;
+    dot.style.color = accentOn || '#fff';
     dot.style.display = 'grid';
     dot.style.placeItems = 'center';
     dot.style.fontSize = `${dotFont}px`;
     dot.style.lineHeight = `${dotSize}px`;
-    dot.style.boxShadow = '0 0 0 2px rgba(16,185,129,0.3), 0 6px 16px rgba(0,0,0,0.35)';
+    dot.style.border = `1px solid ${accentBorder}`;
+    dot.style.boxShadow = `0 0 0 2px ${accentSoft || accentBorder}, 0 6px 16px rgba(0,0,0,0.35)`;
     dot.style.zIndex = '1000';
     dot.style.transform = 'translate(0, 0) scale(1)';
     dot.style.transition = 'transform 600ms cubic-bezier(.2,.7,.3,1), opacity 300ms ease 420ms';
@@ -2442,11 +2457,11 @@ export default function App() {
   const totalTutorialSteps = tutorialSteps.length;
 
   return (
-    <div className="min-h-screen px-4 py-4 sm:px-6 lg:px-8 text-primary">
-      <div className="mx-auto max-w-7xl space-y-5">
+    <div className="min-h-screen px-4 pt-3 pb-6 sm:px-6 lg:px-8 text-primary">
+      <div className="mx-auto max-w-7xl space-y-4">
         {/* Header */}
-        <header className="space-y-3">
-          <div className="flex flex-wrap items-end gap-3">
+        <header className="space-y-2.5">
+          <div className="flex flex-wrap items-end gap-2.5">
             <div className="flex flex-col gap-1 justify-end -translate-y-[2px]">
               <h1 className="text-3xl font-semibold tracking-tight">
                 Taskify
@@ -2658,7 +2673,7 @@ export default function App() {
               </div>
               {!settings.completedTab && (
                 <button
-                  className="ghost-button button-sm pressable mt-2 w-full disabled:opacity-50"
+                  className="ghost-button button-sm pressable mt-1.5 w-full disabled:opacity-50"
                   onClick={clearCompleted}
                   disabled={completed.length === 0}
                 >
@@ -2675,7 +2690,7 @@ export default function App() {
 
         {/* Add bar */}
         {(view === "board" || !settings.completedTab) && currentBoard && !settings.inlineAdd && (
-          <div className="flex flex-wrap gap-2 items-center mb-4">
+          <div className="flex flex-wrap gap-2 items-center mb-3">
             <input
               ref={newTitleRef}
               value={newTitle}
@@ -5110,12 +5125,12 @@ function SettingsModal({
               <div className="text-sm font-medium mb-2">Font size</div>
               <div className="flex flex-wrap gap-2">
                 <button className={pillButtonClass(settings.baseFontSize == null)} onClick={() => setSettings({ baseFontSize: null })}>System</button>
-                <button className={pillButtonClass(settings.baseFontSize === 16)} onClick={() => setSettings({ baseFontSize: 16 })}>Small</button>
-                <button className={pillButtonClass(settings.baseFontSize === 18)} onClick={() => setSettings({ baseFontSize: 18 })}>Default</button>
+                <button className={pillButtonClass(settings.baseFontSize === 16)} onClick={() => setSettings({ baseFontSize: 16 })}>Default</button>
+                <button className={pillButtonClass(settings.baseFontSize === 18)} onClick={() => setSettings({ baseFontSize: 18 })}>Comfortable</button>
                 <button className={pillButtonClass(settings.baseFontSize === 20)} onClick={() => setSettings({ baseFontSize: 20 })}>Large</button>
                 <button className={pillButtonClass(settings.baseFontSize === 22)} onClick={() => setSettings({ baseFontSize: 22 })}>X-Large</button>
               </div>
-              <div className="text-xs text-secondary mt-2">Scales the entire UI. Defaults to a larger reading size.</div>
+              <div className="text-xs text-secondary mt-2">Scales the entire UI. Defaults to a more compact size.</div>
             </div>
             <div>
               <div className="text-sm font-medium mb-2">Add new tasks to</div>

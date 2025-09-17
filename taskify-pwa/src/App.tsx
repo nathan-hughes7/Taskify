@@ -2692,14 +2692,17 @@ export default function App() {
                 }
               }}
               placeholder="New task…"
-              className="pill-input flex-1 min-w-0"
+              className="pill-input pill-input--compact flex-1 min-w-0"
             />
             <button
               ref={addButtonRef}
               onClick={() => addTask()}
-              className="accent-button shrink-0"
+              className="accent-button accent-button--circle pressable shrink-0"
+              type="button"
+              aria-label="Add task"
             >
-              Add
+              <span aria-hidden="true">+</span>
+              <span className="sr-only">Add task</span>
             </button>
             {newImages.length > 0 && (
               <div className="w-full flex gap-2 mt-2">

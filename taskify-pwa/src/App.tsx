@@ -3597,8 +3597,9 @@ function Card({
   }
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
+    e.stopPropagation();
     const dragId = e.dataTransfer.getData('text/task-id');
-    if (dragId) onDropBefore(dragId);
+    if (dragId && dragId !== task.id) onDropBefore(dragId);
     setOverBefore(false);
     onDragEnd();
   }

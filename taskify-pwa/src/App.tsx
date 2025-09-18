@@ -2248,6 +2248,7 @@ export default function App() {
       const fromIdx = arr.findIndex(t => t.id === id);
       if (fromIdx < 0) return prev;
       const task = arr[fromIdx];
+      if (beforeId && beforeId === task.id) return prev;
 
       const updated: Task = { ...task };
       const prevDue = startOfDay(new Date(task.dueISO));
@@ -2769,7 +2770,7 @@ export default function App() {
                       key={day}
                       title={WD_SHORT[day]}
                       onTitleClick={() => { setDayChoice(day); setScheduleDate(""); }}
-                      onDropCard={(payload) => moveTask(payload.id, { type: "day", day })}
+                      onDropCard={(payload) => moveTask(payload.id, { type: "day", day }, payload.beforeId)}
                       onDropEnd={handleDragEnd}
                       data-day={day}
                       scrollable={settings.inlineAdd}
@@ -2823,7 +2824,7 @@ export default function App() {
                     ref={el => setColumnRef("week-bounties", el)}
                     title="Bounties"
                     onTitleClick={() => { setDayChoice("bounties"); setScheduleDate(""); }}
-                    onDropCard={(payload) => moveTask(payload.id, { type: "bounties" })}
+                    onDropCard={(payload) => moveTask(payload.id, { type: "bounties" }, payload.beforeId)}
                     onDropEnd={handleDragEnd}
                     scrollable={settings.inlineAdd}
                     footer={settings.inlineAdd ? (
@@ -2886,7 +2887,7 @@ export default function App() {
                     key={col.id}
                     title={col.name}
                     onTitleClick={() => setDayChoice(col.id)}
-                    onDropCard={(payload) => moveTask(payload.id, { type: "list", columnId: col.id })}
+                    onDropCard={(payload) => moveTask(payload.id, { type: "list", columnId: col.id }, payload.beforeId)}
                     onDropEnd={handleDragEnd}
                     scrollable={settings.inlineAdd}
                     footer={settings.inlineAdd ? (
@@ -3410,7 +3411,7 @@ function TaskMedia({ task, indent = false }: { task: Task; indent?: boolean }) {
 // Column container (fixed width for consistent horizontal scroll)
 const DroppableColumn = React.forwardRef<HTMLDivElement, {
   title: string;
-  onDropCard: (payload: { id: string }) => void;
+  onDropCard: (payload: { id: string; beforeId?: string }) => void;
   onDropEnd?: () => void;
   onTitleClick?: () => void;
   children: React.ReactNode;
@@ -3452,7 +3453,24 @@ const DroppableColumn = React.forwardRef<HTMLDivElement, {
     const onDrop = (e: DragEvent) => {
       e.preventDefault();
       const id = e.dataTransfer?.getData("text/task-id");
-      if (id) onDropCard({ id });
+      if (id) {
+        let beforeId: string | undefined;
+        const columnEl = innerRef.current;
+        if (columnEl) {
+          const cards = Array.from(
+            columnEl.querySelectorAll<HTMLElement>("[data-task-id]")
+          );
+          const pointerY = e.clientY;
+          for (const card of cards) {
+            const rect = card.getBoundingClientRect();
+            if (pointerY < rect.top + rect.height / 2) {
+              beforeId = card.dataset.taskId || undefined;
+              break;
+            }
+          }
+        }
+        onDropCard({ id, beforeId });
+      }
       if (onDropEnd) onDropEnd();
       dragDepthRef.current = 0;
       setIsDragOver(false);
@@ -3597,8 +3615,9 @@ function Card({
   }
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
+    e.stopPropagation();
     const dragId = e.dataTransfer.getData('text/task-id');
-    if (dragId) onDropBefore(dragId);
+    if (dragId && dragId !== task.id) onDropBefore(dragId);
     setOverBefore(false);
     onDragEnd();
   }
@@ -3633,6 +3652,7 @@ function Card({
     <div
       ref={cardRef}
       className="task-card group relative select-none"
+      data-task-id={task.id}
       data-state={task.completed ? 'completed' : undefined}
       data-form={stackedForm ? 'stacked' : 'pill'}
       style={{ touchAction: 'auto' }}

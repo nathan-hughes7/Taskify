@@ -4,7 +4,23 @@ import { loadStore } from "../wallet/storage";
 import { ActionSheet } from "./ActionSheet";
 
 export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { mintUrl, setMintUrl, balance, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice } = useCashu();
+  const {
+    mintUrl,
+    setMintUrl,
+    balance,
+    info,
+    createMintInvoice,
+    checkMintQuote,
+    claimMint,
+    receiveToken,
+    createSendToken,
+    payInvoice,
+    nwcConnection,
+    setNwcConnection,
+    clearNwcConnection,
+    payWithNwc,
+    requestNwcInvoice,
+  } = useCashu();
 
   interface HistoryItem {
     id: string;
@@ -14,8 +30,8 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
 
   const [showReceiveOptions, setShowReceiveOptions] = useState(false);
   const [showSendOptions, setShowSendOptions] = useState(false);
-  const [receiveMode, setReceiveMode] = useState<null | "ecash" | "lightning">(null);
-  const [sendMode, setSendMode] = useState<null | "ecash" | "lightning">(null);
+  const [receiveMode, setReceiveMode] = useState<null | "ecash" | "lightning" | "nwc">(null);
+  const [sendMode, setSendMode] = useState<null | "ecash" | "lightning" | "nwc">(null);
 
   const [mintAmt, setMintAmt] = useState("");
   const [mintQuote, setMintQuote] = useState<{ request: string; quote: string; expiry: number } | null>(null);
@@ -32,6 +48,16 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
   const [lnAddrAmt, setLnAddrAmt] = useState("");
   const [lnState, setLnState] = useState<"idle" | "sending" | "done" | "error">("idle");
   const [lnError, setLnError] = useState("");
+  const [showNwcManager, setShowNwcManager] = useState(false);
+  const [nwcInput, setNwcInput] = useState("");
+  const [nwcSaveStatus, setNwcSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [nwcSaveError, setNwcSaveError] = useState("");
+  const [nwcFundAmt, setNwcFundAmt] = useState("");
+  const [nwcFundState, setNwcFundState] = useState<"idle" | "working" | "success" | "error">("idle");
+  const [nwcFundMsg, setNwcFundMsg] = useState("");
+  const [nwcWithdrawAmt, setNwcWithdrawAmt] = useState("");
+  const [nwcWithdrawState, setNwcWithdrawState] = useState<"idle" | "working" | "success" | "error">("idle");
+  const [nwcWithdrawMsg, setNwcWithdrawMsg] = useState("");
   const [history, setHistory] = useState<HistoryItem[]>(() => {
     try {
       const saved = localStorage.getItem("cashuHistory");
@@ -84,6 +110,16 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       setShowSendOptions(false);
       setReceiveMode(null);
       setSendMode(null);
+      setShowNwcManager(false);
+      setNwcInput("");
+      setNwcSaveStatus("idle");
+      setNwcSaveError("");
+      setNwcFundAmt("");
+      setNwcFundState("idle");
+      setNwcFundMsg("");
+      setNwcWithdrawAmt("");
+      setNwcWithdrawState("idle");
+      setNwcWithdrawMsg("");
     }
   }, [open]);
 
@@ -112,11 +148,25 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     refreshMintEntries();
   }, [showMintBalances, mintUrl]);
 
+  useEffect(() => {
+    if (!showNwcManager) return;
+    setNwcInput(nwcConnection?.connectionString || "");
+    setNwcSaveStatus("idle");
+    setNwcSaveError("");
+  }, [showNwcManager, nwcConnection]);
+
   const headerInfo = useMemo(() => {
     if (!mintUrl) return "No mint set";
     const parts = [info?.name || "Mint", info?.version ? `v${info.version}` : undefined].filter(Boolean);
     return `${parts.join(" ")} • ${mintUrl}`;
   }, [info, mintUrl]);
+
+  const shortKey = (key: string) => {
+    if (!key) return "";
+    return key.length <= 16 ? key : `${key.slice(0, 8)}…${key.slice(-8)}`;
+  };
+
+  const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
   async function handleCreateInvoice() {
     setMintError("");
@@ -213,6 +263,77 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     }
   }
 
+  async function handleSaveNwcConnection() {
+    setNwcSaveStatus("saving");
+    setNwcSaveError("");
+    try {
+      const input = nwcInput.trim();
+      if (!input) throw new Error("Paste a NWC connection string");
+      await setNwcConnection(input);
+      setNwcSaveStatus("saved");
+    } catch (e: any) {
+      setNwcSaveStatus("error");
+      setNwcSaveError(e?.message || String(e));
+    }
+  }
+
+  function handleDisconnectNwc() {
+    clearNwcConnection();
+    setNwcInput("");
+    setNwcSaveStatus("idle");
+    setNwcSaveError("");
+  }
+
+  async function handleFundWithNwc() {
+    setNwcFundState("working");
+    setNwcFundMsg("");
+    try {
+      if (!nwcConnection) throw new Error("Connect an NWC wallet first");
+      const amt = Math.max(0, Math.floor(Number(nwcFundAmt) || 0));
+      if (!amt) throw new Error("Enter amount in sats");
+      const quote = await createMintInvoice(amt, "Taskify wallet top-up");
+      await payWithNwc(quote.request);
+      const deadline = Date.now() + 60000;
+      let minted = false;
+      while (Date.now() < deadline) {
+        const status = await checkMintQuote(quote.quote);
+        if (status === "PAID" || status === "ISSUED") {
+          await claimMint(quote.quote, amt);
+          minted = true;
+          break;
+        }
+        await delay(2000);
+      }
+      if (!minted) throw new Error("Mint did not confirm payment in time");
+      setNwcFundState("success");
+      setNwcFundMsg(`Added ${amt} sats via NWC`);
+      setNwcFundAmt("");
+      setHistory((h) => [{ id: `nwc-fund-${Date.now()}`, summary: `Funded ${amt} sats via NWC` }, ...h]);
+    } catch (e: any) {
+      setNwcFundState("error");
+      setNwcFundMsg(e?.message || String(e));
+    }
+  }
+
+  async function handleWithdrawWithNwc() {
+    setNwcWithdrawState("working");
+    setNwcWithdrawMsg("");
+    try {
+      if (!nwcConnection) throw new Error("Connect an NWC wallet first");
+      const amt = Math.max(0, Math.floor(Number(nwcWithdrawAmt) || 0));
+      if (!amt) throw new Error("Enter amount in sats");
+      const invoice = await requestNwcInvoice(amt, "Taskify wallet withdrawal");
+      await payInvoice(invoice);
+      setNwcWithdrawState("success");
+      setNwcWithdrawMsg(`Sent ${amt} sats via NWC`);
+      setNwcWithdrawAmt("");
+      setHistory((h) => [{ id: `nwc-withdraw-${Date.now()}`, summary: `Withdrew ${amt} sats via NWC` }, ...h]);
+    } catch (e: any) {
+      setNwcWithdrawState("error");
+      setNwcWithdrawMsg(e?.message || String(e));
+    }
+  }
+
   if (!open) return null;
 
   return (
@@ -224,6 +345,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       </div>
       <div className="wallet-modal__toolbar">
         <button className="ghost-button button-sm pressable" onClick={()=>setShowMintBalances(true)}>Mint balances</button>
+        <button className="ghost-button button-sm pressable" onClick={()=>setShowNwcManager(true)}>Manage NWC</button>
       </div>
       <div className="wallet-modal__content">
         <div className="wallet-balance-card">
@@ -247,6 +369,12 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
             <span>Lightning invoice</span>
             <span className="text-tertiary">→</span>
           </button>
+          {nwcConnection && (
+            <button className="ghost-button button-sm pressable w-full justify-between" onClick={()=>setReceiveMode("nwc")}>
+              <span>Fund via NWC</span>
+              <span className="text-tertiary">→</span>
+            </button>
+          )}
         </div>
       </ActionSheet>
 
@@ -295,6 +423,30 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         </div>
       </ActionSheet>
 
+      <ActionSheet
+        open={receiveMode === "nwc"}
+        onClose={()=>{
+          setReceiveMode(null);
+          setShowReceiveOptions(false);
+          setNwcFundAmt("");
+          setNwcFundState("idle");
+          setNwcFundMsg("");
+        }}
+        title="Fund via NWC"
+      >
+        <div className="wallet-section space-y-3">
+          <div className="text-xs text-secondary">Connected wallet: {nwcConnection ? shortKey(nwcConnection.walletPubkey) : "None"}</div>
+          <div className="flex gap-2">
+            <input className="pill-input flex-1" placeholder="Amount (sats)" value={nwcFundAmt} onChange={(e)=>setNwcFundAmt(e.target.value)} />
+            <button className="accent-button button-sm pressable" onClick={handleFundWithNwc} disabled={!nwcConnection || nwcFundState === "working"}>Fund</button>
+          </div>
+          {nwcFundState === "working" && <div className="text-xs text-secondary">Funding…</div>}
+          {nwcFundState === "success" && <div className="text-xs text-accent">{nwcFundMsg}</div>}
+          {nwcFundState === "error" && <div className="text-xs text-rose-400">{nwcFundMsg}</div>}
+          {!nwcConnection && <div className="text-xs text-secondary">Connect an NWC wallet in wallet settings.</div>}
+        </div>
+      </ActionSheet>
+
       {/* Send options */}
       <ActionSheet open={showSendOptions && sendMode === null} onClose={()=>setShowSendOptions(false)} title="Send">
         <div className="wallet-section space-y-2 text-sm">
@@ -306,6 +458,12 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
             <span>Pay lightning invoice</span>
             <span className="text-tertiary">→</span>
           </button>
+          {nwcConnection && (
+            <button className="ghost-button button-sm pressable w-full justify-between" onClick={()=>setSendMode("nwc")}>
+              <span>Withdraw via NWC</span>
+              <span className="text-tertiary">→</span>
+            </button>
+          )}
         </div>
       </ActionSheet>
 
@@ -356,6 +514,30 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         </div>
       </ActionSheet>
 
+      <ActionSheet
+        open={sendMode === "nwc"}
+        onClose={()=>{
+          setSendMode(null);
+          setShowSendOptions(false);
+          setNwcWithdrawAmt("");
+          setNwcWithdrawState("idle");
+          setNwcWithdrawMsg("");
+        }}
+        title="Withdraw via NWC"
+      >
+        <div className="wallet-section space-y-3">
+          <div className="text-xs text-secondary">Connected wallet: {nwcConnection ? shortKey(nwcConnection.walletPubkey) : "None"}</div>
+          <div className="flex gap-2">
+            <input className="pill-input flex-1" placeholder="Amount (sats)" value={nwcWithdrawAmt} onChange={(e)=>setNwcWithdrawAmt(e.target.value)} />
+            <button className="accent-button button-sm pressable" onClick={handleWithdrawWithNwc} disabled={!nwcConnection || nwcWithdrawState === "working"}>Withdraw</button>
+          </div>
+          {nwcWithdrawState === "working" && <div className="text-xs text-secondary">Processing…</div>}
+          {nwcWithdrawState === "success" && <div className="text-xs text-accent">{nwcWithdrawMsg}</div>}
+          {nwcWithdrawState === "error" && <div className="text-xs text-rose-400">{nwcWithdrawMsg}</div>}
+          {!nwcConnection && <div className="text-xs text-secondary">Connect an NWC wallet in wallet settings.</div>}
+        </div>
+      </ActionSheet>
+
       <ActionSheet open={showHistory} onClose={()=>{setShowHistory(false); setExpandedIdx(null);}} title="History">
         {history.length ? (
           <ul className="space-y-2 text-sm">
@@ -380,6 +562,45 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         ) : (
           <div className="wallet-section text-sm text-secondary">No history yet</div>
         )}
+      </ActionSheet>
+
+      <ActionSheet
+        open={showNwcManager}
+        onClose={()=>{
+          setShowNwcManager(false);
+          setNwcSaveStatus("idle");
+          setNwcSaveError("");
+        }}
+        title="Manage NWC"
+      >
+        <div className="space-y-4 text-sm">
+          <div className="wallet-section space-y-3">
+            <div className="text-xs text-secondary uppercase tracking-wide">Connection string</div>
+            <textarea
+              className="pill-textarea wallet-textarea"
+              placeholder="nwc://pubkey?relay=wss://relay&secret=..."
+              value={nwcInput}
+              onChange={(e)=>setNwcInput(e.target.value)}
+            />
+            <div className="flex flex-wrap gap-2">
+              <button className="accent-button button-sm pressable" onClick={handleSaveNwcConnection} disabled={nwcSaveStatus === "saving"}>Save</button>
+              {nwcConnection && (
+                <button className="ghost-button button-sm pressable" onClick={handleDisconnectNwc}>Disconnect</button>
+              )}
+            </div>
+            {nwcSaveStatus === "saving" && <div className="text-xs text-secondary">Connecting…</div>}
+            {nwcSaveStatus === "saved" && <div className="text-xs text-accent">Connection saved</div>}
+            {nwcSaveStatus === "error" && <div className="text-xs text-rose-400">{nwcSaveError}</div>}
+          </div>
+          {nwcConnection && (
+            <div className="wallet-section space-y-2 text-xs">
+              <div className="text-secondary uppercase tracking-wide">Active connection</div>
+              <div><span className="text-secondary">Relay:</span> {nwcConnection.relay}</div>
+              <div><span className="text-secondary">Wallet pubkey:</span> {shortKey(nwcConnection.walletPubkey)}</div>
+              <div><span className="text-secondary">Client pubkey:</span> {shortKey(nwcConnection.clientPubkey)}</div>
+            </div>
+          )}
+        </div>
       </ActionSheet>
 
       {/* Mint balances */}

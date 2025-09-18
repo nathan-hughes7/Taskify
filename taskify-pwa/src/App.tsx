@@ -102,6 +102,7 @@ type Settings = {
   showFullWeekRecurring: boolean;
   // Add tasks via per-column boxes instead of global add bar
   inlineAdd: boolean;
+  hideCompletedSubtasks: boolean;
   // Base UI font size in pixels; null uses the OS preferred size
   baseFontSize: number | null;
   startBoardByDay: Partial<Record<Weekday, string>>;
@@ -516,6 +517,7 @@ function useSettings() {
         }
       }
       const accent = parsed?.accent === "green" ? "green" : "blue";
+      const hideCompletedSubtasks = parsed?.hideCompletedSubtasks === true;
       if (parsed && typeof parsed === "object") {
         delete (parsed as Record<string, unknown>).theme;
       }
@@ -530,6 +532,7 @@ function useSettings() {
         baseFontSize,
         startBoardByDay,
         accent,
+        hideCompletedSubtasks,
       };
     } catch {
       return {
@@ -542,6 +545,7 @@ function useSettings() {
         baseFontSize: null,
         startBoardByDay: {},
         accent: "blue",
+        hideCompletedSubtasks: false,
       };
     }
   });
@@ -2864,6 +2868,7 @@ export default function App() {
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "bounties" }, t.id)}
                           showStreaks={settings.streaksEnabled}
+                          hideCompletedSubtasks={settings.hideCompletedSubtasks}
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
                           onDragStart={(id) => setDraggingTaskId(id)}
                           onDragEnd={handleDragEnd}
@@ -2927,6 +2932,7 @@ export default function App() {
                           onEdit={() => setEditing(t)}
                           onDropBefore={(dragId) => moveTask(dragId, { type: "list", columnId: col.id }, t.id)}
                           showStreaks={settings.streaksEnabled}
+                          hideCompletedSubtasks={settings.hideCompletedSubtasks}
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
                           onDragStart={(id) => setDraggingTaskId(id)}
                           onDragEnd={handleDragEnd}
@@ -2956,52 +2962,62 @@ export default function App() {
             ) : (
               <ul className="space-y-1.5">
                 {completed.map((t) => {
-                  const hasDetail = !!t.note?.trim() || (t.images && t.images.length > 0) || (t.subtasks && t.subtasks.length > 0) || !!t.bounty;
+                  const visibleSubtasks =
+                    settings.hideCompletedSubtasks && t.subtasks
+                      ? t.subtasks.filter((st) => !st.completed)
+                      : t.subtasks;
+                  const hasVisibleSubtasks = !!visibleSubtasks && visibleSubtasks.length > 0;
+                  const hasDetail =
+                    !!t.note?.trim() ||
+                    (t.images && t.images.length > 0) ||
+                    hasVisibleSubtasks ||
+                    !!t.bounty;
                   return (
-                  <li key={t.id} className="task-card space-y-2" data-state="completed" data-form={hasDetail ? 'stacked' : 'pill'}>
-                    <div className="flex items-start gap-2">
-                      <div className="flex-1">
-                      <div className="text-sm font-medium leading-[1.15]">
-                          {renderTitleWithLink(t.title, t.note)}
-                        </div>
-                        <div className="text-xs text-secondary">
-                          {currentBoard?.kind === "week"
-                            ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
-                            : "Completed item"}
-                          {t.completedAt ? ` • Completed ${new Date(t.completedAt).toLocaleString()}` : ""}
-                          {settings.streaksEnabled &&
-                            t.recurrence &&
-                            (t.recurrence.type === "daily" || t.recurrence.type === "weekly") &&
-                            typeof t.streak === "number" && t.streak > 0
-                              ? ` • 🔥 ${t.streak}`
-                              : ""}
-                        </div>
-                        <TaskMedia task={t} />
-                        {t.subtasks?.length ? (
-                          <ul className="mt-1 space-y-1 text-xs">
-                            {t.subtasks.map(st => (
-                              <li key={st.id} className="subtask-row">
-                                <input type="checkbox" checked={!!st.completed} disabled className="subtask-row__checkbox" />
-                                <span className={`subtask-row__text ${st.completed ? 'line-through text-secondary' : ''}`}>{st.title}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
-                        {t.bounty && (
-                          <div className="mt-1">
-                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border ${t.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : t.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : t.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-surface-muted border-surface'}`}>
-                              Bounty {typeof t.bounty.amount==='number' ? `• ${t.bounty.amount} sats` : ''} • {t.bounty.state}
-                            </span>
+                    <li key={t.id} className="task-card space-y-2" data-state="completed" data-form={hasDetail ? 'stacked' : 'pill'}>
+                      <div className="flex items-start gap-2">
+                        <div className="flex-1">
+                          <div className="text-sm font-medium leading-[1.15]">
+                            {renderTitleWithLink(t.title, t.note)}
                           </div>
-                        )}
+                          <div className="text-xs text-secondary">
+                            {currentBoard?.kind === "week"
+                              ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
+                              : "Completed item"}
+                            {t.completedAt ? ` • Completed ${new Date(t.completedAt).toLocaleString()}` : ""}
+                            {settings.streaksEnabled &&
+                              t.recurrence &&
+                              (t.recurrence.type === "daily" || t.recurrence.type === "weekly") &&
+                              typeof t.streak === "number" && t.streak > 0
+                                ? ` • 🔥 ${t.streak}`
+                                : ""}
+                          </div>
+                          <TaskMedia task={t} />
+                          {hasVisibleSubtasks ? (
+                            <ul className="mt-1 space-y-1 text-xs">
+                              {visibleSubtasks!.map(st => (
+                                <li key={st.id} className="subtask-row">
+                                  <input type="checkbox" checked={!!st.completed} disabled className="subtask-row__checkbox" />
+                                  <span className={`subtask-row__text ${st.completed ? 'line-through text-secondary' : ''}`}>{st.title}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                          {t.bounty && (
+                            <div className="mt-1">
+                              <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border ${t.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : t.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : t.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-surface-muted border-surface'}`}>
+                                Bounty {typeof t.bounty.amount==='number' ? `• ${t.bounty.amount} sats` : ''} • {t.bounty.state}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex gap-1">
+                          <IconButton label="Restore" onClick={() => restoreTask(t.id)} intent="success">↩︎</IconButton>
+                          <IconButton label="Delete" onClick={() => deleteTask(t.id)} intent="danger">✕</IconButton>
+                        </div>
                       </div>
-                      <div className="flex gap-1">
-                        <IconButton label="Restore" onClick={() => restoreTask(t.id)} intent="success">↩︎</IconButton>
-                        <IconButton label="Delete" onClick={() => deleteTask(t.id)} intent="danger">✕</IconButton>
-                      </div>
-                    </div>
-                  </li>
-                );})}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -3034,58 +3050,64 @@ export default function App() {
             <div className="text-sm text-secondary">No upcoming tasks.</div>
           ) : (
             <ul className="space-y-1.5">
-              {upcoming.map((t) => (
-                <li key={t.id} className="task-card space-y-2" data-form="stacked">
-                  <div className="flex items-start gap-2">
-                    <div className="flex-1">
-                      <div className="text-sm font-medium leading-[1.15]">{renderTitleWithLink(t.title, t.note)}</div>
-                      <div className="text-xs text-secondary">
-                        {currentBoard?.kind === "week"
-                          ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
-                          : "Hidden item"}
-                        {t.hiddenUntilISO ? ` • Reveals ${new Date(t.hiddenUntilISO).toLocaleDateString()}` : ""}
+              {upcoming.map((t) => {
+                const visibleSubtasks =
+                  settings.hideCompletedSubtasks && t.subtasks
+                    ? t.subtasks.filter((st) => !st.completed)
+                    : t.subtasks;
+                return (
+                  <li key={t.id} className="task-card space-y-2" data-form="stacked">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1">
+                        <div className="text-sm font-medium leading-[1.15]">{renderTitleWithLink(t.title, t.note)}</div>
+                        <div className="text-xs text-secondary">
+                          {currentBoard?.kind === "week"
+                            ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
+                            : "Hidden item"}
+                          {t.hiddenUntilISO ? ` • Reveals ${new Date(t.hiddenUntilISO).toLocaleDateString()}` : ""}
+                        </div>
+                        <TaskMedia task={t} />
+                        {visibleSubtasks && visibleSubtasks.length > 0 ? (
+                          <ul className="mt-1 space-y-1 text-xs">
+                            {visibleSubtasks.map(st => (
+                              <li key={st.id} className="subtask-row">
+                                <input type="checkbox" checked={!!st.completed} disabled className="subtask-row__checkbox" />
+                                <span className={`subtask-row__text ${st.completed ? 'line-through text-secondary' : ''}`}>{st.title}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
                       </div>
-                      <TaskMedia task={t} />
-                      {t.subtasks?.length ? (
-                        <ul className="mt-1 space-y-1 text-xs">
-                          {t.subtasks.map(st => (
-                            <li key={st.id} className="subtask-row">
-                              <input type="checkbox" checked={!!st.completed} disabled className="subtask-row__checkbox" />
-                              <span className={`subtask-row__text ${st.completed ? 'line-through text-secondary' : ''}`}>{st.title}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
                     </div>
-                  </div>
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      className="accent-button button-sm pressable"
-                      onClick={() =>
-                        setTasks((prev) =>
-                          prev.map((x) =>
-                            x.id === t.id ? { ...x, hiddenUntilISO: undefined } : x
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        className="accent-button button-sm pressable"
+                        onClick={() =>
+                          setTasks((prev) =>
+                            prev.map((x) =>
+                              x.id === t.id ? { ...x, hiddenUntilISO: undefined } : x
+                            )
                           )
-                        )
-                      }
-                    >
-                      Reveal now
-                    </button>
-                    <button
-                      className="ghost-button button-sm pressable"
-                      onClick={() => { setEditing(t); setShowUpcoming(false); }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      className="ghost-button button-sm pressable text-rose-400"
-                      onClick={() => deleteTask(t.id)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </li>
-              ))}
+                        }
+                      >
+                        Reveal now
+                      </button>
+                      <button
+                        className="ghost-button button-sm pressable"
+                        onClick={() => { setEditing(t); setShowUpcoming(false); }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="ghost-button button-sm pressable text-rose-400"
+                        onClick={() => deleteTask(t.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </SideDrawer>
@@ -3543,6 +3565,7 @@ function Card({
   onEdit,
   onDropBefore,
   showStreaks,
+  hideCompletedSubtasks,
   onToggleSubtask,
   onFlyToCompleted,
   onDragStart,
@@ -3553,6 +3576,7 @@ function Card({
   onEdit: () => void;
   onDropBefore: (dragId: string) => void;
   showStreaks: boolean;
+  hideCompletedSubtasks: boolean;
   onToggleSubtask: (subId: string) => void;
   onFlyToCompleted: (rect: DOMRect) => void;
   onDragStart: (id: string) => void;
@@ -3564,7 +3588,19 @@ function Card({
   const [isStacked, setIsStacked] = useState(false);
   const iconSizeStyle = useMemo(() => ({ '--icon-size': '2.2rem' } as React.CSSProperties), []);
 
-  const hasDetail = !!task.note?.trim() || (task.images && task.images.length > 0) || (task.subtasks && task.subtasks.length > 0) || !!task.bounty;
+  const visibleSubtasks = useMemo(
+    () =>
+      hideCompletedSubtasks && task.subtasks
+        ? task.subtasks.filter((st) => !st.completed)
+        : task.subtasks,
+    [hideCompletedSubtasks, task.subtasks]
+  );
+  const hasVisibleSubtasks = !!visibleSubtasks && visibleSubtasks.length > 0;
+  const hasDetail =
+    !!task.note?.trim() ||
+    (task.images && task.images.length > 0) ||
+    hasVisibleSubtasks ||
+    !!task.bounty;
 
   useEffect(() => {
     const el = titleRef.current;
@@ -3599,7 +3635,7 @@ function Card({
       window.removeEventListener('resize', compute);
       cancelAnimationFrame(raf);
     };
-  }, [task.title, task.note, task.images?.length, task.subtasks?.length]);
+  }, [task.title, task.note, task.images?.length, visibleSubtasks?.length]);
 
   function handleDragStart(e: React.DragEvent) {
     e.dataTransfer.setData('text/task-id', task.id);
@@ -3727,9 +3763,9 @@ function Card({
 
       <TaskMedia task={task} indent />
 
-      {task.subtasks?.length ? (
+      {hasVisibleSubtasks ? (
         <ul className="task-card__details mt-2 space-y-1.5 text-xs text-secondary">
-          {task.subtasks.map((st) => (
+          {visibleSubtasks!.map((st) => (
             <li key={st.id} className="subtask-row">
               <input
                 type="checkbox"
@@ -5190,6 +5226,14 @@ function SettingsModal({
                 <button className={pillButtonClass(settings.inlineAdd)} onClick={() => setSettings({ inlineAdd: true })}>Inline</button>
                 <button className={pillButtonClass(!settings.inlineAdd)} onClick={() => setSettings({ inlineAdd: false })}>Top bar</button>
               </div>
+            </div>
+            <div>
+              <div className="text-sm font-medium mb-2">Completed subtasks</div>
+              <div className="flex gap-2">
+                <button className={pillButtonClass(!settings.hideCompletedSubtasks)} onClick={() => setSettings({ hideCompletedSubtasks: false })}>Show</button>
+                <button className={pillButtonClass(settings.hideCompletedSubtasks)} onClick={() => setSettings({ hideCompletedSubtasks: true })}>Hide</button>
+              </div>
+              <div className="text-xs text-secondary mt-2">Hide completed subtasks from task cards—they stay visible while editing.</div>
             </div>
           </div>
           {showViewAdvanced && (

@@ -647,7 +647,9 @@ html.light .board-column[data-drop-over="true"] {
 .wallet-modal__toolbar {
   margin-top: 1rem;
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
 }
 
 .wallet-modal__content {

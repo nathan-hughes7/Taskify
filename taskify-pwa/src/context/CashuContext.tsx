@@ -2,7 +2,8 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import type { Proof } from "@cashu/cashu-ts";
 import { getDecodedToken } from "@cashu/cashu-ts";
 import { CashuManager } from "../wallet/CashuManager";
-import { getActiveMint, setActiveMint as persistActiveMint } from "../wallet/storage";
+import { NwcClient, type NwcConnectionDetails } from "../wallet/NwcClient";
+import { getActiveMint, getNwcConnection, setActiveMint as persistActiveMint, setNwcConnection as persistNwcConnection } from "../wallet/storage";
 
 type MintInfo = {
   name?: string;
@@ -23,6 +24,11 @@ type CashuContextType = {
   receiveToken: (encoded: string) => Promise<{ proofs: Proof[]; usedMintUrl: string; activeMintUrl: string; crossMint: boolean }>;
   createSendToken: (amount: number) => Promise<{ token: string }>;
   payInvoice: (invoice: string) => Promise<{ state: string }>;
+  nwcConnection: NwcConnectionDetails | null;
+  setNwcConnection: (connectionString: string) => Promise<void>;
+  clearNwcConnection: () => void;
+  payWithNwc: (invoice: string) => Promise<void>;
+  requestNwcInvoice: (amount: number, memo?: string) => Promise<string>;
 };
 
 const CashuContext = createContext<CashuContextType | null>(null);
@@ -34,6 +40,25 @@ export function CashuProvider({ children }: { children: React.ReactNode }) {
   const [balance, setBalance] = useState(0);
   const [proofs, setProofs] = useState<Proof[]>([]);
   const [info, setInfo] = useState<MintInfo | null>(null);
+  type NwcState = { client: NwcClient | null; info: NwcConnectionDetails | null };
+  const [nwcState, setNwcState] = useState<NwcState>(() => {
+    const stored = getNwcConnection();
+    if (!stored) return { client: null, info: null };
+    try {
+      const client = new NwcClient(stored);
+      const details = client.details;
+      if (details.connectionString !== stored) {
+        persistNwcConnection(details.connectionString);
+      }
+      return { client, info: details };
+    } catch (e) {
+      console.error("Failed to restore NWC connection", e);
+      persistNwcConnection(null);
+      return { client: null, info: null };
+    }
+  });
+  const nwcClient = nwcState.client;
+  const nwcInfo = nwcState.info;
 
   useEffect(() => {
     let cancelled = false;
@@ -71,6 +96,24 @@ export function CashuProvider({ children }: { children: React.ReactNode }) {
     const clean = url.trim().replace(/\/$/, "");
     setMintUrlState(clean);
     persistActiveMint(clean);
+  }, []);
+
+  const setNwcConnection = useCallback(async (connectionString: string) => {
+    const client = new NwcClient(connectionString);
+    const details = client.details;
+    setNwcState((prev) => {
+      if (prev.client) prev.client.close();
+      return { client, info: details };
+    });
+    persistNwcConnection(details.connectionString);
+  }, []);
+
+  const clearNwcConnection = useCallback(() => {
+    setNwcState((prev) => {
+      if (prev.client) prev.client.close();
+      return { client: null, info: null };
+    });
+    persistNwcConnection(null);
   }, []);
 
   const createMintInvoice = useCallback(async (amount: number, description?: string) => {
@@ -136,6 +179,16 @@ export function CashuProvider({ children }: { children: React.ReactNode }) {
     return { state: (res.quote as any)?.state ?? "" };
   }, [manager]);
 
+  const payWithNwc = useCallback(async (invoice: string) => {
+    if (!nwcClient) throw new Error("No NWC connection configured");
+    await nwcClient.payInvoice(invoice);
+  }, [nwcClient]);
+
+  const requestNwcInvoice = useCallback(async (amount: number, memo?: string) => {
+    if (!nwcClient) throw new Error("No NWC connection configured");
+    return nwcClient.makeInvoice(amount, memo);
+  }, [nwcClient]);
+
   const value = useMemo<CashuContextType>(() => ({
     ready,
     mintUrl,
@@ -149,7 +202,30 @@ export function CashuProvider({ children }: { children: React.ReactNode }) {
     receiveToken,
     createSendToken,
     payInvoice,
-  }), [ready, mintUrl, setMintUrl, balance, proofs, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice]);
+    nwcConnection: nwcInfo,
+    setNwcConnection,
+    clearNwcConnection,
+    payWithNwc,
+    requestNwcInvoice,
+  }), [
+    ready,
+    mintUrl,
+    setMintUrl,
+    balance,
+    proofs,
+    info,
+    createMintInvoice,
+    checkMintQuote,
+    claimMint,
+    receiveToken,
+    createSendToken,
+    payInvoice,
+    nwcInfo,
+    setNwcConnection,
+    clearNwcConnection,
+    payWithNwc,
+    requestNwcInvoice,
+  ]);
 
   return <CashuContext.Provider value={value}>{children}</CashuContext.Provider>;
 }

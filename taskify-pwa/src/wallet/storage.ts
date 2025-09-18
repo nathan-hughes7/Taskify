@@ -2,6 +2,7 @@ import type { Proof } from "@cashu/cashu-ts";
 
 const LS_KEY = "cashu_proofs_v1";
 const LS_ACTIVE_MINT = "cashu_active_mint_v1";
+const LS_NWC_CONNECTION = "cashu_nwc_connection_v1";
 
 export type ProofStore = {
   [mintUrl: string]: Proof[];
@@ -68,4 +69,18 @@ export function getActiveMint(): string {
 export function setActiveMint(url: string | null) {
   if (!url) localStorage.removeItem(LS_ACTIVE_MINT);
   else localStorage.setItem(LS_ACTIVE_MINT, url);
+}
+
+export function getNwcConnection(): string | null {
+  try {
+    const raw = localStorage.getItem(LS_NWC_CONNECTION);
+    return raw ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setNwcConnection(connection: string | null) {
+  if (!connection) localStorage.removeItem(LS_NWC_CONNECTION);
+  else localStorage.setItem(LS_NWC_CONNECTION, connection);
 }

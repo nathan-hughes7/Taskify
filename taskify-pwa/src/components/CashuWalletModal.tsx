@@ -100,6 +100,10 @@ const BOLT11_AMOUNT_MULTIPLIERS = {
   p: { numerator: 1n, denominator: 10n },
 } as const satisfies Record<string, { numerator: bigint; denominator: bigint }>;
 
+const SATS_PER_BTC = 100_000_000;
+const COINBASE_SPOT_PRICE_URL = "https://api.coinbase.com/v2/prices/BTC-USD/spot";
+const PRICE_REFRESH_MS = 60_000;
+
 type Bolt11AmountInfo = {
   amountMsat: bigint | null;
 };
@@ -306,7 +310,19 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
   );
 }
 
-export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CashuWalletModal({
+  open,
+  onClose,
+  walletConversionEnabled,
+  walletPrimaryCurrency,
+  setWalletPrimaryCurrency,
+}: {
+  open: boolean;
+  onClose: () => void;
+  walletConversionEnabled: boolean;
+  walletPrimaryCurrency: "sat" | "usd";
+  setWalletPrimaryCurrency: (currency: "sat" | "usd") => void;
+}) {
   const { mintUrl, setMintUrl, balance, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice: payMintInvoice } = useCashu();
   const { status: nwcStatus, connection: nwcConnection, info: nwcInfo, lastError: nwcError, connect: connectNwc, disconnect: disconnectNwc, refreshInfo: refreshNwcInfo, getBalanceMsat: getNwcBalanceMsat, payInvoice: payWithNwc, makeInvoice: makeNwcInvoice } = useNwc();
 
@@ -330,8 +346,13 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
   const [receiveMode, setReceiveMode] = useState<null | "ecash" | "lightning" | "lnurlWithdraw" | "nwcFund">(null);
   const [sendMode, setSendMode] = useState<null | "ecash" | "lightning" | "paymentRequest" | "nwcWithdraw">(null);
 
+  const [btcUsdPrice, setBtcUsdPrice] = useState<number | null>(null);
+  const [priceStatus, setPriceStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [priceUpdatedAt, setPriceUpdatedAt] = useState<number | null>(null);
+
   const [mintAmt, setMintAmt] = useState("");
   const [mintQuote, setMintQuote] = useState<{ request: string; quote: string; expiry: number } | null>(null);
+  const [mintQuoteAmountSat, setMintQuoteAmountSat] = useState<number | null>(null);
   const [mintStatus, setMintStatus] = useState<"idle" | "waiting" | "minted" | "error">("idle");
   const [mintError, setMintError] = useState("");
 
@@ -589,6 +610,14 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
   );
   const nwcFundInProgress = nwcFundState === "creating" || nwcFundState === "paying" || nwcFundState === "waiting" || nwcFundState === "claiming";
   const nwcWithdrawInProgress = nwcWithdrawState === "requesting" || nwcWithdrawState === "paying";
+  const canSubmitNwcFund = useMemo(() => {
+    const parsed = parseAmountInput(nwcFundAmt);
+    return !parsed.error && parsed.sats > 0;
+  }, [parseAmountInput, nwcFundAmt]);
+  const canSubmitNwcWithdraw = useMemo(() => {
+    const parsed = parseAmountInput(nwcWithdrawAmt);
+    return !parsed.error && parsed.sats > 0;
+  }, [parseAmountInput, nwcWithdrawAmt]);
 
   // Mint balances sheet
   const [showMintBalances, setShowMintBalances] = useState(false);
@@ -693,11 +722,166 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     setNwcFeedback("");
   }, [showNwcManager, nwcConnection]);
 
-  const headerInfo = useMemo(() => {
+  useEffect(() => {
+    if (!open || !walletConversionEnabled) return;
+    let cancelled = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const loadPrice = async () => {
+      try {
+        setPriceStatus((prev) => (prev === "loading" ? prev : "loading"));
+        const response = await fetch(COINBASE_SPOT_PRICE_URL, { headers: { Accept: "application/json" } });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload: any = await response.json();
+        const amount = Number(payload?.data?.amount);
+        if (!Number.isFinite(amount) || amount <= 0) throw new Error("Invalid price data");
+        if (cancelled) return;
+        setBtcUsdPrice(amount);
+        setPriceUpdatedAt(Date.now());
+        setPriceStatus("idle");
+      } catch (err) {
+        if (!cancelled) {
+          setPriceStatus("error");
+        }
+      } finally {
+        if (!cancelled) {
+          refreshTimer = setTimeout(() => {
+            void loadPrice();
+          }, PRICE_REFRESH_MS);
+        }
+      }
+    };
+
+    void loadPrice();
+
+    return () => {
+      cancelled = true;
+      if (refreshTimer) clearTimeout(refreshTimer);
+    };
+  }, [open, walletConversionEnabled]);
+
+  useEffect(() => {
+    if (!walletConversionEnabled) {
+      setPriceStatus("idle");
+    }
+  }, [walletConversionEnabled]);
+
+  const mintMeta = useMemo(() => {
     if (!mintUrl) return "No mint set";
     const parts = [info?.name || "Mint", info?.version ? `v${info.version}` : undefined].filter(Boolean);
     return `${parts.join(" ")} • ${mintUrl}`;
   }, [info, mintUrl]);
+
+  const usdFormatterLarge = useMemo(() => new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }), []);
+
+  const usdFormatterSmall = useMemo(() => new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 6,
+  }), []);
+
+  const satFormatter = useMemo(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }), []);
+
+  const formatUsdAmount = useCallback((amount: number | null) => {
+    if (amount == null || !Number.isFinite(amount)) return "—";
+    if (amount <= 0) return "$0.00";
+    if (amount >= 1) return usdFormatterLarge.format(amount);
+    return usdFormatterSmall.format(amount);
+  }, [usdFormatterLarge, usdFormatterSmall]);
+
+  const effectivePrimaryCurrency = walletConversionEnabled ? walletPrimaryCurrency : "sat";
+
+  const usdBalance = useMemo(() => {
+    if (!walletConversionEnabled || btcUsdPrice == null || btcUsdPrice <= 0) return null;
+    return (balance / SATS_PER_BTC) * btcUsdPrice;
+  }, [walletConversionEnabled, btcUsdPrice, balance]);
+
+  const primaryCurrency = effectivePrimaryCurrency === "usd" ? "usd" : "sat";
+  const unitLabel = primaryCurrency === "usd" ? "USD" : "SAT";
+  const amountInputUnitLabel = primaryCurrency === "usd" ? "USD" : "sats";
+  const amountInputPlaceholder = `Amount (${amountInputUnitLabel})`;
+  const canToggleCurrency = walletConversionEnabled;
+
+  const unitButtonClass = useMemo(
+    () => `wallet-modal__unit chip chip-accent${canToggleCurrency ? " pressable" : ""}`,
+    [canToggleCurrency]
+  );
+
+  const parseAmountInput = useCallback((raw: string) => {
+    const trimmed = raw.trim();
+    const unitLabelLocal = primaryCurrency === "usd" ? "USD" : "sats";
+    if (!trimmed) {
+      return { sats: 0, raw: 0 };
+    }
+    const numeric = Number(trimmed);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return { sats: 0, raw: numeric, error: `Enter amount in ${unitLabelLocal}` };
+    }
+    if (primaryCurrency === "usd") {
+      if (!walletConversionEnabled || btcUsdPrice == null || btcUsdPrice <= 0) {
+        return { sats: 0, raw: numeric, error: "USD price unavailable. Try again in a moment." };
+      }
+      const sats = Math.floor((numeric / btcUsdPrice) * SATS_PER_BTC);
+      if (sats <= 0) {
+        return { sats: 0, raw: numeric, error: "Amount too small. Increase the USD value." };
+      }
+      return { sats, raw: numeric, usd: numeric };
+    }
+    const sats = Math.floor(numeric);
+    if (sats <= 0) {
+      return { sats: 0, raw: numeric, error: `Enter amount in ${unitLabelLocal}` };
+    }
+    return { sats, raw: numeric };
+  }, [primaryCurrency, walletConversionEnabled, btcUsdPrice]);
+
+  const handleTogglePrimary = useCallback(() => {
+    if (!walletConversionEnabled) return;
+    const next = walletPrimaryCurrency === "usd" ? "sat" : "usd";
+    setWalletPrimaryCurrency(next);
+  }, [walletConversionEnabled, walletPrimaryCurrency, setWalletPrimaryCurrency]);
+  const primaryAmountDisplay = useMemo(() => {
+    if (primaryCurrency === "usd") {
+      if (usdBalance == null) {
+        if (!walletConversionEnabled) return "$0.00";
+        return priceStatus === "error" ? "USD unavailable" : "Fetching price…";
+      }
+      return formatUsdAmount(usdBalance);
+    }
+    return `${satFormatter.format(Math.max(0, Math.floor(balance)))} sat`;
+  }, [primaryCurrency, usdBalance, walletConversionEnabled, priceStatus, formatUsdAmount, satFormatter, balance]);
+
+  const secondaryAmountDisplay = useMemo(() => {
+    if (!walletConversionEnabled) return null;
+    if (primaryCurrency === "usd") {
+      return `≈ ${satFormatter.format(Math.max(0, Math.floor(balance)))} sat`;
+    }
+    if (usdBalance == null) {
+      return priceStatus === "error" ? "USD unavailable" : "Fetching price…";
+    }
+    return `≈ ${formatUsdAmount(usdBalance)}`;
+  }, [walletConversionEnabled, primaryCurrency, satFormatter, balance, usdBalance, priceStatus, formatUsdAmount]);
+
+  const priceMeta = useMemo(() => {
+    if (!walletConversionEnabled) return null;
+    if (btcUsdPrice == null || btcUsdPrice <= 0) {
+      return priceStatus === "error" ? "Coinbase price unavailable" : "Fetching BTC/USD price…";
+    }
+    const base = `Coinbase ${usdFormatterLarge.format(btcUsdPrice)} / BTC`;
+    if (priceStatus === "error") {
+      return `${base} • Using last update`;
+    }
+    if (priceUpdatedAt) {
+      const timeStr = new Date(priceUpdatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      return `${base} • Updated ${timeStr}`;
+    }
+    return base;
+  }, [walletConversionEnabled, btcUsdPrice, priceStatus, priceUpdatedAt, usdFormatterLarge]);
 
   const scannerMessageTone = useMemo(() => {
     if (!scannerMessage) return "info";
@@ -998,12 +1182,14 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
   async function handleCreateInvoice() {
     setMintError("");
     try {
-      const amt = Math.max(0, Math.floor(Number(mintAmt) || 0));
-      if (!amt) throw new Error("Enter amount in sats");
-      const q = await createMintInvoice(amt);
+      const { sats, error } = parseAmountInput(mintAmt);
+      if (error) throw new Error(error);
+      if (!sats) throw new Error(`Enter amount in ${amountInputUnitLabel}`);
+      const q = await createMintInvoice(sats);
       setMintQuote(q);
+      setMintQuoteAmountSat(sats);
       setMintStatus("waiting");
-      setHistory((h) => [{ id: q.quote, summary: `Invoice for ${amt} sats`, detail: q.request }, ...h]);
+      setHistory((h) => [{ id: q.quote, summary: `Invoice for ${sats} sats`, detail: q.request }, ...h]);
     } catch (e: any) {
       setMintError(e?.message || String(e));
     }
@@ -1015,30 +1201,39 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       try {
         const st = await checkMintQuote(mintQuote.quote);
         if (st === "PAID") {
-          const amt = Math.max(0, Math.floor(Number(mintAmt) || 0));
-          await claimMint(mintQuote.quote, amt);
+          const amountSat = mintQuoteAmountSat ?? 0;
+          if (!amountSat) {
+            setMintStatus("error");
+            setMintError("Unable to determine mint amount. Try again.");
+            clearInterval(timer);
+            return;
+          }
+          await claimMint(mintQuote.quote, amountSat);
           setMintStatus("minted");
           setMintQuote(null);
+          setMintQuoteAmountSat(null);
           setMintAmt("");
-           setHistory((h) => [{ id: `mint-${Date.now()}`, summary: `Minted ${amt} sats` }, ...h.filter((i) => i.id !== mintQuote.quote)]);
+           setHistory((h) => [{ id: `mint-${Date.now()}`, summary: `Minted ${amountSat} sats` }, ...h.filter((i) => i.id !== mintQuote.quote)]);
           clearInterval(timer);
         }
       } catch (e: any) {
         setMintError(e?.message || String(e));
         setMintStatus("error");
+        setMintQuoteAmountSat(null);
         clearInterval(timer);
       }
     }, 3000);
     return () => clearInterval(timer);
-  }, [mintQuote, mintAmt, checkMintQuote, claimMint]);
+  }, [mintQuote, mintQuoteAmountSat, checkMintQuote, claimMint]);
 
   async function handleCreateSendToken() {
     try {
-      const amt = Math.max(0, Math.floor(Number(sendAmt) || 0));
-      if (!amt) throw new Error("Enter amount in sats");
-      const { token } = await createSendToken(amt);
+      const { sats, error } = parseAmountInput(sendAmt);
+      if (error) throw new Error(error);
+      if (!sats) throw new Error(`Enter amount in ${amountInputUnitLabel}`);
+      const { token } = await createSendToken(sats);
       setSendTokenStr(token);
-      setHistory((h) => [{ id: `token-${Date.now()}`, summary: `Token for ${amt} sats`, detail: token }, ...h]);
+      setHistory((h) => [{ id: `token-${Date.now()}`, summary: `Token for ${sats} sats`, detail: token }, ...h]);
     } catch (e: any) {
       setSendTokenStr("");
       alert(e?.message || String(e));
@@ -1075,11 +1270,14 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         const infoRes = await fetch(`https://${domain}/.well-known/lnurlp/${name}`);
         if (!infoRes.ok) throw new Error("Failed to fetch LNURL pay info");
         const info = await infoRes.json();
+        const parsed = parseAmountInput(lnAddrAmt);
+        if (parsed.error) throw new Error(parsed.error);
+        if (!parsed.sats) throw new Error(`Enter amount in ${amountInputUnitLabel}`);
         const amtMsat = Math.max(
           info.minSendable || 0,
-          Math.min(info.maxSendable || Infinity, Math.floor(Number(lnAddrAmt) || 0) * 1000)
+          Math.min(info.maxSendable || Infinity, parsed.sats * 1000)
         );
-        if (!amtMsat) throw new Error("Enter amount in sats");
+        if (!amtMsat) throw new Error(`Enter amount in ${amountInputUnitLabel}`);
         const invRes = await fetch(`${info.callback}?amount=${amtMsat}`);
         if (!invRes.ok) throw new Error("Failed to fetch invoice");
         const inv = await invRes.json();
@@ -1118,8 +1316,12 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         const maxSat = Math.floor(payData.maxSendable / 1000);
         const amountSat = payData.minSendable === payData.maxSendable
           ? Math.floor(payData.minSendable / 1000)
-          : Math.max(0, Math.floor(Number(lnAddrAmt) || 0));
-        if (!amountSat) throw new Error("Enter amount in sats");
+          : (() => {
+              const parsed = parseAmountInput(lnAddrAmt);
+              if (parsed.error) throw new Error(parsed.error);
+              return parsed.sats;
+            })();
+        if (!amountSat) throw new Error(`Enter amount in ${amountInputUnitLabel}`);
         if (amountSat < minSat || amountSat > maxSat) {
           throw new Error(`Amount must be between ${minSat} and ${maxSat} sats`);
         }
@@ -1215,8 +1417,9 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     try {
       if (!hasNwcConnection) throw new Error("Connect an NWC wallet first");
       if (!mintUrl) throw new Error("Set an active mint first");
-      const amount = Math.max(0, Math.floor(Number(nwcFundAmt) || 0));
-      if (!amount) throw new Error("Enter amount in sats");
+      const { sats: amount, error } = parseAmountInput(nwcFundAmt);
+      if (error) throw new Error(error);
+      if (!amount) throw new Error(`Enter amount in ${amountInputUnitLabel}`);
       setNwcFundState("creating");
       const quote = await createMintInvoice(amount, `Taskify via NWC (${amount} sat)`);
       setNwcFundInvoice(quote.request);
@@ -1253,8 +1456,9 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     }
     setLnurlWithdrawMessage("");
     try {
-      const amountSat = Math.max(0, Math.floor(Number(lnurlWithdrawAmt) || 0));
-      if (!amountSat) throw new Error("Enter amount in sats");
+      const { sats: amountSat, error } = parseAmountInput(lnurlWithdrawAmt);
+      if (error) throw new Error(error);
+      if (!amountSat) throw new Error(`Enter amount in ${amountInputUnitLabel}`);
       const minSat = Math.ceil(lnurlWithdrawInfo.minWithdrawable / 1000);
       const maxSat = Math.floor(lnurlWithdrawInfo.maxWithdrawable / 1000);
       if (amountSat < minSat || amountSat > maxSat) {
@@ -1316,8 +1520,9 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     setNwcWithdrawMessage("");
     try {
       if (!hasNwcConnection) throw new Error("Connect an NWC wallet first");
-      const amount = Math.max(0, Math.floor(Number(nwcWithdrawAmt) || 0));
-      if (!amount) throw new Error("Enter amount in sats");
+      const { sats: amount, error } = parseAmountInput(nwcWithdrawAmt);
+      if (error) throw new Error(error);
+      if (!amount) throw new Error(`Enter amount in ${amountInputUnitLabel}`);
       setNwcWithdrawState("requesting");
       const msat = amount * 1000;
       const invoiceRes = await makeNwcInvoice(msat, `Taskify withdrawal ${amount} sat`);
@@ -1411,7 +1616,15 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     <div className="wallet-modal">
       <div className="wallet-modal__header">
         <button className="ghost-button button-sm pressable" onClick={onClose}>Close</button>
-        <div className="wallet-modal__unit chip chip-accent">{info?.unit?.toUpperCase() || "SAT"}</div>
+        <button
+          type="button"
+          className={unitButtonClass}
+          onClick={handleTogglePrimary}
+          aria-disabled={!canToggleCurrency}
+          title={canToggleCurrency ? "Toggle primary currency" : "Currency toggle available when conversion is enabled"}
+        >
+          {unitLabel}
+        </button>
         <button className="ghost-button button-sm pressable" onClick={()=>setShowHistory(true)}>History</button>
       </div>
       <div className="wallet-modal__toolbar">
@@ -1419,8 +1632,14 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       </div>
       <div className="wallet-modal__content">
         <div className="wallet-balance-card">
-          <div className="wallet-balance-card__amount">{balance} sat</div>
-          <div className="wallet-balance-card__meta">{headerInfo}</div>
+          <div className="wallet-balance-card__amount">{primaryAmountDisplay}</div>
+          {secondaryAmountDisplay && (
+            <div className="wallet-balance-card__secondary">{secondaryAmountDisplay}</div>
+          )}
+          <div className="wallet-balance-card__meta">
+            <div>{mintMeta}</div>
+            {priceMeta && <div>{priceMeta}</div>}
+          </div>
         </div>
         <div className="wallet-modal__cta">
           <button className="accent-button pressable" onClick={()=>{ setShowReceiveOptions(true); }}>{"Receive"}</button>
@@ -1485,7 +1704,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       <ActionSheet open={receiveMode === "lightning"} onClose={()=>{setReceiveMode(null); setShowReceiveOptions(false);}} title="Mint via Lightning">
         <div className="wallet-section space-y-3">
           <div className="flex gap-2">
-            <input className="pill-input flex-1" placeholder="Amount (sats)" value={mintAmt} onChange={(e)=>setMintAmt(e.target.value)} />
+            <input className="pill-input flex-1" placeholder={amountInputPlaceholder} value={mintAmt} onChange={(e)=>setMintAmt(e.target.value)} />
             <button className="accent-button button-sm pressable" onClick={handleCreateInvoice} disabled={!mintUrl}>Get invoice</button>
           </div>
           {mintQuote && (
@@ -1517,7 +1736,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
             </div>
             <input
               className="pill-input"
-              placeholder="Amount (sats)"
+              placeholder={amountInputPlaceholder}
               value={lnurlWithdrawAmt}
               onChange={(e)=>setLnurlWithdrawAmt(e.target.value)}
               inputMode="decimal"
@@ -1551,12 +1770,12 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       <ActionSheet open={receiveMode === "nwcFund"} onClose={()=>{resetNwcFundState(); setReceiveMode(null); setShowReceiveOptions(false);}} title="Fund via NWC">
         <div className="wallet-section space-y-3">
           <div className="text-xs text-secondary">Creates a mint invoice and pays it automatically with your linked NWC wallet.</div>
-          <input className="pill-input" placeholder="Amount (sats)" value={nwcFundAmt} onChange={(e)=>setNwcFundAmt(e.target.value)} />
+            <input className="pill-input" placeholder={amountInputPlaceholder} value={nwcFundAmt} onChange={(e)=>setNwcFundAmt(e.target.value)} />
           <div className="flex flex-wrap gap-2 items-center text-xs text-secondary">
             <button
               className="accent-button button-sm pressable"
               onClick={handleNwcFund}
-              disabled={!hasNwcConnection || !mintUrl || nwcFundInProgress || Math.floor(Number(nwcFundAmt) || 0) <= 0}
+              disabled={!hasNwcConnection || !mintUrl || nwcFundInProgress || !canSubmitNwcFund}
             >Fund now</button>
             {nwcFundInProgress && nwcFundStatusText && <span>{nwcFundStatusText}</span>}
             {nwcFundState === "done" && nwcFundMessage && <span className="text-accent">{nwcFundMessage}</span>}
@@ -1600,7 +1819,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       <ActionSheet open={sendMode === "ecash"} onClose={()=>{setSendMode(null); setShowSendOptions(false);}} title="Send eCash">
         <div className="wallet-section space-y-3">
           <div className="flex gap-2">
-            <input className="pill-input flex-1" placeholder="Amount (sats)" value={sendAmt} onChange={(e)=>setSendAmt(e.target.value)} />
+            <input className="pill-input flex-1" placeholder={amountInputPlaceholder} value={sendAmt} onChange={(e)=>setSendAmt(e.target.value)} />
             <button className="accent-button button-sm pressable" onClick={handleCreateSendToken} disabled={!mintUrl}>Create token</button>
           </div>
           {sendTokenStr && (
@@ -1758,7 +1977,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
           )}
           <textarea ref={lnRef} className="pill-textarea wallet-textarea" placeholder="Paste BOLT11 invoice or enter lightning address" value={lnInput} onChange={(e)=>setLnInput(e.target.value)} />
           {(isLnAddress || isLnurlInput) && (
-            <input className="pill-input" placeholder="Amount (sats)" value={lnAddrAmt} onChange={(e)=>setLnAddrAmt(e.target.value)} />
+          <input className="pill-input" placeholder={amountInputPlaceholder} value={lnAddrAmt} onChange={(e)=>setLnAddrAmt(e.target.value)} />
           )}
           {isLnurlInput && lnurlPayData && (
             <div className="text-xs text-secondary">
@@ -1827,12 +2046,12 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       <ActionSheet open={sendMode === "nwcWithdraw"} onClose={()=>{resetNwcWithdrawState(); setSendMode(null); setShowSendOptions(false);}} title="Withdraw via NWC">
         <div className="wallet-section space-y-3">
           <div className="text-xs text-secondary">Requests an invoice from your NWC wallet and pays it using your current Cashu balance.</div>
-          <input className="pill-input" placeholder="Amount (sats)" value={nwcWithdrawAmt} onChange={(e)=>setNwcWithdrawAmt(e.target.value)} />
+          <input className="pill-input" placeholder={amountInputPlaceholder} value={nwcWithdrawAmt} onChange={(e)=>setNwcWithdrawAmt(e.target.value)} />
           <div className="flex flex-wrap gap-2 items-center text-xs text-secondary">
             <button
               className="accent-button button-sm pressable"
               onClick={handleNwcWithdraw}
-              disabled={!hasNwcConnection || !mintUrl || nwcWithdrawInProgress || Math.floor(Number(nwcWithdrawAmt) || 0) <= 0}
+              disabled={!hasNwcConnection || !mintUrl || nwcWithdrawInProgress || !canSubmitNwcWithdraw}
             >Withdraw</button>
             {nwcWithdrawInProgress && nwcWithdrawStatusText && <span>{nwcWithdrawStatusText}</span>}
             {nwcWithdrawState === "done" && nwcWithdrawMessage && <span className="text-accent">{nwcWithdrawMessage}</span>}

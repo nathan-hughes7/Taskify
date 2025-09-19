@@ -109,6 +109,8 @@ type Settings = {
   accent: "green" | "blue";
   hideCompletedSubtasks: boolean;
   startupView: "main" | "wallet";
+  walletConversionEnabled: boolean;
+  walletPrimaryCurrency: "sat" | "usd";
 };
 
 const ACCENT_CHOICES = [
@@ -521,6 +523,8 @@ function useSettings() {
       const accent = parsed?.accent === "green" ? "green" : "blue";
       const hideCompletedSubtasks = parsed?.hideCompletedSubtasks === true;
       const startupView = parsed?.startupView === "wallet" ? "wallet" : "main";
+      const walletConversionEnabled = parsed?.walletConversionEnabled === true;
+      const walletPrimaryCurrency = parsed?.walletPrimaryCurrency === "usd" ? "usd" : "sat";
       if (parsed && typeof parsed === "object") {
         delete (parsed as Record<string, unknown>).theme;
       }
@@ -537,6 +541,8 @@ function useSettings() {
         startBoardByDay,
         accent,
         startupView,
+        walletConversionEnabled,
+        walletPrimaryCurrency: walletConversionEnabled ? walletPrimaryCurrency : "sat",
       };
     } catch {
       return {
@@ -551,11 +557,21 @@ function useSettings() {
         accent: "blue",
         hideCompletedSubtasks: false,
         startupView: "main",
+        walletConversionEnabled: false,
+        walletPrimaryCurrency: "sat",
       };
     }
   });
   const setSettings = useCallback((s: Partial<Settings>) => {
-    setSettingsRaw(prev => ({ ...prev, ...s }));
+    setSettingsRaw(prev => {
+      const next = { ...prev, ...s };
+      if (!next.walletConversionEnabled) {
+        next.walletPrimaryCurrency = "sat";
+      } else if (next.walletPrimaryCurrency !== "usd") {
+        next.walletPrimaryCurrency = "sat";
+      }
+      return next;
+    });
   }, []);
   useEffect(() => {
     localStorage.setItem(LS_SETTINGS, JSON.stringify(settings));
@@ -3293,7 +3309,13 @@ export default function App() {
 
       {/* Cashu Wallet */}
       {showWallet && (
-        <CashuWalletModal open={showWallet} onClose={() => setShowWallet(false)} />
+        <CashuWalletModal
+          open={showWallet}
+          onClose={() => setShowWallet(false)}
+          walletConversionEnabled={settings.walletConversionEnabled}
+          walletPrimaryCurrency={settings.walletPrimaryCurrency}
+          setWalletPrimaryCurrency={(currency) => setSettings({ walletPrimaryCurrency: currency })}
+        />
       )}
     </div>
   );
@@ -5430,6 +5452,45 @@ function SettingsModal({
               </div>
             </div>
           )}
+        </section>
+
+        {/* Wallet */}
+        <section className="wallet-section space-y-3">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="text-sm font-medium">Wallet</div>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <div className="text-sm font-medium mb-2">Currency conversion</div>
+              <div className="flex gap-2">
+                <button
+                  className={pillButtonClass(settings.walletConversionEnabled)}
+                  onClick={() => setSettings({ walletConversionEnabled: true })}
+                >On</button>
+                <button
+                  className={pillButtonClass(!settings.walletConversionEnabled)}
+                  onClick={() => setSettings({ walletConversionEnabled: false, walletPrimaryCurrency: "sat" })}
+                >Off</button>
+              </div>
+              <div className="text-xs text-secondary mt-2">Show USD equivalents by fetching spot BTC prices from Coinbase.</div>
+            </div>
+            {settings.walletConversionEnabled && (
+              <div>
+                <div className="text-sm font-medium mb-2">Primary display</div>
+                <div className="flex gap-2">
+                  <button
+                    className={pillButtonClass(settings.walletPrimaryCurrency === "sat")}
+                    onClick={() => setSettings({ walletPrimaryCurrency: "sat" })}
+                  >Sats</button>
+                  <button
+                    className={pillButtonClass(settings.walletPrimaryCurrency === "usd")}
+                    onClick={() => setSettings({ walletPrimaryCurrency: "usd" })}
+                  >USD</button>
+                </div>
+                <div className="text-xs text-secondary mt-2">You can also tap the unit label in the wallet header to toggle.</div>
+              </div>
+            )}
+          </div>
         </section>
 
         {/* Nostr */}

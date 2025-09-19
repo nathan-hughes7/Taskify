@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19, nip04 } from "nostr-tools";
 import { CashuWalletModal } from "./components/CashuWalletModal";
 import { useCashu } from "./context/CashuContext";
+import { LS_LIGHTNING_CONTACTS } from "./localStorageKeys";
 import { loadStore as loadProofStore, saveStore as saveProofStore, getActiveMint, setActiveMint } from "./wallet/storage";
 import { encryptToBoard, decryptFromBoard, boardTag } from "./boardCrypto";
 import { useToast } from "./context/ToastContext";
@@ -106,6 +107,8 @@ type Settings = {
   baseFontSize: number | null;
   startBoardByDay: Partial<Record<Weekday, string>>;
   accent: "green" | "blue";
+  hideCompletedSubtasks: boolean;
+  startupView: "main" | "wallet";
 };
 
 const ACCENT_CHOICES = [
@@ -516,6 +519,8 @@ function useSettings() {
         }
       }
       const accent = parsed?.accent === "green" ? "green" : "blue";
+      const hideCompletedSubtasks = parsed?.hideCompletedSubtasks === true;
+      const startupView = parsed?.startupView === "wallet" ? "wallet" : "main";
       if (parsed && typeof parsed === "object") {
         delete (parsed as Record<string, unknown>).theme;
       }
@@ -527,9 +532,11 @@ function useSettings() {
         showFullWeekRecurring: false,
         inlineAdd: true,
         ...parsed,
+        hideCompletedSubtasks,
         baseFontSize,
         startBoardByDay,
         accent,
+        startupView,
       };
     } catch {
       return {
@@ -542,6 +549,8 @@ function useSettings() {
         baseFontSize: null,
         startBoardByDay: {},
         accent: "blue",
+        hideCompletedSubtasks: false,
+        startupView: "main",
       };
     }
   });
@@ -861,6 +870,14 @@ export default function App() {
   const [view, setView] = useState<"board" | "completed">("board");
   const [showSettings, setShowSettings] = useState(false);
   const [showWallet, setShowWallet] = useState(false);
+  const startupViewHandledRef = useRef(false);
+  useEffect(() => {
+    if (startupViewHandledRef.current) return;
+    startupViewHandledRef.current = true;
+    if (settings.startupView === "wallet") {
+      setShowWallet(true);
+    }
+  }, [settings.startupView]);
   const { receiveToken } = useCashu();
 
   const [tutorialComplete, setTutorialComplete] = useState(() => {
@@ -2814,6 +2831,7 @@ export default function App() {
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
                           onDragStart={(id) => setDraggingTaskId(id)}
                           onDragEnd={handleDragEnd}
+                          hideCompletedSubtasks={settings.hideCompletedSubtasks}
                         />
                       ))}
                     </DroppableColumn>
@@ -2867,6 +2885,7 @@ export default function App() {
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
                           onDragStart={(id) => setDraggingTaskId(id)}
                           onDragEnd={handleDragEnd}
+                          hideCompletedSubtasks={settings.hideCompletedSubtasks}
                         />
                     ))}
                   </DroppableColumn>
@@ -2930,6 +2949,7 @@ export default function App() {
                           onToggleSubtask={(subId) => toggleSubtask(t.id, subId)}
                           onDragStart={(id) => setDraggingTaskId(id)}
                           onDragEnd={handleDragEnd}
+                          hideCompletedSubtasks={settings.hideCompletedSubtasks}
                         />
                     ))}
                   </DroppableColumn>
@@ -2958,50 +2978,51 @@ export default function App() {
                 {completed.map((t) => {
                   const hasDetail = !!t.note?.trim() || (t.images && t.images.length > 0) || (t.subtasks && t.subtasks.length > 0) || !!t.bounty;
                   return (
-                  <li key={t.id} className="task-card space-y-2" data-state="completed" data-form={hasDetail ? 'stacked' : 'pill'}>
-                    <div className="flex items-start gap-2">
-                      <div className="flex-1">
-                      <div className="text-sm font-medium leading-[1.15]">
-                          {renderTitleWithLink(t.title, t.note)}
-                        </div>
-                        <div className="text-xs text-secondary">
-                          {currentBoard?.kind === "week"
-                            ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
-                            : "Completed item"}
-                          {t.completedAt ? ` • Completed ${new Date(t.completedAt).toLocaleString()}` : ""}
-                          {settings.streaksEnabled &&
-                            t.recurrence &&
-                            (t.recurrence.type === "daily" || t.recurrence.type === "weekly") &&
-                            typeof t.streak === "number" && t.streak > 0
-                              ? ` • 🔥 ${t.streak}`
-                              : ""}
-                        </div>
-                        <TaskMedia task={t} />
-                        {t.subtasks?.length ? (
-                          <ul className="mt-1 space-y-1 text-xs">
-                            {t.subtasks.map(st => (
-                              <li key={st.id} className="subtask-row">
-                                <input type="checkbox" checked={!!st.completed} disabled className="subtask-row__checkbox" />
-                                <span className={`subtask-row__text ${st.completed ? 'line-through text-secondary' : ''}`}>{st.title}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
-                        {t.bounty && (
-                          <div className="mt-1">
-                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border ${t.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : t.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : t.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-surface-muted border-surface'}`}>
-                              Bounty {typeof t.bounty.amount==='number' ? `• ${t.bounty.amount} sats` : ''} • {t.bounty.state}
-                            </span>
+                    <li key={t.id} className="task-card space-y-2" data-state="completed" data-form={hasDetail ? 'stacked' : 'pill'}>
+                      <div className="flex items-start gap-2">
+                        <div className="flex-1">
+                          <div className="text-sm font-medium leading-[1.15]">
+                            {renderTitleWithLink(t.title, t.note)}
                           </div>
-                        )}
+                          <div className="text-xs text-secondary">
+                            {currentBoard?.kind === "week"
+                              ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
+                              : "Completed item"}
+                            {t.completedAt ? ` • Completed ${new Date(t.completedAt).toLocaleString()}` : ""}
+                            {settings.streaksEnabled &&
+                              t.recurrence &&
+                              (t.recurrence.type === "daily" || t.recurrence.type === "weekly") &&
+                              typeof t.streak === "number" && t.streak > 0
+                                ? ` • 🔥 ${t.streak}`
+                                : ""}
+                          </div>
+                          <TaskMedia task={t} />
+                          {t.subtasks?.length ? (
+                            <ul className="mt-1 space-y-1 text-xs">
+                              {t.subtasks.map(st => (
+                                <li key={st.id} className="subtask-row">
+                                  <input type="checkbox" checked={!!st.completed} disabled className="subtask-row__checkbox" />
+                                  <span className={`subtask-row__text ${st.completed ? 'line-through text-secondary' : ''}`}>{st.title}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                          {t.bounty && (
+                            <div className="mt-1">
+                              <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border ${t.bounty.state==='unlocked' ? 'bg-emerald-700/30 border-emerald-700' : t.bounty.state==='locked' ? 'bg-neutral-700/40 border-neutral-600' : t.bounty.state==='revoked' ? 'bg-rose-700/30 border-rose-700' : 'bg-surface-muted border-surface'}`}>
+                                Bounty {typeof t.bounty.amount==='number' ? `• ${t.bounty.amount} sats` : ''} • {t.bounty.state}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex gap-1">
+                          <IconButton label="Restore" onClick={() => restoreTask(t.id)} intent="success">↩︎</IconButton>
+                          <IconButton label="Delete" onClick={() => deleteTask(t.id)} intent="danger">✕</IconButton>
+                        </div>
                       </div>
-                      <div className="flex gap-1">
-                        <IconButton label="Restore" onClick={() => restoreTask(t.id)} intent="success">↩︎</IconButton>
-                        <IconButton label="Delete" onClick={() => deleteTask(t.id)} intent="danger">✕</IconButton>
-                      </div>
-                    </div>
-                  </li>
-                );})}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -3034,8 +3055,12 @@ export default function App() {
             <div className="text-sm text-secondary">No upcoming tasks.</div>
           ) : (
             <ul className="space-y-1.5">
-              {upcoming.map((t) => (
-                <li key={t.id} className="task-card space-y-2" data-form="stacked">
+              {upcoming.map((t) => {
+                const visibleSubtasks = settings.hideCompletedSubtasks
+                  ? (t.subtasks?.filter((st) => !st.completed) ?? [])
+                  : (t.subtasks ?? []);
+                return (
+                  <li key={t.id} className="task-card space-y-2" data-form="stacked">
                   <div className="flex items-start gap-2">
                     <div className="flex-1">
                       <div className="text-sm font-medium leading-[1.15]">{renderTitleWithLink(t.title, t.note)}</div>
@@ -3046,9 +3071,9 @@ export default function App() {
                         {t.hiddenUntilISO ? ` • Reveals ${new Date(t.hiddenUntilISO).toLocaleDateString()}` : ""}
                       </div>
                       <TaskMedia task={t} />
-                      {t.subtasks?.length ? (
+                      {visibleSubtasks.length ? (
                         <ul className="mt-1 space-y-1 text-xs">
-                          {t.subtasks.map(st => (
+                          {visibleSubtasks.map(st => (
                             <li key={st.id} className="subtask-row">
                               <input type="checkbox" checked={!!st.completed} disabled className="subtask-row__checkbox" />
                               <span className={`subtask-row__text ${st.completed ? 'line-through text-secondary' : ''}`}>{st.title}</span>
@@ -3084,8 +3109,9 @@ export default function App() {
                       Delete
                     </button>
                   </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </SideDrawer>
@@ -3547,6 +3573,7 @@ function Card({
   onFlyToCompleted,
   onDragStart,
   onDragEnd,
+  hideCompletedSubtasks,
 }: {
   task: Task;
   onComplete: (from?: DOMRect) => void;
@@ -3557,14 +3584,19 @@ function Card({
   onFlyToCompleted: (rect: DOMRect) => void;
   onDragStart: (id: string) => void;
   onDragEnd: () => void;
+  hideCompletedSubtasks: boolean;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
   const [isStacked, setIsStacked] = useState(false);
   const iconSizeStyle = useMemo(() => ({ '--icon-size': '2.2rem' } as React.CSSProperties), []);
-
-  const hasDetail = !!task.note?.trim() || (task.images && task.images.length > 0) || (task.subtasks && task.subtasks.length > 0) || !!task.bounty;
+  const visibleSubtasks = useMemo(() => (
+    hideCompletedSubtasks
+      ? (task.subtasks?.filter((st) => !st.completed) ?? [])
+      : (task.subtasks ?? [])
+  ), [hideCompletedSubtasks, task.subtasks]);
+  const hasDetail = !!task.note?.trim() || (task.images && task.images.length > 0) || (visibleSubtasks.length > 0) || !!task.bounty;
 
   useEffect(() => {
     const el = titleRef.current;
@@ -3599,7 +3631,7 @@ function Card({
       window.removeEventListener('resize', compute);
       cancelAnimationFrame(raf);
     };
-  }, [task.title, task.note, task.images?.length, task.subtasks?.length]);
+  }, [task.title, task.note, task.images?.length, visibleSubtasks.length]);
 
   function handleDragStart(e: React.DragEvent) {
     e.dataTransfer.setData('text/task-id', task.id);
@@ -3727,9 +3759,9 @@ function Card({
 
       <TaskMedia task={task} indent />
 
-      {task.subtasks?.length ? (
+      {visibleSubtasks.length ? (
         <ul className="task-card__details mt-2 space-y-1.5 text-xs text-secondary">
-          {task.subtasks.map((st) => (
+          {visibleSubtasks.map((st) => (
             <li key={st.id} className="subtask-row">
               <input
                 type="checkbox"
@@ -3801,6 +3833,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
   const [subtasks, setSubtasks] = useState<Subtask[]>(task.subtasks || []);
   const [newSubtask, setNewSubtask] = useState("");
   const newSubtaskRef = useRef<HTMLInputElement>(null);
+  const dragSubtaskIdRef = useRef<string | null>(null);
   const [rule, setRule] = useState<Recurrence>(task.recurrence ?? R_NONE);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [scheduledDate, setScheduledDate] = useState(task.dueISO.slice(0,10));
@@ -3852,6 +3885,64 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
     if (keepKeyboard) newSubtaskRef.current?.focus();
     else newSubtaskRef.current?.blur();
   }
+
+  const reorderSubtasks = useCallback((sourceId: string, targetId: string | null, position: 'before' | 'after' = 'before') => {
+    if (!sourceId || sourceId === targetId) return;
+    setSubtasks(prev => {
+      const sourceIndex = prev.findIndex(s => s.id === sourceId);
+      if (sourceIndex === -1) return prev;
+      const sourceItem = prev[sourceIndex];
+      const remaining = prev.filter(s => s.id !== sourceId);
+      if (!targetId) {
+        return [...remaining, sourceItem];
+      }
+      const rawTargetIndex = prev.findIndex(s => s.id === targetId);
+      if (rawTargetIndex === -1) return prev;
+      let insertIndex = rawTargetIndex;
+      if (sourceIndex < rawTargetIndex) insertIndex -= 1;
+      if (position === 'after') insertIndex += 1;
+      if (insertIndex < 0) insertIndex = 0;
+      if (insertIndex > remaining.length) insertIndex = remaining.length;
+      const next = [...remaining];
+      next.splice(insertIndex, 0, sourceItem);
+      return next;
+    });
+  }, [setSubtasks]);
+
+  const handleSubtaskDragStart = useCallback((id: string) => (e: React.DragEvent<HTMLElement>) => {
+    dragSubtaskIdRef.current = id;
+    e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData('text/subtask-id', id);
+    } catch {}
+  }, []);
+
+  const handleSubtaskDragEnd = useCallback(() => {
+    dragSubtaskIdRef.current = null;
+  }, []);
+
+  const handleSubtaskDragOver = useCallback((id: string | null) => (e: React.DragEvent<HTMLDivElement>) => {
+    if (!dragSubtaskIdRef.current) return;
+    void id;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const handleSubtaskDrop = useCallback((id: string | null) => (e: React.DragEvent<HTMLDivElement>) => {
+    const sourceHint = dragSubtaskIdRef.current || e.dataTransfer.getData('text/subtask-id');
+    if (!sourceHint) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragSubtaskIdRef.current = null;
+    let position: 'before' | 'after' = 'before';
+    if (id) {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      if (e.clientY > rect.top + rect.height / 2) position = 'after';
+    } else {
+      position = 'after';
+    }
+    reorderSubtasks(sourceHint, id, position);
+  }, [reorderSubtasks]);
 
   function buildTask(overrides: Partial<Task> = {}): Task {
     const dueISO = new Date(scheduledDate + "T00:00").toISOString();
@@ -3911,12 +4002,24 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
           </div>
         )}
 
-        <div>
+        <div
+          onDragOver={handleSubtaskDragOver(null)}
+          onDrop={handleSubtaskDrop(null)}
+        >
           <div className="flex items-center mb-2">
             <label className="text-sm font-medium">Subtasks</label>
           </div>
           {subtasks.map((st) => (
-            <div key={st.id} className="flex items-center gap-2 mb-1">
+            <div
+              key={st.id}
+              className="flex items-center gap-2 mb-1 cursor-grab active:cursor-grabbing"
+              style={{ touchAction: 'auto' }}
+              draggable
+              onDragStart={handleSubtaskDragStart(st.id)}
+              onDragEnd={handleSubtaskDragEnd}
+              onDragOver={handleSubtaskDragOver(st.id)}
+              onDrop={handleSubtaskDrop(st.id)}
+            >
               <input
                 type="checkbox"
                 checked={!!st.completed}
@@ -4677,6 +4780,7 @@ function SettingsModal({
       boards: JSON.parse(localStorage.getItem(LS_BOARDS) || "[]"),
       settings: JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}"),
       defaultRelays: JSON.parse(localStorage.getItem(LS_NOSTR_RELAYS) || "[]"),
+      contacts: JSON.parse(localStorage.getItem(LS_LIGHTNING_CONTACTS) || "[]"),
       nostrSk: localStorage.getItem(LS_NOSTR_SK) || "",
       cashu: {
         proofs: loadProofStore(),
@@ -4702,6 +4806,7 @@ function SettingsModal({
         if (data.boards) localStorage.setItem(LS_BOARDS, JSON.stringify(data.boards));
         if (data.settings) localStorage.setItem(LS_SETTINGS, JSON.stringify(data.settings));
         if (data.defaultRelays) localStorage.setItem(LS_NOSTR_RELAYS, JSON.stringify(data.defaultRelays));
+        if (data.contacts) localStorage.setItem(LS_LIGHTNING_CONTACTS, JSON.stringify(data.contacts));
         if (data.nostrSk) localStorage.setItem(LS_NOSTR_SK, data.nostrSk);
         if (data.cashu?.proofs) saveProofStore(data.cashu.proofs);
         if (data.cashu) setActiveMint(data.cashu.activeMint || null);
@@ -5190,6 +5295,36 @@ function SettingsModal({
                 <button className={pillButtonClass(settings.inlineAdd)} onClick={() => setSettings({ inlineAdd: true })}>Inline</button>
                 <button className={pillButtonClass(!settings.inlineAdd)} onClick={() => setSettings({ inlineAdd: false })}>Top bar</button>
               </div>
+            </div>
+            <div>
+              <div className="text-sm font-medium mb-2">Hide completed subtasks</div>
+              <div className="flex gap-2">
+                <button
+                  className={pillButtonClass(settings.hideCompletedSubtasks)}
+                  onClick={() => setSettings({ hideCompletedSubtasks: !settings.hideCompletedSubtasks })}
+                >
+                  {settings.hideCompletedSubtasks ? "On" : "Off"}
+                </button>
+              </div>
+              <div className="text-xs text-secondary mt-2">Keep finished subtasks out of cards. Open Edit to review them later.</div>
+            </div>
+            <div>
+              <div className="text-sm font-medium mb-2">Open app to</div>
+              <div className="flex gap-2">
+                <button
+                  className={pillButtonClass(settings.startupView === "main")}
+                  onClick={() => setSettings({ startupView: "main" })}
+                >
+                  Main view
+                </button>
+                <button
+                  className={pillButtonClass(settings.startupView === "wallet")}
+                  onClick={() => setSettings({ startupView: "wallet" })}
+                >
+                  Wallet
+                </button>
+              </div>
+              <div className="text-xs text-secondary mt-2">Choose whether Taskify launches to your boards or directly into the wallet.</div>
             </div>
           </div>
           {showViewAdvanced && (

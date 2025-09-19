@@ -107,6 +107,7 @@ type Settings = {
   startBoardByDay: Partial<Record<Weekday, string>>;
   accent: "green" | "blue";
   hideCompletedSubtasks: boolean;
+  startupView: "main" | "wallet";
 };
 
 const ACCENT_CHOICES = [
@@ -518,6 +519,7 @@ function useSettings() {
       }
       const accent = parsed?.accent === "green" ? "green" : "blue";
       const hideCompletedSubtasks = parsed?.hideCompletedSubtasks === true;
+      const startupView = parsed?.startupView === "wallet" ? "wallet" : "main";
       if (parsed && typeof parsed === "object") {
         delete (parsed as Record<string, unknown>).theme;
       }
@@ -533,6 +535,7 @@ function useSettings() {
         baseFontSize,
         startBoardByDay,
         accent,
+        startupView,
       };
     } catch {
       return {
@@ -546,6 +549,7 @@ function useSettings() {
         startBoardByDay: {},
         accent: "blue",
         hideCompletedSubtasks: false,
+        startupView: "main",
       };
     }
   });
@@ -865,6 +869,14 @@ export default function App() {
   const [view, setView] = useState<"board" | "completed">("board");
   const [showSettings, setShowSettings] = useState(false);
   const [showWallet, setShowWallet] = useState(false);
+  const startupViewHandledRef = useRef(false);
+  useEffect(() => {
+    if (startupViewHandledRef.current) return;
+    startupViewHandledRef.current = true;
+    if (settings.startupView === "wallet") {
+      setShowWallet(true);
+    }
+  }, [settings.startupView]);
   const { receiveToken } = useCashu();
 
   const [tutorialComplete, setTutorialComplete] = useState(() => {
@@ -5292,6 +5304,24 @@ function SettingsModal({
                 </button>
               </div>
               <div className="text-xs text-secondary mt-2">Keep finished subtasks out of cards. Open Edit to review them later.</div>
+            </div>
+            <div>
+              <div className="text-sm font-medium mb-2">Open app to</div>
+              <div className="flex gap-2">
+                <button
+                  className={pillButtonClass(settings.startupView === "main")}
+                  onClick={() => setSettings({ startupView: "main" })}
+                >
+                  Main view
+                </button>
+                <button
+                  className={pillButtonClass(settings.startupView === "wallet")}
+                  onClick={() => setSettings({ startupView: "wallet" })}
+                >
+                  Wallet
+                </button>
+              </div>
+              <div className="text-xs text-secondary mt-2">Choose whether Taskify launches to your boards or directly into the wallet.</div>
             </div>
           </div>
           {showViewAdvanced && (

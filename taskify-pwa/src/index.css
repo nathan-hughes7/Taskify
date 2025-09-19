@@ -1011,7 +1011,8 @@ html.light .board-column[data-drop-over="true"] {
   border: 1px solid var(--surface-border);
   box-shadow: var(--shadow-soft);
   padding: 1.25rem;
-  max-height: 80%;
+  max-height: calc(100vh - 1.5rem);
+  max-height: calc(100vh - env(safe-area-inset-top) - 1.5rem);
   overflow-y: auto;
 }
 

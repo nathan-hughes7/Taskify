@@ -1656,7 +1656,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
             )}
           </div>
           {contactsOpen && (
-            <div className="flex max-h-[65vh] flex-col gap-3 bg-surface-muted border border-surface rounded-2xl p-3 text-xs">
+            <div className="flex max-h-[calc(100vh-9rem)] flex-col gap-3 bg-surface-muted border border-surface rounded-2xl p-3 text-xs">
               <div className="text-secondary text-[11px]">
                 {sortedContacts.length
                   ? "Select a contact to use their lightning address."

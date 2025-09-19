@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
+import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { QRCodeCanvas } from "qrcode.react";
 import { useCashu } from "../context/CashuContext";
 import { useNwc } from "../context/NwcContext";
@@ -51,6 +52,7 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
   const controlsRef = useRef<IScannerControls | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const processingRef = useRef(false);
+  const closingRef = useRef(false);
   const lastValueRef = useRef<string | null>(null);
   const resetTimerRef = useRef<number>();
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +87,7 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
     if (readerRef.current) {
       readerRef.current.reset();
     }
+    closingRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -95,6 +98,7 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
       clearError();
       lastValueRef.current = null;
       processingRef.current = false;
+      closingRef.current = false;
       return;
     }
 
@@ -107,7 +111,9 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
       try {
         clearError();
         if (!readerRef.current) {
-          readerRef.current = new BrowserMultiFormatReader();
+          const hints = new Map();
+          hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
+          readerRef.current = new BrowserMultiFormatReader(hints, 180);
         } else {
           readerRef.current.reset();
         }
@@ -115,34 +121,44 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
         const video = videoRef.current;
         if (!reader || !video) throw new Error("Unable to access camera");
 
-        const controls = await reader.decodeFromVideoDevice(null, video, async (result, err, ctrl) => {
+        const constraints: MediaStreamConstraints = {
+          audio: false,
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+        };
+
+        const controls = await reader.decodeFromConstraints(constraints, video, async (result, err, ctrl) => {
           if (cancelled || !active) {
             ctrl.stop();
             return;
           }
           if (result) {
             const raw = result.getText()?.trim();
-            if (raw && raw !== lastValueRef.current) {
+            if (raw && !closingRef.current && raw !== lastValueRef.current) {
               if (!processingRef.current) {
                 processingRef.current = true;
+                lastValueRef.current = raw;
+                if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+                resetTimerRef.current = window.setTimeout(() => {
+                  if (!closingRef.current) lastValueRef.current = null;
+                }, 1400);
+
                 let shouldClose = false;
                 try {
                   shouldClose = await onDetected(raw);
                 } catch (handlerError) {
                   console.warn("QR handler failed", handlerError);
-                } finally {
-                  processingRef.current = false;
                 }
+
                 if (shouldClose) {
-                  ctrl.stop();
-                  stopScanner();
+                  closingRef.current = true;
                   return;
                 }
-                lastValueRef.current = raw;
-                if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
-                resetTimerRef.current = window.setTimeout(() => {
-                  if (lastValueRef.current === raw) lastValueRef.current = null;
-                }, 1600);
+
+                processingRef.current = false;
               }
             } else if (!raw) {
               lastValueRef.current = null;
@@ -183,6 +199,7 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
       }
       lastValueRef.current = null;
       processingRef.current = false;
+      closingRef.current = false;
     };
   }, [active, clearError, onDetected, reportError, stopScanner]);
 

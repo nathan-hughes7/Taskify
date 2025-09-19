@@ -13,6 +13,21 @@ QrScannerLib.WORKER_PATH = qrScannerWorkerPath;
 type ScanResult = QrScannerLib.ScanResult;
 
 const LNURL_DECODE_LIMIT = 2048;
+const LS_LIGHTNING_CONTACTS = "cashu_contacts_v1";
+const SMALL_ICON_BUTTON_STYLE = { "--icon-size": "2rem" } as React.CSSProperties;
+
+type LightningContact = {
+  id: string;
+  name: string;
+  address: string;
+};
+
+function makeContactId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 function decodeLnurlString(lnurl: string): string {
   try {
@@ -36,6 +51,25 @@ function extractDomain(target: string): string {
   } catch {
     return target;
   }
+}
+
+function PencilIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
+      <path d="M4 13.75V16h2.25l8.43-8.43a1.59 1.59 0 0 0 0-2.25l-1.5-1.5a1.59 1.59 0 0 0-2.25 0L4 13.75z" />
+      <path d="M11.5 4.5l2.5 2.5" />
+    </svg>
+  );
+}
+
+function TrashIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
+      <path d="M5 6h10l-.85 10.2a1.5 1.5 0 0 1-1.5 1.3H7.35a1.5 1.5 0 0 1-1.5-1.3L5 6z" />
+      <path d="M3 6h14" />
+      <path d="M8.5 6V4.5A1.5 1.5 0 0 1 10 3h0a1.5 1.5 0 0 1 1.5 1.5V6" />
+    </svg>
+  );
 }
 
 type LnurlPayData = {
@@ -312,6 +346,37 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
   const [lnState, setLnState] = useState<"idle" | "sending" | "done" | "error">("idle");
   const [lnError, setLnError] = useState("");
   const [lnurlPayData, setLnurlPayData] = useState<LnurlPayData | null>(null);
+  const [contacts, setContacts] = useState<LightningContact[]>(() => {
+    try {
+      const saved = localStorage.getItem(LS_LIGHTNING_CONTACTS);
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((item: any) => {
+          if (!item) return null;
+          const name = typeof item.name === "string" ? item.name : "";
+          const address = typeof item.address === "string" ? item.address : "";
+          if (!address.trim()) return null;
+          return {
+            id: typeof item.id === "string" && item.id ? item.id : makeContactId(),
+            name,
+            address,
+          } satisfies LightningContact;
+        })
+        .filter(Boolean) as LightningContact[];
+    } catch {
+      return [];
+    }
+  });
+  const [contactsOpen, setContactsOpen] = useState(false);
+  const [contactFormVisible, setContactFormVisible] = useState(false);
+  const [contactForm, setContactForm] = useState<{ id: string | null; name: string; address: string }>({
+    id: null,
+    name: "",
+    address: "",
+  });
+  const [contactFormError, setContactFormError] = useState("");
 
   const [lnurlWithdrawInfo, setLnurlWithdrawInfo] = useState<LnurlWithdrawData | null>(null);
   const [lnurlWithdrawAmt, setLnurlWithdrawAmt] = useState("");
@@ -372,6 +437,15 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     return lnurlPayData.minSendable !== lnurlPayData.maxSendable;
   }, [isLnurlInput, lnurlPayData, normalizedLnInput]);
   const hasNwcConnection = !!nwcConnection;
+  const sortedContacts = useMemo(() => {
+    return [...contacts].sort((a, b) => {
+      const nameA = (a.name || a.address).toLowerCase();
+      const nameB = (b.name || b.address).toLowerCase();
+      if (nameA < nameB) return -1;
+      if (nameA > nameB) return 1;
+      return a.address.localeCompare(b.address);
+    });
+  }, [contacts]);
   const nwcAlias = nwcInfo?.alias || nwcConnection?.walletName || "";
   const nwcBalanceSats = typeof nwcInfo?.balanceMsat === "number" ? Math.floor(nwcInfo.balanceMsat / 1000) : null;
   const nwcPrimaryRelay = nwcConnection?.relayUrls?.[0];
@@ -428,6 +502,91 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         return "";
     }
   }, [lnurlWithdrawState]);
+
+  const resetContactForm = useCallback(() => {
+    setContactForm({ id: null, name: "", address: "" });
+    setContactFormError("");
+    setContactFormVisible(false);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_LIGHTNING_CONTACTS, JSON.stringify(contacts));
+    } catch (err) {
+      console.warn("Unable to save contacts", err);
+    }
+  }, [contacts]);
+
+  useEffect(() => {
+    if (!contactsOpen) {
+      resetContactForm();
+    }
+  }, [contactsOpen, resetContactForm]);
+
+  const handleSelectContact = useCallback(
+    (contact: LightningContact) => {
+      setLnInput(contact.address);
+      setContactsOpen(false);
+      resetContactForm();
+      setTimeout(() => {
+        lnRef.current?.focus();
+      }, 0);
+    },
+    [resetContactForm, lnRef],
+  );
+
+  const handleStartNewContact = useCallback(() => {
+    setContactsOpen(true);
+    setContactForm({ id: null, name: "", address: "" });
+    setContactFormError("");
+    setContactFormVisible(true);
+  }, []);
+
+  const handleStartEditContact = useCallback((contact: LightningContact) => {
+    setContactsOpen(true);
+    setContactForm({ id: contact.id, name: contact.name, address: contact.address });
+    setContactFormError("");
+    setContactFormVisible(true);
+  }, []);
+
+  const handleDeleteContact = useCallback((id: string) => {
+    setContacts((prev) => prev.filter((c) => c.id !== id));
+  }, []);
+
+  const handleSubmitContact = useCallback(
+    (ev?: React.FormEvent) => {
+      if (ev) ev.preventDefault();
+      const name = contactForm.name.trim();
+      const address = contactForm.address.trim();
+      if (!address) {
+        setContactFormError("Lightning address is required");
+        return;
+      }
+      const isEditing = !!contactForm.id;
+      const contact: LightningContact = {
+        id: contactForm.id || makeContactId(),
+        name,
+        address,
+      };
+      setContacts((prev) => {
+        const exists = prev.some((c) => c.id === contact.id);
+        if (exists) {
+          return prev.map((c) => (c.id === contact.id ? contact : c));
+        }
+        return [...prev, contact];
+      });
+      setContactFormError("");
+      setLnInput(address);
+      if (!isEditing) {
+        setContactsOpen(false);
+      }
+      resetContactForm();
+      setTimeout(() => {
+        lnRef.current?.focus();
+      }, 0);
+    },
+    [contactForm, lnRef, resetContactForm],
+  );
   const nwcFundInProgress = nwcFundState === "creating" || nwcFundState === "paying" || nwcFundState === "waiting" || nwcFundState === "claiming";
   const nwcWithdrawInProgress = nwcWithdrawState === "requesting" || nwcWithdrawState === "paying";
 
@@ -1455,8 +1614,144 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         </div>
       </ActionSheet>
 
-      <ActionSheet open={sendMode === "lightning"} onClose={()=>{setSendMode(null); setShowSendOptions(false); setLnInput(""); setLnAddrAmt(""); setLnState("idle"); setLnError("");}} title="Pay Lightning Invoice">
+      <ActionSheet
+        open={sendMode === "lightning"}
+        onClose={() => {
+          setSendMode(null);
+          setShowSendOptions(false);
+          setLnInput("");
+          setLnAddrAmt("");
+          setLnState("idle");
+          setLnError("");
+          setContactsOpen(false);
+          resetContactForm();
+        }}
+        title="Pay Lightning Invoice"
+      >
         <div className="wallet-section space-y-3">
+          <div className="flex flex-wrap gap-2 items-center text-xs text-secondary">
+            <button
+              className="ghost-button button-sm pressable"
+              type="button"
+              onClick={() => setContactsOpen((prev) => !prev)}
+              aria-expanded={contactsOpen}
+            >
+              {contactsOpen ? "Hide contacts" : "Contacts"}
+            </button>
+            {contactsOpen && (
+              <button
+                className="ghost-button button-sm pressable"
+                type="button"
+                onClick={handleStartNewContact}
+              >
+                New contact
+              </button>
+            )}
+            {!contactsOpen && sortedContacts.length > 0 && (
+              <span>Select a saved contact to fill their address.</span>
+            )}
+            {!contactsOpen && sortedContacts.length === 0 && (
+              <span>No saved contacts yet.</span>
+            )}
+          </div>
+          {contactsOpen && (
+            <div className="space-y-3 bg-surface-muted border border-surface rounded-2xl p-3 text-xs">
+              <div className="text-secondary text-[11px]">
+                {sortedContacts.length
+                  ? "Select a contact to use their lightning address."
+                  : "Add a contact to quickly reuse a lightning address."}
+              </div>
+              {contactFormVisible && (
+                <form className="space-y-2" onSubmit={handleSubmitContact}>
+                  <div className="space-y-2">
+                    <input
+                      className="pill-input"
+                      placeholder="Contact name (optional)"
+                      value={contactForm.name}
+                      onChange={(e) => setContactForm((prev) => ({ ...prev, name: e.target.value }))}
+                      autoComplete="name"
+                    />
+                    <input
+                      className="pill-input"
+                      placeholder="Lightning address"
+                      value={contactForm.address}
+                      onChange={(e) => setContactForm((prev) => ({ ...prev, address: e.target.value }))}
+                      autoComplete="off"
+                      aria-required={true}
+                    />
+                  </div>
+                  <div className="text-[11px] text-secondary">
+                    {contactForm.id
+                      ? `Editing ${contactForm.name?.trim() || "saved contact"}`
+                      : "Create a shortcut for frequently used lightning addresses."}
+                  </div>
+                  {contactFormError && <div className="text-[11px] text-rose-500">{contactFormError}</div>}
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <button className="accent-button button-sm pressable" type="submit">
+                      {contactForm.id ? "Save contact" : "Add contact"}
+                    </button>
+                    <button
+                      className="ghost-button button-sm pressable"
+                      type="button"
+                      onClick={resetContactForm}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+              {sortedContacts.length ? (
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {sortedContacts.map((contact) => (
+                    <div key={contact.id} className="flex flex-col gap-1 rounded-xl border border-transparent bg-surface px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="ghost-button button-sm pressable w-full text-left truncate"
+                          onClick={() => handleSelectContact(contact)}
+                        >
+                          {contact.name?.trim() || contact.address}
+                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            className="icon-button pressable"
+                            style={SMALL_ICON_BUTTON_STYLE}
+                            onClick={() => handleStartEditContact(contact)}
+                            aria-label={`Edit contact ${contact.name || contact.address}`}
+                            title={`Edit contact ${contact.name || contact.address}`}
+                          >
+                            <PencilIcon className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-button pressable icon-button--danger"
+                            style={SMALL_ICON_BUTTON_STYLE}
+                            onClick={() => {
+                              if (window.confirm("Remove this contact?")) {
+                                handleDeleteContact(contact.id);
+                              }
+                            }}
+                            aria-label={`Delete contact ${contact.name || contact.address}`}
+                            title={`Delete contact ${contact.name || contact.address}`}
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                      {contact.name?.trim() && (
+                        <div className="text-[11px] text-secondary break-all">{contact.address}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                !contactFormVisible && (
+                  <div className="text-secondary">Add a contact to quickly reuse a lightning address.</div>
+                )
+              )}
+            </div>
+          )}
           <textarea ref={lnRef} className="pill-textarea wallet-textarea" placeholder="Paste BOLT11 invoice or enter lightning address" value={lnInput} onChange={(e)=>setLnInput(e.target.value)} />
           {(isLnAddress || isLnurlInput) && (
             <input className="pill-input" placeholder="Amount (sats)" value={lnAddrAmt} onChange={(e)=>setLnAddrAmt(e.target.value)} />

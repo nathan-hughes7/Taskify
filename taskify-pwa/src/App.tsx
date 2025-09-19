@@ -3910,6 +3910,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
 
   const handleSubtaskDragOver = useCallback((id: string | null) => (e: React.DragEvent<HTMLDivElement>) => {
     if (!dragSubtaskIdRef.current) return;
+    void id;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
   }, []);

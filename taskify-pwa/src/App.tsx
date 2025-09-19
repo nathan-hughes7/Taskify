@@ -936,34 +936,32 @@ export default function App() {
   const tutorialSteps = useMemo(
     () => [
       {
-        title: "Welcome to Taskify",
+        title: "Welcome to the new Taskify",
         body: (
-          <div className="space-y-3 text-sm text-neutral-200">
-            <p>
-              Taskify keeps your plans organized on boards. The default Week board groups tasks by day plus a Bounties
-              lane for reward-backed work.
+          <div className="space-y-3 text-sm text-secondary">
+            <p className="text-primary">
+              Taskify now opens on a glassy Week board with a command center that keeps your essential controls close.
             </p>
-            <ul className="list-disc pl-5 space-y-1 text-secondary">
-              <li>Use the board switcher in the header to focus on different projects.</li>
-              <li>Add more boards from Settings → Boards &amp; Lists, or paste a Board ID there to join a shared space.</li>
-              <li>Open Manage board to copy its Board ID for teammates and tap the refresh icon to pull in shared updates.</li>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Pick any board from the pill switcher, or drag a task onto it to move work between boards.</li>
+              <li>Use the control matrix to refresh shared boards, pop open Settings, jump into your wallet, or flip to the Completed view.</li>
+              <li>The accent-aware surfaces keep lists legible while matching the color palette you choose.</li>
             </ul>
-            <p className="text-secondary">You can skip this tutorial at any time.</p>
+            <p className="text-tertiary">You can skip this tutorial at any time.</p>
           </div>
         ),
       },
       {
         title: "Capture and organize tasks",
         body: (
-          <div className="space-y-3 text-sm text-neutral-200">
-            <p>
-              Use the New Task bar to add items instantly, attach notes or images, and schedule them for specific days.
+          <div className="space-y-3 text-sm text-secondary">
+            <p className="text-primary">
+              Capture ideas instantly and arrange them across days or custom lists.
             </p>
-            <ul className="list-disc pl-5 space-y-1 text-secondary">
-              <li>Drag tasks to reorder them, move them between days and lists, or drop them on the Upcoming drawer.</li>
-              <li>Upcoming keeps tasks hidden until you need them—future due dates pop onto the board at the start of that week.</li>
-              <li>Open a task to set recurrence, manage subtasks, track streaks on repeats, or attach optional bounties.</li>
-              <li>Turn streak tracking on or off later from Settings → Streaks.</li>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Use the New Task bar or enable inline add boxes in Settings → View to create cards exactly where you need them.</li>
+              <li>Drag tasks to reorder, drop them between boards, or toss them onto the floating Upcoming button to hide them until you&apos;re ready.</li>
+              <li>Open a task to reorder subtasks, paste images, set advanced recurrence, track streaks, and attach optional bounties.</li>
             </ul>
           </div>
         ),
@@ -971,11 +969,12 @@ export default function App() {
       {
         title: "Shape your workspace",
         body: (
-          <div className="space-y-3 text-sm text-neutral-200">
-            <p>Dial in how Taskify feels so it matches the way you work.</p>
-            <ul className="list-disc pl-5 space-y-1 text-secondary">
-              <li>Choose between inline add boxes inside each list or the top New Task bar from Settings → Add tasks within lists.</li>
-              <li>Adjust week start, default task position, and other layout options anytime from Settings.</li>
+          <div className="space-y-3 text-sm text-secondary">
+            <p className="text-primary">Settings are grouped so you can personalize the layout without hunting around.</p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Adjust font size, accent color, start-of-week, and Completed tab behavior from Settings → View.</li>
+              <li>Pick inline add boxes, default task position, and per-day start boards to match how you plan.</li>
+              <li>Manage boards from Settings → Boards &amp; Lists: reorder, archive via drag, or join shared boards with an ID.</li>
             </ul>
           </div>
         ),
@@ -983,35 +982,35 @@ export default function App() {
       {
         title: "Lightning ecash tools",
         body: (
-          <div className="space-y-3 text-sm text-neutral-200">
-            <p>The 💰 button opens your built-in Cashu wallet. Even without tokens yet, it&apos;s ready for ecash.</p>
-            <ul className="list-disc pl-5 space-y-1 text-secondary">
-              <li>Receive to accept new ecash from a mint and store it securely on this device.</li>
-              <li>Send to share tokens or fund task bounties when you&apos;re coordinating with others.</li>
-              <li>History keeps track of every ecash transfer so you know where tokens went.</li>
+          <div className="space-y-3 text-sm text-secondary">
+            <p className="text-primary">The 💰 button opens your upgraded Cashu wallet with Lightning superpowers.</p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Track balances in sats or USD (toggle conversions in Settings → Wallet) and switch units from the wallet header.</li>
+              <li>Scan QR codes to receive eCash, LNURL withdraws, Lightning invoices, or addresses without leaving the app.</li>
+              <li>Save Lightning contacts, reuse them when paying, and fund task bounties or NWC withdrawals in a couple taps.</li>
+              <li>Receive, Send, and Scan flows let you create shareable tokens, pay invoices, or move sats with Nostr Wallet Connect without leaving the app.</li>
             </ul>
-            <p className="text-secondary">Bounties on tasks will show any ecash rewards once you add them.</p>
+            <p className="text-tertiary">Bounties on tasks reflect any ecash rewards you attach.</p>
           </div>
         ),
       },
       {
         title: "Back up your nsec",
         body: (
-          <div className="space-y-3 text-sm text-neutral-200">
-            <p>
-              Your Nostr private key (nsec) lives only on this device. Back it up so you can recover tasks, boards, and
-              ecash access.
+          <div className="space-y-3 text-sm text-secondary">
+            <p className="text-primary">
+              Your Nostr private key (nsec) lives only on this device. It unlocks shared boards, wallet connections, and future recoveries.
             </p>
-            <p>Copy it now or later from Settings → Nostr and store it in a safe password manager.</p>
+            <p>Copy it now or later from Settings → Nostr and store it in a secure password manager.</p>
             <div>
               <button
-                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm"
+                className="accent-button button-sm pressable"
                 onClick={handleCopyNsec}
               >
                 Copy my nsec
               </button>
             </div>
-            <p className="text-secondary">Skipping is okay—you can always copy it from Settings when you&apos;re ready.</p>
+            <p className="text-tertiary">Skipping is okay—you can always copy it from Settings when you&apos;re ready.</p>
           </div>
         ),
       },
@@ -3216,7 +3215,7 @@ export default function App() {
             {currentTutorial.body}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
               <button
-                className="px-3 py-2 rounded-xl bg-surface-muted text-sm"
+                className="ghost-button button-sm pressable"
                 onClick={handleSkipTutorial}
               >
                 Skip tutorial
@@ -3224,14 +3223,14 @@ export default function App() {
               <div className="flex gap-2">
                 {tutorialStep > 0 && (
                   <button
-                    className="px-3 py-2 rounded-xl bg-surface-muted text-sm"
+                    className="ghost-button button-sm pressable"
                     onClick={handlePrevTutorial}
                   >
                     Back
                   </button>
                 )}
                 <button
-                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm"
+                  className="accent-button button-sm pressable"
                   onClick={handleNextTutorial}
                 >
                   {tutorialStep === totalTutorialSteps - 1 ? "Finish" : "Next"}

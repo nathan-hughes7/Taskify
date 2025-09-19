@@ -1,13 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { bech32 } from "bech32";
 import { decodePaymentRequest, PaymentRequest, PaymentRequestTransportType, type PaymentRequestTransport } from "@cashu/cashu-ts";
-import QrScannerLib, { type QrScannerScanResult as ScanResult } from "qr-scanner";
+import QrScannerLib from "qr-scanner";
 import qrScannerWorkerPath from "qr-scanner/qr-scanner-worker.min.js?url";
 import { QRCodeCanvas } from "qrcode.react";
 import { useCashu } from "../context/CashuContext";
 import { useNwc } from "../context/NwcContext";
 import { loadStore } from "../wallet/storage";
 import { ActionSheet } from "./ActionSheet";
+
+QrScannerLib.WORKER_PATH = qrScannerWorkerPath;
+type ScanResult = QrScannerLib.ScanResult;
 
 const LNURL_DECODE_LIMIT = 2048;
 
@@ -97,12 +100,9 @@ function QrCodeCard({ value, label, copyLabel = "Copy", extraActions, size = 220
 
 function QrScanner({ active, onDetected, onError }: { active: boolean; onDetected: (value: string) => boolean | Promise<boolean>; onError?: (message: string) => void; }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const controlsRef = useRef<IScannerControls | null>(null);
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
-  const processingRef = useRef(false);
-  const closingRef = useRef(false);
-  const lastValueRef = useRef<string | null>(null);
-  const resetTimerRef = useRef<number>();
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const scannerRef = useRef<QrScannerLib | null>(null);
+  const stopRequestedRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const reportError = useCallback((message: string) => {
@@ -115,123 +115,79 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
   }, []);
 
   const stopScanner = useCallback(() => {
-    if (controlsRef.current) {
+    const scanner = scannerRef.current;
+    if (scanner) {
       try {
-        controlsRef.current.stop();
+        scanner.stop();
       } catch (err) {
         console.warn("Failed to stop scanner", err);
       }
-      controlsRef.current = null;
+      scanner.destroy();
+      scannerRef.current = null;
     }
     const video = videoRef.current;
-    const stream = (video?.srcObject as MediaStream | null) || null;
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-    }
-    if (video) {
-      video.pause();
+    if (video && video.srcObject instanceof MediaStream) {
+      video.srcObject.getTracks().forEach((track) => track.stop());
       video.srcObject = null;
     }
-    if (readerRef.current) {
-      readerRef.current.reset();
-    }
-    closingRef.current = false;
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-
     if (!active) {
+      stopRequestedRef.current = true;
       stopScanner();
       clearError();
-      lastValueRef.current = null;
-      processingRef.current = false;
-      closingRef.current = false;
       return;
     }
 
-    if (!navigator?.mediaDevices?.getUserMedia) {
-      reportError("Camera access not supported on this device");
-      return;
-    }
+    const video = videoRef.current;
+    const overlay = overlayRef.current || undefined;
+    if (!video) return;
+
+    stopRequestedRef.current = false;
+    let cancelled = false;
 
     async function start() {
       try {
         clearError();
-        if (!readerRef.current) {
-          const hints = new Map();
-          hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
-          readerRef.current = new BrowserMultiFormatReader(hints, 180);
-        } else {
-          readerRef.current.reset();
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error("Camera access not supported on this device");
         }
-        const reader = readerRef.current;
-        const video = videoRef.current;
-        if (!reader || !video) throw new Error("Unable to access camera");
 
-        const constraints: MediaStreamConstraints = {
-          audio: false,
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        };
-
-        const controls = await reader.decodeFromConstraints(constraints, video, async (result, err, ctrl) => {
-          if (cancelled || !active) {
-            ctrl.stop();
-            return;
-          }
-          if (result) {
-            const raw = result.getText()?.trim();
-            if (raw && !closingRef.current && raw !== lastValueRef.current) {
-              if (!processingRef.current) {
-                processingRef.current = true;
-                lastValueRef.current = raw;
-                if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
-                resetTimerRef.current = window.setTimeout(() => {
-                  if (!closingRef.current) lastValueRef.current = null;
-                }, 1400);
-
-                let shouldClose = false;
-                try {
-                  shouldClose = await onDetected(raw);
-                } catch (handlerError) {
-                  console.warn("QR handler failed", handlerError);
-                }
-
-                if (shouldClose) {
-                  closingRef.current = true;
-                  return;
-                }
-
-                processingRef.current = false;
+        const scanner = new QrScannerLib(
+          video,
+          async (result: ScanResult) => {
+            const value = result?.data?.trim();
+            if (!value || stopRequestedRef.current) return;
+            try {
+              const shouldClose = await onDetected(value);
+              if (shouldClose) {
+                stopRequestedRef.current = true;
+                stopScanner();
               }
-            } else if (!raw) {
-              lastValueRef.current = null;
+            } catch (err) {
+              console.warn("QR handler failed", err);
             }
-          } else if (err && (err as { name?: string }).name !== "NotFoundException") {
-            console.warn("ZXing scanner error", err);
+          },
+          {
+            returnDetailedScanResult: true,
+            highlightScanRegion: true,
+            highlightCodeOutline: true,
+            overlay,
+            preferredCamera: "environment",
+            maxScansPerSecond: 12,
+            onDecodeError: (err) => {
+              if (typeof err === "string" && err === QrScannerLib.NO_QR_CODE_FOUND) return;
+            },
           }
-        });
+        );
 
-        if (cancelled) {
-          controls.stop();
-          return;
-        }
-
-        controlsRef.current = controls;
+        scannerRef.current = scanner;
+        await scanner.start();
       } catch (err) {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : String(err);
-        if (/NotAllowedError|denied/i.test(message)) {
-          reportError("Camera permission denied");
-        } else if (/NotFoundError|device not found/i.test(message)) {
-          reportError("Camera not available");
-        } else {
-          reportError(message || "Unable to access camera");
-        }
+        reportError(message || "Unable to access camera");
         stopScanner();
       }
     }
@@ -240,16 +196,10 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
 
     return () => {
       cancelled = true;
+      stopRequestedRef.current = true;
       stopScanner();
-      if (resetTimerRef.current) {
-        clearTimeout(resetTimerRef.current);
-        resetTimerRef.current = undefined;
-      }
-      lastValueRef.current = null;
-      processingRef.current = false;
-      closingRef.current = false;
     };
-  }, [active, clearError, onDetected, reportError, stopScanner]);
+  }, [active, onDetected, reportError, stopScanner, clearError]);
 
   return (
     <div className="wallet-scanner space-y-3">
@@ -259,7 +209,7 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
         ) : (
           <>
             <video ref={videoRef} className="wallet-scanner__video" playsInline muted />
-            <div className="wallet-scanner__guide" aria-hidden="true" />
+            <div ref={overlayRef} className="wallet-scanner__guide" aria-hidden="true" />
           </>
         )}
       </div>
@@ -574,30 +524,35 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
 
     candidate = candidate.replace(/^lightning:/i, "").trim();
 
-    if (/^cashu[0-9a-z]+$/i.test(candidate)) {
+    const lowerCandidate = candidate.toLowerCase();
+
+    if (lowerCandidate.startsWith("cashu")) {
       setPendingScan({ type: "ecash", token: candidate });
+      setShowScanner(false);
       return true;
     }
 
     if (/^creqa[0-9a-z]+$/i.test(candidate)) {
       setPendingScan({ type: "paymentRequest", request: candidate });
+      setShowScanner(false);
       return true;
     }
 
-    const lowered = candidate.toLowerCase();
-
-    if (/^ln(bc|tb|sb|bcrt)[0-9]/.test(lowered)) {
-      setPendingScan({ type: "bolt11", invoice: lowered });
+    if (/^ln(bc|tb|sb|bcrt)[0-9]/.test(lowerCandidate)) {
+      setPendingScan({ type: "bolt11", invoice: lowerCandidate });
+      setShowScanner(false);
       return true;
     }
 
     if (/^[^@\s]+@[^@\s]+$/.test(candidate)) {
       setPendingScan({ type: "lightningAddress", address: candidate.toLowerCase() });
+      setShowScanner(false);
       return true;
     }
 
     if (/^lnurl[0-9a-z]+$/i.test(candidate)) {
       setPendingScan({ type: "lnurl", data: candidate });
+      setShowScanner(false);
       return true;
     }
 
@@ -646,7 +601,6 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         setLnState("idle");
         setLnError("");
         setScannerMessage("");
-        setTimeout(() => setShowScanner(false), 90);
         return;
       }
 
@@ -678,7 +632,6 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         setReceiveMode("lnurlWithdraw");
         setShowReceiveOptions(false);
         setScannerMessage("");
-        setTimeout(() => setShowScanner(false), 90);
         return;
       }
 
@@ -714,7 +667,6 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       setSendMode("paymentRequest");
       setShowSendOptions(true);
       setScannerMessage("");
-      setTimeout(() => setShowScanner(false), 90);
     } catch (err: any) {
       console.error("Payment request scan failed", err);
       setPaymentRequestState(null);
@@ -744,15 +696,6 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     if (!pendingScan) return;
     let cancelled = false;
 
-    const closeCamera = () => {
-      setScannerMessage("");
-      setTimeout(() => {
-        if (!cancelled) {
-          setShowScanner(false);
-        }
-      }, 90);
-    };
-
     async function process() {
       switch (pendingScan.type) {
         case "ecash": {
@@ -762,7 +705,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
           setShowSendOptions(false);
           setReceiveMode("ecash");
           setShowReceiveOptions(true);
-          closeCamera();
+          setScannerMessage("");
           break;
         }
         case "bolt11": {
@@ -774,7 +717,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
           setLnAddrAmt("");
           setLnState("idle");
           setLnError("");
-          closeCamera();
+          setScannerMessage("");
           break;
         }
         case "lightningAddress": {
@@ -786,7 +729,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
           setLnAddrAmt("");
           setLnState("idle");
           setLnError("");
-          closeCamera();
+          setScannerMessage("");
           break;
         }
         case "lnurl": {

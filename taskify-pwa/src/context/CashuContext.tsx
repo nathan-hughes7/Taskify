@@ -21,7 +21,7 @@ type CashuContextType = {
   checkMintQuote: (quoteId: string) => Promise<"UNPAID" | "PAID" | "ISSUED">;
   claimMint: (quoteId: string, amount: number) => Promise<Proof[]>;
   receiveToken: (encoded: string) => Promise<{ proofs: Proof[]; usedMintUrl: string; activeMintUrl: string; crossMint: boolean }>;
-  createSendToken: (amount: number) => Promise<{ token: string }>;
+  createSendToken: (amount: number) => Promise<{ token: string; proofs: Proof[]; mintUrl: string }>;
   payInvoice: (invoice: string) => Promise<{ state: string }>;
 };
 
@@ -125,7 +125,7 @@ export function CashuProvider({ children }: { children: React.ReactNode }) {
     const res = await manager.createSendToken(amount);
     setBalance(manager.balance);
     setProofs(manager.proofs);
-    return { token: res.token };
+    return { token: res.token, proofs: res.send, mintUrl: manager.mintUrl };
   }, [manager]);
 
   const payInvoice = useCallback(async (invoice: string) => {

@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { bech32 } from "bech32";
+import { decodePaymentRequest, PaymentRequest, PaymentRequestTransportType, type PaymentRequestTransport } from "@cashu/cashu-ts";
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { QRCodeCanvas } from "qrcode.react";
@@ -6,6 +8,52 @@ import { useCashu } from "../context/CashuContext";
 import { useNwc } from "../context/NwcContext";
 import { loadStore } from "../wallet/storage";
 import { ActionSheet } from "./ActionSheet";
+
+const LNURL_DECODE_LIMIT = 2048;
+
+function decodeLnurlString(lnurl: string): string {
+  try {
+    const trimmed = lnurl.trim();
+    const decoded = bech32.decode(trimmed.toLowerCase(), LNURL_DECODE_LIMIT);
+    const bytes = bech32.fromWords(decoded.words);
+    return new TextDecoder().decode(Uint8Array.from(bytes));
+  } catch {
+    throw new Error("Invalid LNURL");
+  }
+}
+
+function normalizeMintUrl(url: string): string {
+  return url.replace(/\/$/, "");
+}
+
+function extractDomain(target: string): string {
+  try {
+    const hostname = new URL(target).hostname;
+    return hostname || target;
+  } catch {
+    return target;
+  }
+}
+
+type LnurlPayData = {
+  lnurl: string;
+  callback: string;
+  domain: string;
+  minSendable: number;
+  maxSendable: number;
+  commentAllowed: number;
+  metadata?: string;
+};
+
+type LnurlWithdrawData = {
+  lnurl: string;
+  callback: string;
+  domain: string;
+  k1: string;
+  minWithdrawable: number;
+  maxWithdrawable: number;
+  defaultDescription?: string;
+};
 
 function QrCodeCard({ value, label, copyLabel = "Copy", extraActions, size = 220, className }: { value: string; label: string; copyLabel?: string; extraActions?: React.ReactNode; size?: number; className?: string; }) {
   const trimmed = value?.trim();
@@ -236,10 +284,15 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
   const [showSendOptions, setShowSendOptions] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [scannerMessage, setScannerMessage] = useState("");
-  type PendingScan = { type: "ecash"; value: string } | { type: "lightning"; value: string; isAddress: boolean };
+  type PendingScan =
+    | { type: "ecash"; token: string }
+    | { type: "bolt11"; invoice: string }
+    | { type: "lightningAddress"; address: string }
+    | { type: "lnurl"; data: string }
+    | { type: "paymentRequest"; request: string };
   const [pendingScan, setPendingScan] = useState<PendingScan | null>(null);
-  const [receiveMode, setReceiveMode] = useState<null | "ecash" | "lightning" | "nwcFund">(null);
-  const [sendMode, setSendMode] = useState<null | "ecash" | "lightning" | "nwcWithdraw">(null);
+  const [receiveMode, setReceiveMode] = useState<null | "ecash" | "lightning" | "lnurlWithdraw" | "nwcFund">(null);
+  const [sendMode, setSendMode] = useState<null | "ecash" | "lightning" | "paymentRequest" | "nwcWithdraw">(null);
 
   const [mintAmt, setMintAmt] = useState("");
   const [mintQuote, setMintQuote] = useState<{ request: string; quote: string; expiry: number } | null>(null);
@@ -256,6 +309,17 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
   const [lnAddrAmt, setLnAddrAmt] = useState("");
   const [lnState, setLnState] = useState<"idle" | "sending" | "done" | "error">("idle");
   const [lnError, setLnError] = useState("");
+  const [lnurlPayData, setLnurlPayData] = useState<LnurlPayData | null>(null);
+
+  const [lnurlWithdrawInfo, setLnurlWithdrawInfo] = useState<LnurlWithdrawData | null>(null);
+  const [lnurlWithdrawAmt, setLnurlWithdrawAmt] = useState("");
+  const [lnurlWithdrawState, setLnurlWithdrawState] = useState<"idle" | "creating" | "waiting" | "done" | "error">("idle");
+  const [lnurlWithdrawMessage, setLnurlWithdrawMessage] = useState("");
+  const [lnurlWithdrawInvoice, setLnurlWithdrawInvoice] = useState("");
+
+  const [paymentRequestState, setPaymentRequestState] = useState<{ encoded: string; request: PaymentRequest } | null>(null);
+  const [paymentRequestStatus, setPaymentRequestStatus] = useState<"idle" | "sending" | "done" | "error">("idle");
+  const [paymentRequestMessage, setPaymentRequestMessage] = useState("");
 
   const [showNwcManager, setShowNwcManager] = useState(false);
   const [nwcUrlInput, setNwcUrlInput] = useState("");
@@ -283,7 +347,16 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const recvRef = useRef<HTMLTextAreaElement | null>(null);
   const lnRef = useRef<HTMLTextAreaElement | null>(null);
-  const isLnAddress = useMemo(() => /^[^@\s]+@[^@\s]+$/.test(lnInput), [lnInput]);
+  const normalizedLnInput = useMemo(() => lnInput.trim().replace(/^lightning:/i, "").trim(), [lnInput]);
+  const isLnAddress = useMemo(() => /^[^@\s]+@[^@\s]+$/.test(normalizedLnInput), [normalizedLnInput]);
+  const isLnurlInput = useMemo(() => /^lnurl[0-9a-z]+$/i.test(normalizedLnInput), [normalizedLnInput]);
+  const isBolt11Input = useMemo(() => /^ln(bc|tb|sb|bcrt)[0-9]/i.test(normalizedLnInput), [normalizedLnInput]);
+  const lnurlRequiresAmount = useMemo(() => {
+    if (!isLnurlInput) return false;
+    if (!lnurlPayData) return true;
+    if (lnurlPayData.lnurl.trim().toLowerCase() !== normalizedLnInput.toLowerCase()) return true;
+    return lnurlPayData.minSendable !== lnurlPayData.maxSendable;
+  }, [isLnurlInput, lnurlPayData, normalizedLnInput]);
   const hasNwcConnection = !!nwcConnection;
   const nwcAlias = nwcInfo?.alias || nwcConnection?.walletName || "";
   const nwcBalanceSats = typeof nwcInfo?.balanceMsat === "number" ? Math.floor(nwcInfo.balanceMsat / 1000) : null;
@@ -327,6 +400,20 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         return "";
     }
   }, [nwcWithdrawState]);
+  const lnurlWithdrawStatusText = useMemo(() => {
+    switch (lnurlWithdrawState) {
+      case "creating":
+        return "Creating invoice…";
+      case "waiting":
+        return "Waiting for payment…";
+      case "done":
+        return "Completed";
+      case "error":
+        return "Error";
+      default:
+        return "";
+    }
+  }, [lnurlWithdrawState]);
   const nwcFundInProgress = nwcFundState === "creating" || nwcFundState === "paying" || nwcFundState === "waiting" || nwcFundState === "claiming";
   const nwcWithdrawInProgress = nwcWithdrawState === "requesting" || nwcWithdrawState === "paying";
 
@@ -380,6 +467,16 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       setNwcWithdrawState("idle");
       setNwcWithdrawMessage("");
       setNwcWithdrawInvoice("");
+      setLnurlPayData(null);
+      setLnurlWithdrawInfo(null);
+      setLnurlWithdrawAmt("");
+      setLnurlWithdrawState("idle");
+      setLnurlWithdrawMessage("");
+      setLnurlWithdrawInvoice("");
+      setPaymentRequestState(null);
+      setPaymentRequestStatus("idle");
+      setPaymentRequestMessage("");
+      setPendingScan(null);
       setShowScanner(false);
       setScannerMessage("");
     }
@@ -403,6 +500,13 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     }, 100);
     return () => clearTimeout(timer);
   }, [open, sendMode]);
+
+  useEffect(() => {
+    if (!lnurlPayData) return;
+    if (normalizedLnInput.toLowerCase() !== lnurlPayData.lnurl.trim().toLowerCase()) {
+      setLnurlPayData(null);
+    }
+  }, [lnurlPayData, normalizedLnInput]);
 
   useEffect(() => {
     if (!showMintBalances) return;
@@ -437,24 +541,188 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     const text = rawValue.trim();
     if (!text) return false;
 
-    if (/^cashu[0-9a-z]+/i.test(text)) {
-      setPendingScan({ type: "ecash", value: text });
+    const compact = text.replace(/\s+/g, "");
+
+    if (/^https?:\/\//i.test(compact) || /^www\./i.test(compact)) {
+      setScannerMessage("Unsupported QR code. Only Cashu tokens and Lightning requests are allowed.");
+      return false;
+    }
+
+    let candidate = compact;
+
+    if (/^bitcoin:/i.test(candidate)) {
+      const [, query = ""] = candidate.split("?");
+      if (query) {
+        const params = new URLSearchParams(query);
+        const lightningParam = params.get("lightning") || params.get("lightning_pay");
+        const tokenParam = params.get("token");
+        if (lightningParam) {
+          try {
+            candidate = decodeURIComponent(lightningParam);
+          } catch {
+            candidate = lightningParam;
+          }
+        } else if (tokenParam?.toLowerCase().startsWith("cashu")) {
+          try {
+            candidate = decodeURIComponent(tokenParam);
+          } catch {
+            candidate = tokenParam;
+          }
+        }
+      }
+    }
+
+    candidate = candidate.replace(/^lightning:/i, "").trim();
+
+    if (/^cashu[0-9a-z]+$/i.test(candidate)) {
+      setPendingScan({ type: "ecash", token: candidate });
       return true;
     }
 
-    const normalized = text.replace(/^lightning:/i, "").trim();
-    const isLightningAddress = /^[^@\s]+@[^@\s]+$/.test(normalized);
-    const isBolt11 = /^ln(bc|tb|sb|bcrt)[0-9]/i.test(normalized);
-
-    if (normalized && (isBolt11 || isLightningAddress)) {
-      const value = isBolt11 ? normalized.toLowerCase() : normalized;
-      setPendingScan({ type: "lightning", value, isAddress: isLightningAddress });
+    if (/^creqa[0-9a-z]+$/i.test(candidate)) {
+      setPendingScan({ type: "paymentRequest", request: candidate });
       return true;
     }
 
-    setScannerMessage("Unrecognized code. Scan a Cashu token or lightning invoice.");
+    const lowered = candidate.toLowerCase();
+
+    if (/^ln(bc|tb|sb|bcrt)[0-9]/.test(lowered)) {
+      setPendingScan({ type: "bolt11", invoice: lowered });
+      return true;
+    }
+
+    if (/^[^@\s]+@[^@\s]+$/.test(candidate)) {
+      setPendingScan({ type: "lightningAddress", address: candidate.toLowerCase() });
+      return true;
+    }
+
+    if (/^lnurl[0-9a-z]+$/i.test(candidate)) {
+      setPendingScan({ type: "lnurl", data: candidate });
+      return true;
+    }
+
+    setScannerMessage("Unrecognized code. Scan a Cashu token, Lightning invoice/address, LNURL or payment request.");
     return false;
   }, []);
+
+  const handleLnurlScan = useCallback(async (lnurlValue: string) => {
+    try {
+      const url = decodeLnurlString(lnurlValue);
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`LNURL request failed (${res.status})`);
+      const data = await res.json();
+      const tag = String(data?.tag || "").toLowerCase();
+      const domain = extractDomain(url);
+
+      if (tag === "payrequest") {
+        const minSendable = Number(data?.minSendable ?? 0);
+        const maxSendable = Number(data?.maxSendable ?? 0);
+        const commentAllowed = Number(data?.commentAllowed ?? 0);
+        if (!data?.callback) throw new Error("LNURL pay is missing callback URL");
+        if (!minSendable || !maxSendable) throw new Error("LNURL pay missing sendable range");
+
+        const payload: LnurlPayData = {
+          lnurl: lnurlValue.trim(),
+          callback: data.callback,
+          domain,
+          minSendable,
+          maxSendable,
+          commentAllowed,
+          metadata: typeof data?.metadata === "string" ? data.metadata : undefined,
+        };
+
+        setLnurlPayData(payload);
+        setLnurlWithdrawInfo(null);
+        setReceiveMode(null);
+        setShowReceiveOptions(false);
+        setSendMode("lightning");
+        setShowSendOptions(true);
+        setLnInput(lnurlValue.trim());
+        if (minSendable === maxSendable) {
+          setLnAddrAmt(String(Math.floor(minSendable / 1000)));
+        } else {
+          setLnAddrAmt("");
+        }
+        setLnState("idle");
+        setLnError("");
+        setScannerMessage("");
+        setTimeout(() => setShowScanner(false), 90);
+        return;
+      }
+
+      if (tag === "withdrawrequest") {
+        if (!data?.callback || !data?.k1) throw new Error("LNURL withdraw missing callback parameters");
+        const minWithdrawable = Number(data?.minWithdrawable ?? 0);
+        const maxWithdrawable = Number(data?.maxWithdrawable ?? 0);
+        if (!minWithdrawable || !maxWithdrawable) throw new Error("LNURL withdraw missing withdrawable range");
+
+        const info: LnurlWithdrawData = {
+          lnurl: lnurlValue.trim(),
+          callback: data.callback,
+          domain,
+          k1: data.k1,
+          minWithdrawable,
+          maxWithdrawable,
+          defaultDescription: typeof data?.defaultDescription === "string" ? data.defaultDescription : undefined,
+        };
+
+        setLnurlWithdrawInfo(info);
+        const maxSat = Math.floor(maxWithdrawable / 1000);
+        setLnurlWithdrawAmt(maxSat > 0 ? String(maxSat) : "");
+        setLnurlWithdrawState("idle");
+        setLnurlWithdrawMessage("");
+        setLnurlWithdrawInvoice("");
+        setLnurlPayData(null);
+        setSendMode(null);
+        setShowSendOptions(false);
+        setReceiveMode("lnurlWithdraw");
+        setShowReceiveOptions(false);
+        setScannerMessage("");
+        setTimeout(() => setShowScanner(false), 90);
+        return;
+      }
+
+      throw new Error("Unsupported LNURL tag");
+    } catch (err: any) {
+      console.error("handleLnurlScan failed", err);
+      setScannerMessage(err?.message || String(err));
+    }
+  }, []);
+
+  const handlePaymentRequestScan = useCallback(async (encodedRequest: string) => {
+    try {
+      const request = decodePaymentRequest(encodedRequest);
+      if (request.mints && request.mints.length) {
+        if (!mintUrl) {
+          throw new Error("Set an active mint before fulfilling payment requests");
+        }
+        const normalizedActive = normalizeMintUrl(mintUrl);
+        const compatible = request.mints.some((m) => normalizeMintUrl(m) === normalizedActive);
+        if (!compatible) {
+          throw new Error("Payment request targets a different mint");
+        }
+      }
+      if (request.unit && info?.unit && request.unit.toLowerCase() !== info.unit.toLowerCase()) {
+        throw new Error(`Payment request unit ${request.unit} does not match active mint unit ${info.unit}`);
+      }
+
+      setPaymentRequestState({ encoded: encodedRequest, request });
+      setPaymentRequestStatus("idle");
+      setPaymentRequestMessage("");
+      setReceiveMode(null);
+      setShowReceiveOptions(false);
+      setSendMode("paymentRequest");
+      setShowSendOptions(true);
+      setScannerMessage("");
+      setTimeout(() => setShowScanner(false), 90);
+    } catch (err: any) {
+      console.error("Payment request scan failed", err);
+      setPaymentRequestState(null);
+      setPaymentRequestStatus("error");
+      setPaymentRequestMessage("");
+      setScannerMessage(err?.message || "Invalid payment request");
+    }
+  }, [info?.unit, mintUrl]);
 
   const openScanner = useCallback(() => {
     setScannerMessage("");
@@ -474,31 +742,77 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
 
   useEffect(() => {
     if (!pendingScan) return;
+    let cancelled = false;
 
-    if (pendingScan.type === "ecash") {
-      setRecvTokenStr(pendingScan.value);
-      setRecvMsg("");
-      setSendMode(null);
-      setShowSendOptions(false);
-      setReceiveMode("ecash");
-      setShowReceiveOptions(true);
-    } else if (pendingScan.type === "lightning") {
-      setReceiveMode(null);
-      setShowReceiveOptions(false);
-      setSendMode("lightning");
-      setShowSendOptions(true);
-      setLnInput(pendingScan.value);
-      setLnAddrAmt("");
-      setLnState("idle");
-      setLnError("");
+    const closeCamera = () => {
+      setScannerMessage("");
+      setTimeout(() => {
+        if (!cancelled) {
+          setShowScanner(false);
+        }
+      }, 90);
+    };
+
+    async function process() {
+      switch (pendingScan.type) {
+        case "ecash": {
+          setRecvTokenStr(pendingScan.token);
+          setRecvMsg("");
+          setSendMode(null);
+          setShowSendOptions(false);
+          setReceiveMode("ecash");
+          setShowReceiveOptions(true);
+          closeCamera();
+          break;
+        }
+        case "bolt11": {
+          setReceiveMode(null);
+          setShowReceiveOptions(false);
+          setSendMode("lightning");
+          setShowSendOptions(true);
+          setLnInput(pendingScan.invoice);
+          setLnAddrAmt("");
+          setLnState("idle");
+          setLnError("");
+          closeCamera();
+          break;
+        }
+        case "lightningAddress": {
+          setReceiveMode(null);
+          setShowReceiveOptions(false);
+          setSendMode("lightning");
+          setShowSendOptions(true);
+          setLnInput(pendingScan.address);
+          setLnAddrAmt("");
+          setLnState("idle");
+          setLnError("");
+          closeCamera();
+          break;
+        }
+        case "lnurl": {
+          setScannerMessage("Processing LNURL…");
+          await handleLnurlScan(pendingScan.data);
+          break;
+        }
+        case "paymentRequest": {
+          setScannerMessage("Processing payment request…");
+          await handlePaymentRequestScan(pendingScan.request);
+          break;
+        }
+        default:
+          closeCamera();
+          break;
+      }
     }
 
-    setScannerMessage("");
-    setPendingScan(null);
-    setTimeout(() => {
-      setShowScanner((prev) => (prev ? false : prev));
-    }, 80);
-  }, [pendingScan]);
+    process().finally(() => {
+      if (!cancelled) setPendingScan(null);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingScan, handleLnurlScan, handlePaymentRequestScan]);
 
   async function handleCreateInvoice() {
     setMintError("");
@@ -570,22 +884,77 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     setLnState("sending");
     setLnError("");
     try {
-      const input = lnInput.trim();
-      if (!input) throw new Error("Paste an invoice or enter lightning address");
-        if (/^[^@\s]+@[^@\s]+$/.test(input)) {
-          const [name, domain] = input.split("@");
-          const infoRes = await fetch(`https://${domain}/.well-known/lnurlp/${name}`);
-          const info = await infoRes.json();
-          const amtMsat = Math.max(info.minSendable || 0, Math.min(info.maxSendable || Infinity, Math.floor(Number(lnAddrAmt) || 0) * 1000));
-          if (!amtMsat) throw new Error("Enter amount in sats");
-          const invRes = await fetch(`${info.callback}?amount=${amtMsat}`);
-          const inv = await invRes.json();
-          await payMintInvoice(inv.pr);
-          setHistory((h) => [{ id: `sent-${Date.now()}`, summary: `Sent ${amtMsat/1000} sats to ${input}` }, ...h]);
-        } else {
-          await payMintInvoice(input);
-          setHistory((h) => [{ id: `paid-${Date.now()}`, summary: `Paid lightning invoice` }, ...h]);
+      const raw = lnInput.trim();
+      if (!raw) throw new Error("Paste an invoice or enter lightning address");
+      const normalized = raw.replace(/^lightning:/i, "").trim();
+
+      if (isLnAddress) {
+        const [name, domain] = normalized.split("@");
+        const infoRes = await fetch(`https://${domain}/.well-known/lnurlp/${name}`);
+        if (!infoRes.ok) throw new Error("Failed to fetch LNURL pay info");
+        const info = await infoRes.json();
+        const amtMsat = Math.max(
+          info.minSendable || 0,
+          Math.min(info.maxSendable || Infinity, Math.floor(Number(lnAddrAmt) || 0) * 1000)
+        );
+        if (!amtMsat) throw new Error("Enter amount in sats");
+        const invRes = await fetch(`${info.callback}?amount=${amtMsat}`);
+        if (!invRes.ok) throw new Error("Failed to fetch invoice");
+        const inv = await invRes.json();
+        if (inv?.status === "ERROR") throw new Error(inv?.reason || "Invoice request failed");
+        await payMintInvoice(inv.pr);
+        setHistory((h) => [{ id: `sent-${Date.now()}`, summary: `Sent ${amtMsat/1000} sats to ${normalized}` }, ...h]);
+      } else if (isLnurlInput) {
+        const payData = await (async () => {
+          if (lnurlPayData && lnurlPayData.lnurl.trim().toLowerCase() === normalized.toLowerCase()) return lnurlPayData;
+          const url = decodeLnurlString(normalized);
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`LNURL request failed (${res.status})`);
+          const data = await res.json();
+          if (String(data?.tag || "").toLowerCase() !== "payrequest") {
+            throw new Error("LNURL is not a pay request");
+          }
+          const minSendable = Number(data?.minSendable ?? 0);
+          const maxSendable = Number(data?.maxSendable ?? 0);
+          if (!data?.callback || !minSendable || !maxSendable) {
+            throw new Error("LNURL pay metadata incomplete");
+          }
+          const payload: LnurlPayData = {
+            lnurl: normalized,
+            callback: data.callback,
+            domain: extractDomain(url),
+            minSendable,
+            maxSendable,
+            commentAllowed: Number(data?.commentAllowed ?? 0),
+            metadata: typeof data?.metadata === "string" ? data.metadata : undefined,
+          };
+          setLnurlPayData(payload);
+          return payload;
+        })();
+
+        const minSat = Math.ceil(payData.minSendable / 1000);
+        const maxSat = Math.floor(payData.maxSendable / 1000);
+        const amountSat = payData.minSendable === payData.maxSendable
+          ? Math.floor(payData.minSendable / 1000)
+          : Math.max(0, Math.floor(Number(lnAddrAmt) || 0));
+        if (!amountSat) throw new Error("Enter amount in sats");
+        if (amountSat < minSat || amountSat > maxSat) {
+          throw new Error(`Amount must be between ${minSat} and ${maxSat} sats`);
         }
+        const params = new URLSearchParams({ amount: String(amountSat * 1000) });
+        const invoiceRes = await fetch(`${payData.callback}?${params.toString()}`);
+        if (!invoiceRes.ok) throw new Error("Failed to fetch LNURL invoice");
+        const invoice = await invoiceRes.json();
+        if (invoice?.status === "ERROR") throw new Error(invoice?.reason || "LNURL pay error");
+        await payMintInvoice(invoice.pr);
+        setHistory((h) => [{ id: `paid-lnurl-${Date.now()}`, summary: `Paid ${amountSat} sats via LNURL (${payData.domain})` }, ...h]);
+        setLnurlPayData(null);
+      } else if (isBolt11Input) {
+        await payMintInvoice(normalized);
+        setHistory((h) => [{ id: `paid-${Date.now()}`, summary: `Paid lightning invoice` }, ...h]);
+      } else {
+        throw new Error("Unsupported lightning input");
+      }
       setLnState("done");
       setLnInput("");
       setLnAddrAmt("");
@@ -605,6 +974,14 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     setNwcWithdrawState("idle");
     setNwcWithdrawMessage("");
     setNwcWithdrawInvoice("");
+  }
+
+  function resetLnurlWithdrawView() {
+    setLnurlWithdrawState("idle");
+    setLnurlWithdrawMessage("");
+    setLnurlWithdrawInvoice("");
+    setLnurlWithdrawAmt("");
+    setLnurlWithdrawInfo(null);
   }
 
   async function handleNwcConnect() {
@@ -687,6 +1064,72 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     }
   }
 
+  async function handleLnurlWithdrawConfirm() {
+    if (!lnurlWithdrawInfo) {
+      setLnurlWithdrawMessage("Scan an LNURL withdraw code first");
+      return;
+    }
+    setLnurlWithdrawMessage("");
+    try {
+      const amountSat = Math.max(0, Math.floor(Number(lnurlWithdrawAmt) || 0));
+      if (!amountSat) throw new Error("Enter amount in sats");
+      const minSat = Math.ceil(lnurlWithdrawInfo.minWithdrawable / 1000);
+      const maxSat = Math.floor(lnurlWithdrawInfo.maxWithdrawable / 1000);
+      if (amountSat < minSat || amountSat > maxSat) {
+        throw new Error(`Amount must be between ${minSat} and ${maxSat} sats`);
+      }
+      if (!mintUrl) throw new Error("Set an active mint first");
+
+      setLnurlWithdrawState("creating");
+      const description = lnurlWithdrawInfo.defaultDescription || `LNURL withdraw (${lnurlWithdrawInfo.domain})`;
+      const quote = await createMintInvoice(amountSat, description);
+      setLnurlWithdrawInvoice(quote.request);
+      setLnurlWithdrawState("waiting");
+
+      const params = new URLSearchParams({ k1: lnurlWithdrawInfo.k1, pr: quote.request });
+      const callbackUrl = lnurlWithdrawInfo.callback.includes("?")
+        ? `${lnurlWithdrawInfo.callback}&${params.toString()}`
+        : `${lnurlWithdrawInfo.callback}?${params.toString()}`;
+
+      const resp = await fetch(callbackUrl);
+      let body: any = null;
+      try {
+        body = await resp.clone().json();
+      } catch {
+        // ignore parse issues for non-json responses
+      }
+      if (!resp.ok || body?.status === "ERROR") {
+        throw new Error(body?.reason || "LNURL withdraw callback failed");
+      }
+
+      const deadline = Date.now() + 120000;
+      while (Date.now() < deadline) {
+        const state = await checkMintQuote(quote.quote);
+        if (state === "PAID" || state === "ISSUED") {
+          await claimMint(quote.quote, amountSat);
+          setLnurlWithdrawState("done");
+          setLnurlWithdrawMessage(`Received ${amountSat} sats via LNURL withdraw`);
+          setLnurlWithdrawAmt("");
+          setHistory((h) => [
+            {
+              id: `lnurl-withdraw-${Date.now()}`,
+              summary: `Received ${amountSat} sats via LNURLw (${lnurlWithdrawInfo.domain})`,
+              detail: quote.request,
+            },
+            ...h,
+          ]);
+          return;
+        }
+        await sleep(2500);
+      }
+
+      throw new Error("Withdraw still pending. Try again shortly.");
+    } catch (err: any) {
+      setLnurlWithdrawState("error");
+      setLnurlWithdrawMessage(err?.message || String(err));
+    }
+  }
+
   async function handleNwcWithdraw() {
     setNwcWithdrawMessage("");
     try {
@@ -707,6 +1150,76 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     } catch (e: any) {
       setNwcWithdrawState("error");
       setNwcWithdrawMessage(e?.message || String(e));
+    }
+  }
+
+  async function handleFulfillPaymentRequest() {
+    if (!paymentRequestState) {
+      setPaymentRequestMessage("Scan a payment request first");
+      return;
+    }
+    setPaymentRequestMessage("");
+    setPaymentRequestStatus("sending");
+    try {
+      const request = paymentRequestState.request;
+      const amount = Math.max(0, Math.floor(Number(request.amount) || 0));
+      if (!amount) throw new Error("Payment request missing amount");
+      if (!mintUrl) throw new Error("Set an active mint first");
+
+      if (request.mints && request.mints.length) {
+        const normalizedActive = normalizeMintUrl(mintUrl);
+        const compatible = request.mints.some((m) => normalizeMintUrl(m) === normalizedActive);
+        if (!compatible) {
+          throw new Error("Payment request targets a different mint");
+        }
+      }
+
+      if (request.unit && info?.unit && request.unit.toLowerCase() !== info.unit.toLowerCase()) {
+        throw new Error(`Payment request unit ${request.unit} does not match active mint unit ${info.unit}`);
+      }
+
+      const transport = request.getTransport(PaymentRequestTransportType.POST) as PaymentRequestTransport | undefined;
+      if (!transport || transport.type !== PaymentRequestTransportType.POST) {
+        throw new Error("Unsupported payment request transport");
+      }
+
+      const { proofs, mintUrl: proofMintUrl } = await createSendToken(amount);
+      const payload = {
+        id: request.id,
+        memo: request.description,
+        unit: (request.unit || info?.unit || "sat").toLowerCase(),
+        mint: proofMintUrl,
+        proofs,
+      };
+
+      const resp = await fetch(transport.target, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      let body: any = null;
+      try {
+        body = await resp.clone().json();
+      } catch {
+        // ignore non-json response bodies
+      }
+      if (!resp.ok || body?.status === "ERROR") {
+        throw new Error(body?.reason || "Payment request endpoint failed");
+      }
+
+      setPaymentRequestStatus("done");
+      setPaymentRequestMessage("");
+      setHistory((h) => [
+        {
+          id: `payment-request-${Date.now()}`,
+          summary: `Sent ${amount} sats via payment request`,
+          detail: transport.target,
+        },
+        ...h,
+      ]);
+    } catch (err: any) {
+      setPaymentRequestStatus("error");
+      setPaymentRequestMessage(err?.message || String(err));
     }
   }
 
@@ -813,6 +1326,46 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         </div>
       </ActionSheet>
 
+      <ActionSheet open={receiveMode === "lnurlWithdraw"} onClose={()=>{resetLnurlWithdrawView(); setReceiveMode(null); setShowReceiveOptions(false);}} title="LNURL Withdraw">
+        {lnurlWithdrawInfo ? (
+          <div className="wallet-section space-y-3">
+            <div className="text-xs text-secondary">Source: {lnurlWithdrawInfo.domain}</div>
+            <div className="text-xs text-secondary">
+              Limits: {Math.ceil(lnurlWithdrawInfo.minWithdrawable / 1000)} – {Math.floor(lnurlWithdrawInfo.maxWithdrawable / 1000)} sats
+            </div>
+            <input
+              className="pill-input"
+              placeholder="Amount (sats)"
+              value={lnurlWithdrawAmt}
+              onChange={(e)=>setLnurlWithdrawAmt(e.target.value)}
+              inputMode="decimal"
+            />
+            <div className="flex flex-wrap gap-2 items-center text-xs text-secondary">
+              <button
+                className="accent-button button-sm pressable"
+                onClick={handleLnurlWithdrawConfirm}
+                disabled={!mintUrl || lnurlWithdrawState === "creating" || lnurlWithdrawState === "waiting"}
+              >Withdraw</button>
+              {lnurlWithdrawStatusText && <span>{lnurlWithdrawStatusText}</span>}
+              {lnurlWithdrawMessage && (
+                <span className={lnurlWithdrawState === "error" ? "text-rose-400" : "text-accent"}>{lnurlWithdrawMessage}</span>
+              )}
+            </div>
+            {lnurlWithdrawInvoice && (
+              <QrCodeCard
+                className="bg-surface-muted border border-surface rounded-2xl p-3 text-xs"
+                value={lnurlWithdrawInvoice}
+                label="Mint invoice"
+                copyLabel="Copy invoice"
+                size={220}
+              />
+            )}
+          </div>
+        ) : (
+          <div className="wallet-section text-sm text-secondary">Scan an LNURL withdraw QR code to pull sats into your wallet.</div>
+        )}
+      </ActionSheet>
+
       <ActionSheet open={receiveMode === "nwcFund"} onClose={()=>{resetNwcFundState(); setReceiveMode(null); setShowReceiveOptions(false);}} title="Fund via NWC">
         <div className="wallet-section space-y-3">
           <div className="text-xs text-secondary">Creates a mint invoice and pays it automatically with your linked NWC wallet.</div>
@@ -883,8 +1436,13 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       <ActionSheet open={sendMode === "lightning"} onClose={()=>{setSendMode(null); setShowSendOptions(false); setLnInput(""); setLnAddrAmt(""); setLnState("idle"); setLnError("");}} title="Pay Lightning Invoice">
         <div className="wallet-section space-y-3">
           <textarea ref={lnRef} className="pill-textarea wallet-textarea" placeholder="Paste BOLT11 invoice or enter lightning address" value={lnInput} onChange={(e)=>setLnInput(e.target.value)} />
-          {isLnAddress && (
+          {(isLnAddress || isLnurlInput) && (
             <input className="pill-input" placeholder="Amount (sats)" value={lnAddrAmt} onChange={(e)=>setLnAddrAmt(e.target.value)} />
+          )}
+          {isLnurlInput && lnurlPayData && (
+            <div className="text-xs text-secondary">
+              Limits: {Math.ceil(lnurlPayData.minSendable / 1000)} – {Math.floor(lnurlPayData.maxSendable / 1000)} sats
+            </div>
           )}
           <div className="flex flex-wrap gap-2 items-center text-xs text-secondary">
             <button
@@ -898,12 +1456,45 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
                 }
               }}
             >Paste</button>
-            <button className="accent-button button-sm pressable" onClick={handlePayInvoice} disabled={!mintUrl || !lnInput || (isLnAddress && !lnAddrAmt)}>Pay</button>
+            <button
+              className="accent-button button-sm pressable"
+              onClick={handlePayInvoice}
+              disabled={!mintUrl || !lnInput || ((isLnAddress || lnurlRequiresAmount) && !lnAddrAmt)}
+            >Pay</button>
             {lnState === "sending" && <span className="text-xs">Paying…</span>}
             {lnState === "done" && <span className="text-xs text-accent">Paid</span>}
             {lnState === "error" && <span className="text-xs text-rose-400">{lnError}</span>}
           </div>
         </div>
+      </ActionSheet>
+
+      <ActionSheet open={sendMode === "paymentRequest"} onClose={()=>{setSendMode(null); setShowSendOptions(false); setPaymentRequestState(null); setPaymentRequestStatus("idle"); setPaymentRequestMessage("");}} title="Fulfill eCash Request">
+        {paymentRequestState ? (
+          <div className="wallet-section space-y-3 text-sm">
+            <div className="space-y-1 text-xs text-secondary">
+              <div>Amount: {paymentRequestState.request.amount ?? "?"} {paymentRequestState.request.unit?.toUpperCase() || info?.unit?.toUpperCase() || "SAT"}</div>
+              {paymentRequestState.request.description && <div>Memo: {paymentRequestState.request.description}</div>}
+              {paymentRequestState.request.mints?.length ? (
+                <div>Mint: {paymentRequestState.request.mints.map(normalizeMintUrl).join(", ")}</div>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap gap-2 items-center text-xs text-secondary">
+              <button
+                className="accent-button button-sm pressable"
+                onClick={handleFulfillPaymentRequest}
+                disabled={paymentRequestStatus === "sending"}
+              >Send</button>
+              {paymentRequestStatus === "sending" && <span>Sending…</span>}
+              {paymentRequestStatus === "done" && <span className="text-accent">Payment sent</span>}
+              {paymentRequestStatus === "error" && paymentRequestMessage && <span className="text-rose-400">{paymentRequestMessage}</span>}
+            </div>
+            {paymentRequestStatus !== "error" && paymentRequestMessage && (
+              <div className="text-xs text-secondary">{paymentRequestMessage}</div>
+            )}
+          </div>
+        ) : (
+          <div className="wallet-section text-sm text-secondary">Scan an eCash withdrawal request to continue.</div>
+        )}
       </ActionSheet>
 
       <ActionSheet open={sendMode === "nwcWithdraw"} onClose={()=>{resetNwcWithdrawState(); setSendMode(null); setShowSendOptions(false);}} title="Withdraw via NWC">

@@ -1070,7 +1070,8 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       const normalized = raw.replace(/^lightning:/i, "").trim();
 
       if (isLnAddress) {
-        const [name, domain] = normalized.split("@");
+        const normalizedAddress = normalized.toLowerCase();
+        const [name, domain] = normalizedAddress.split("@");
         const infoRes = await fetch(`https://${domain}/.well-known/lnurlp/${name}`);
         if (!infoRes.ok) throw new Error("Failed to fetch LNURL pay info");
         const info = await infoRes.json();
@@ -1084,7 +1085,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         const inv = await invRes.json();
         if (inv?.status === "ERROR") throw new Error(inv?.reason || "Invoice request failed");
         await payMintInvoice(inv.pr);
-        setHistory((h) => [{ id: `sent-${Date.now()}`, summary: `Sent ${amtMsat/1000} sats to ${normalized}` }, ...h]);
+        setHistory((h) => [{ id: `sent-${Date.now()}`, summary: `Sent ${amtMsat/1000} sats to ${normalizedAddress}` }, ...h]);
       } else if (isLnurlInput) {
         const payData = await (async () => {
           if (lnurlPayData && lnurlPayData.lnurl.trim().toLowerCase() === normalized.toLowerCase()) return lnurlPayData;

@@ -610,14 +610,6 @@ export function CashuWalletModal({
   );
   const nwcFundInProgress = nwcFundState === "creating" || nwcFundState === "paying" || nwcFundState === "waiting" || nwcFundState === "claiming";
   const nwcWithdrawInProgress = nwcWithdrawState === "requesting" || nwcWithdrawState === "paying";
-  const canSubmitNwcFund = useMemo(() => {
-    const parsed = parseAmountInput(nwcFundAmt);
-    return !parsed.error && parsed.sats > 0;
-  }, [parseAmountInput, nwcFundAmt]);
-  const canSubmitNwcWithdraw = useMemo(() => {
-    const parsed = parseAmountInput(nwcWithdrawAmt);
-    return !parsed.error && parsed.sats > 0;
-  }, [parseAmountInput, nwcWithdrawAmt]);
 
   // Mint balances sheet
   const [showMintBalances, setShowMintBalances] = useState(false);
@@ -839,6 +831,16 @@ export function CashuWalletModal({
     }
     return { sats, raw: numeric };
   }, [primaryCurrency, walletConversionEnabled, btcUsdPrice]);
+
+  const canSubmitNwcFund = useMemo(() => {
+    const parsed = parseAmountInput(nwcFundAmt);
+    return !parsed.error && parsed.sats > 0;
+  }, [parseAmountInput, nwcFundAmt]);
+
+  const canSubmitNwcWithdraw = useMemo(() => {
+    const parsed = parseAmountInput(nwcWithdrawAmt);
+    return !parsed.error && parsed.sats > 0;
+  }, [parseAmountInput, nwcWithdrawAmt]);
 
   const handleTogglePrimary = useCallback(() => {
     if (!walletConversionEnabled) return;

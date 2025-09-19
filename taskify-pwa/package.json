@@ -17,6 +17,7 @@
     "@zxing/browser": "^0.1.5",
     "bech32": "^2.0.0",
     "nostr-tools": "^2.16.2",
+    "qr-scanner": "^1.4.2",
     "qrcode.react": "^4.2.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"

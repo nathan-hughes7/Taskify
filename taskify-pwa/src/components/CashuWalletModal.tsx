@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { bech32 } from "bech32";
 import { decodePaymentRequest, PaymentRequest, PaymentRequestTransportType, type PaymentRequestTransport } from "@cashu/cashu-ts";
-import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
-import { BarcodeFormat, DecodeHintType } from "@zxing/library";
+import QrScannerLib, { type QrScannerScanResult as ScanResult } from "qr-scanner";
+import qrScannerWorkerPath from "qr-scanner/qr-scanner-worker.min.js?url";
 import { QRCodeCanvas } from "qrcode.react";
 import { useCashu } from "../context/CashuContext";
 import { useNwc } from "../context/NwcContext";

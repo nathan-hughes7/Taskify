@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19, nip04 } from "nostr-tools";
 import { CashuWalletModal } from "./components/CashuWalletModal";
 import { useCashu } from "./context/CashuContext";
+import { LS_LIGHTNING_CONTACTS } from "./localStorageKeys";
 import { loadStore as loadProofStore, saveStore as saveProofStore, getActiveMint, setActiveMint } from "./wallet/storage";
 import { encryptToBoard, decryptFromBoard, boardTag } from "./boardCrypto";
 import { useToast } from "./context/ToastContext";
@@ -4779,6 +4780,7 @@ function SettingsModal({
       boards: JSON.parse(localStorage.getItem(LS_BOARDS) || "[]"),
       settings: JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}"),
       defaultRelays: JSON.parse(localStorage.getItem(LS_NOSTR_RELAYS) || "[]"),
+      contacts: JSON.parse(localStorage.getItem(LS_LIGHTNING_CONTACTS) || "[]"),
       nostrSk: localStorage.getItem(LS_NOSTR_SK) || "",
       cashu: {
         proofs: loadProofStore(),
@@ -4804,6 +4806,7 @@ function SettingsModal({
         if (data.boards) localStorage.setItem(LS_BOARDS, JSON.stringify(data.boards));
         if (data.settings) localStorage.setItem(LS_SETTINGS, JSON.stringify(data.settings));
         if (data.defaultRelays) localStorage.setItem(LS_NOSTR_RELAYS, JSON.stringify(data.defaultRelays));
+        if (data.contacts) localStorage.setItem(LS_LIGHTNING_CONTACTS, JSON.stringify(data.contacts));
         if (data.nostrSk) localStorage.setItem(LS_NOSTR_SK, data.nostrSk);
         if (data.cashu?.proofs) saveProofStore(data.cashu.proofs);
         if (data.cashu) setActiveMint(data.cashu.activeMint || null);

@@ -7,13 +7,13 @@ import { QRCodeCanvas } from "qrcode.react";
 import { useCashu } from "../context/CashuContext";
 import { useNwc } from "../context/NwcContext";
 import { loadStore } from "../wallet/storage";
+import { LS_LIGHTNING_CONTACTS } from "../localStorageKeys";
 import { ActionSheet } from "./ActionSheet";
 
 QrScannerLib.WORKER_PATH = qrScannerWorkerPath;
 type ScanResult = QrScannerLib.ScanResult;
 
 const LNURL_DECODE_LIMIT = 2048;
-const LS_LIGHTNING_CONTACTS = "cashu_contacts_v1";
 const SMALL_ICON_BUTTON_STYLE = { "--icon-size": "2rem" } as React.CSSProperties;
 
 type LightningContact = {

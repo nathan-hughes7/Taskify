@@ -3169,7 +3169,7 @@ export default function App() {
       {undoTask && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-surface-muted border border-surface text-sm px-4 py-2 rounded-xl shadow-lg flex items-center gap-3">
           Task deleted
-          <button onClick={undoDelete} className="pressable px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500">Undo</button>
+          <button onClick={undoDelete} className="accent-button button-sm pressable">Undo</button>
         </div>
       )}
 
@@ -4422,7 +4422,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
         )}
 
         <div className="pt-2 flex justify-between">
-          <button className="pressable px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
+          <button className="pressable px-4 py-2 rounded-full bg-rose-600/80 hover:bg-rose-600" onClick={onDelete}>Delete</button>
           <div className="flex gap-2">
             <button className="ghost-button button-sm pressable" onClick={copyCurrent}>Copy</button>
             <button className="ghost-button button-sm pressable" onClick={onCancel}>Cancel</button>

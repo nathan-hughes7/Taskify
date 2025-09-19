@@ -236,6 +236,8 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
   const [showSendOptions, setShowSendOptions] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [scannerMessage, setScannerMessage] = useState("");
+  type PendingScan = { type: "ecash"; value: string } | { type: "lightning"; value: string; isAddress: boolean };
+  const [pendingScan, setPendingScan] = useState<PendingScan | null>(null);
   const [receiveMode, setReceiveMode] = useState<null | "ecash" | "lightning" | "nwcFund">(null);
   const [sendMode, setSendMode] = useState<null | "ecash" | "lightning" | "nwcWithdraw">(null);
 
@@ -436,14 +438,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     if (!text) return false;
 
     if (/^cashu[0-9a-z]+/i.test(text)) {
-      setScannerMessage("");
-      setRecvTokenStr(text);
-      setRecvMsg("");
-      setSendMode(null);
-      setReceiveMode("ecash");
-      setShowSendOptions(false);
-      setShowReceiveOptions(true);
-      requestAnimationFrame(() => setShowScanner(false));
+      setPendingScan({ type: "ecash", value: text });
       return true;
     }
 
@@ -452,16 +447,8 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     const isBolt11 = /^ln(bc|tb|sb|bcrt)[0-9]/i.test(normalized);
 
     if (normalized && (isBolt11 || isLightningAddress)) {
-      setScannerMessage("");
-      setReceiveMode(null);
-      setSendMode("lightning");
-      setLnInput(normalized);
-      setLnAddrAmt("");
-      setLnState("idle");
-      setLnError("");
-      setShowReceiveOptions(false);
-      setShowSendOptions(true);
-      requestAnimationFrame(() => setShowScanner(false));
+      const value = isBolt11 ? normalized.toLowerCase() : normalized;
+      setPendingScan({ type: "lightning", value, isAddress: isLightningAddress });
       return true;
     }
 
@@ -471,6 +458,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
 
   const openScanner = useCallback(() => {
     setScannerMessage("");
+    setPendingScan(null);
     setShowReceiveOptions(false);
     setReceiveMode(null);
     setShowSendOptions(false);
@@ -481,7 +469,36 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
   const closeScanner = useCallback(() => {
     setShowScanner(false);
     setScannerMessage("");
+    setPendingScan(null);
   }, []);
+
+  useEffect(() => {
+    if (!pendingScan) return;
+
+    if (pendingScan.type === "ecash") {
+      setRecvTokenStr(pendingScan.value);
+      setRecvMsg("");
+      setSendMode(null);
+      setShowSendOptions(false);
+      setReceiveMode("ecash");
+      setShowReceiveOptions(true);
+    } else if (pendingScan.type === "lightning") {
+      setReceiveMode(null);
+      setShowReceiveOptions(false);
+      setSendMode("lightning");
+      setShowSendOptions(true);
+      setLnInput(pendingScan.value);
+      setLnAddrAmt("");
+      setLnState("idle");
+      setLnError("");
+    }
+
+    setScannerMessage("");
+    setPendingScan(null);
+    setTimeout(() => {
+      setShowScanner((prev) => (prev ? false : prev));
+    }, 80);
+  }, [pendingScan]);
 
   async function handleCreateInvoice() {
     setMintError("");

@@ -1656,7 +1656,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
             )}
           </div>
           {contactsOpen && (
-            <div className="space-y-3 bg-surface-muted border border-surface rounded-2xl p-3 text-xs">
+            <div className="flex max-h-[65vh] flex-col gap-3 bg-surface-muted border border-surface rounded-2xl p-3 text-xs">
               <div className="text-secondary text-[11px]">
                 {sortedContacts.length
                   ? "Select a contact to use their lightning address."
@@ -1702,7 +1702,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
                 </form>
               )}
               {sortedContacts.length ? (
-                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                <div className="flex-1 min-h-0 space-y-2 overflow-y-auto pr-1">
                   {sortedContacts.map((contact) => (
                     <div key={contact.id} className="flex flex-col gap-1 rounded-xl border border-transparent bg-surface px-3 py-2">
                       <div className="flex items-center gap-2">

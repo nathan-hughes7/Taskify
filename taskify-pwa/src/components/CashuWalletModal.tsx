@@ -1930,13 +1930,13 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
                       <div className="text-xs text-secondary">Balance</div>
                       <div className="font-semibold">{m.balance} sat</div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-col gap-2 w-full sm:w-auto">
                       <button
-                        className="ghost-button button-sm pressable"
+                        className="ghost-button button-sm pressable w-full"
                         onClick={async ()=>{ try { await navigator.clipboard?.writeText(m.url); } catch {} }}
                       >Copy</button>
                       {m.url !== mintUrl && (
-                        <button className="accent-button button-sm pressable" onClick={async ()=>{ try { await setMintUrl(m.url); refreshMintEntries(); } catch (e: any) { alert(e?.message || String(e)); } }}>Set active</button>
+                        <button className="accent-button button-sm pressable w-full" onClick={async ()=>{ try { await setMintUrl(m.url); refreshMintEntries(); } catch (e: any) { alert(e?.message || String(e)); } }}>Set active</button>
                       )}
                     </div>
                   </div>

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BrowserMultiFormatReader, NotFoundException, type IScannerControls } from "@zxing/browser";
+import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
 import { QRCodeCanvas } from "qrcode.react";
 import { useCashu } from "../context/CashuContext";
 import { useNwc } from "../context/NwcContext";
@@ -147,7 +147,7 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
             } else if (!raw) {
               lastValueRef.current = null;
             }
-          } else if (err && !(err instanceof NotFoundException)) {
+          } else if (err && (err as { name?: string }).name !== "NotFoundException") {
             console.warn("ZXing scanner error", err);
           }
         });

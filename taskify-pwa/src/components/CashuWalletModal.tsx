@@ -150,8 +150,9 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
     async function start() {
       try {
         clearError();
-        if (!navigator.mediaDevices?.getUserMedia) {
-          throw new Error("Camera access not supported on this device");
+        const hasCamera = await QrScannerLib.hasCamera().catch(() => true);
+        if (!hasCamera) {
+          console.warn("No camera detected by qr-scanner; attempting fallback start");
         }
 
         const scanner = new QrScannerLib(
@@ -181,6 +182,12 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
             },
           }
         );
+
+        video.setAttribute("playsinline", "true");
+        video.setAttribute("muted", "true");
+        video.setAttribute("autoplay", "true");
+        video.playsInline = true;
+        video.muted = true;
 
         scannerRef.current = scanner;
         await scanner.start();

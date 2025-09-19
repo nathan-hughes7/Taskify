@@ -150,11 +150,6 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
     async function start() {
       try {
         clearError();
-        const hasCamera = await QrScannerLib.hasCamera().catch(() => true);
-        if (!hasCamera) {
-          console.warn("No camera detected by qr-scanner; attempting fallback start");
-        }
-
         const scanner = new QrScannerLib(
           video,
           async (result: ScanResult) => {
@@ -683,7 +678,22 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     }
   }, [info?.unit, mintUrl]);
 
-  const openScanner = useCallback(() => {
+  const openScanner = useCallback(async () => {
+    const constraints: MediaStreamConstraints = {
+      audio: false,
+      video: { facingMode: { ideal: "environment" } },
+    };
+    if (navigator?.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (err: any) {
+        setScannerMessage(err?.message || "Camera permission denied");
+        setPendingScan(null);
+        setShowScanner(true);
+        return;
+      }
+    }
     setScannerMessage("");
     setPendingScan(null);
     setShowReceiveOptions(false);
@@ -1191,11 +1201,11 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
           <div className="wallet-balance-card__meta">{headerInfo}</div>
         </div>
         <div className="wallet-modal__cta">
-          <button className="accent-button pressable" onClick={()=>setShowReceiveOptions(true)}>Receive</button>
+          <button className="accent-button pressable" onClick={()=>{ setShowReceiveOptions(true); }}>{"Receive"}</button>
           <button
             type="button"
             className="wallet-modal__scan-button pressable"
-            onClick={openScanner}
+            onClick={()=>{ void openScanner(); }}
             aria-label="Scan code"
             title="Scan code"
           >

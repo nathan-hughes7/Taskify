@@ -1,8 +1,224 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { QRCodeCanvas } from "qrcode.react";
 import { useCashu } from "../context/CashuContext";
 import { useNwc } from "../context/NwcContext";
 import { loadStore } from "../wallet/storage";
 import { ActionSheet } from "./ActionSheet";
+
+type BarcodeDetectorLike = {
+  detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue: string }>>;
+};
+
+type BarcodeDetectorCtorLike = new (options?: { formats?: string[] }) => BarcodeDetectorLike;
+
+function QrCodeCard({ value, label, copyLabel = "Copy", extraActions, size = 220, className }: { value: string; label: string; copyLabel?: string; extraActions?: React.ReactNode; size?: number; className?: string; }) {
+  const trimmed = value?.trim();
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  if (!trimmed) return null;
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard?.writeText(trimmed);
+      setCopied(true);
+    } catch (e) {
+      console.warn("Copy failed", e);
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className={`wallet-qr-card${className ? ` ${className}` : ""}`}>
+      <div className="wallet-qr-card__label">{label}</div>
+      <div className="wallet-qr-card__code" aria-live="polite">
+        <div className="wallet-qr-card__canvas" aria-hidden="true">
+          <QRCodeCanvas value={trimmed} size={size} includeMargin={false} className="wallet-qr-card__qr" />
+        </div>
+      </div>
+      <div className="wallet-qr-card__actions">
+        {extraActions}
+        <button className="ghost-button button-sm pressable" onClick={handleCopy} aria-label={`Copy ${label.toLowerCase()}`}>
+          {copied ? "Copied" : copyLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function QrScanner({ active, onDetected, onError }: { active: boolean; onDetected: (value: string) => boolean | Promise<boolean>; onError?: (message: string) => void; }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const rafRef = useRef<number>();
+  const detectorRef = useRef<BarcodeDetectorLike | null>(null);
+  const processingRef = useRef(false);
+  const lastValueRef = useRef<string | null>(null);
+  const resetTimerRef = useRef<number>();
+  const [error, setError] = useState<string | null>(null);
+
+  const reportError = useCallback((message: string) => {
+    setError(message);
+    if (onError) onError(message);
+  }, [onError]);
+
+  const clearError = useCallback(() => {
+    setError(null);
+  }, []);
+
+  function stopStream() {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = undefined;
+    }
+    const video = videoRef.current;
+    if (video) {
+      video.pause();
+      video.srcObject = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    detectorRef.current = null;
+  }
+
+  useEffect(() => {
+    if (!active) {
+      stopStream();
+      clearError();
+      lastValueRef.current = null;
+      processingRef.current = false;
+      return;
+    }
+
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      reportError("Camera access not supported on this device");
+      return;
+    }
+
+    let cancelled = false;
+
+    async function start() {
+      try {
+        clearError();
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        streamRef.current = stream;
+        const video = videoRef.current;
+        if (!video) {
+          reportError("Unable to access camera feed");
+          return;
+        }
+        video.srcObject = stream;
+        await video.play().catch(() => undefined);
+
+        const DetectorCtor = (window as any)?.BarcodeDetector as BarcodeDetectorCtorLike | undefined;
+        if (!DetectorCtor) {
+          reportError("QR scanning not supported in this browser");
+          stopStream();
+          return;
+        }
+
+        try {
+          detectorRef.current = new DetectorCtor({ formats: ["qr_code"] });
+        } catch {
+          detectorRef.current = new DetectorCtor();
+        }
+
+        async function tick() {
+          if (cancelled || !active) return;
+          const detector = detectorRef.current;
+          const vid = videoRef.current;
+          if (!detector || !vid || vid.readyState < 2) {
+            rafRef.current = requestAnimationFrame(tick);
+            return;
+          }
+
+          try {
+            if (!processingRef.current) {
+              const codes = await detector.detect(vid);
+              const match = codes.find((code) => code.rawValue?.trim());
+              const raw = match?.rawValue?.trim();
+              if (raw && raw !== lastValueRef.current) {
+                processingRef.current = true;
+                let shouldClose = false;
+                try {
+                  shouldClose = await onDetected(raw);
+                } catch (err) {
+                  console.warn("QR handler failed", err);
+                }
+                processingRef.current = false;
+                if (shouldClose) {
+                  stopStream();
+                  return;
+                }
+                lastValueRef.current = raw;
+                if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+                resetTimerRef.current = window.setTimeout(() => {
+                  if (lastValueRef.current === raw) lastValueRef.current = null;
+                }, 1600);
+              } else if (!raw) {
+                lastValueRef.current = null;
+              }
+            }
+          } catch (err) {
+            console.warn("QR detection failed", err);
+          }
+
+          rafRef.current = requestAnimationFrame(tick);
+        }
+
+        rafRef.current = requestAnimationFrame(tick);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        reportError(message);
+        stopStream();
+      }
+    }
+
+    start();
+
+    return () => {
+      cancelled = true;
+      stopStream();
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = undefined;
+      }
+      lastValueRef.current = null;
+      processingRef.current = false;
+    };
+  }, [active, clearError, onDetected, reportError]);
+
+  return (
+    <div className="wallet-scanner space-y-3">
+      <div className={`wallet-scanner__viewport${error ? " wallet-scanner__viewport--error" : ""}`}>
+        {error ? (
+          <div className="wallet-scanner__fallback">{error}</div>
+        ) : (
+          <>
+            <video ref={videoRef} className="wallet-scanner__video" playsInline muted />
+            <div className="wallet-scanner__guide" aria-hidden="true" />
+          </>
+        )}
+      </div>
+      <div className="wallet-scanner__hint text-xs text-secondary text-center">
+        {error ? "Camera unavailable. Try entering the code manually." : "Align a QR code inside the frame."}
+      </div>
+    </div>
+  );
+}
 
 export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { mintUrl, setMintUrl, balance, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice: payMintInvoice } = useCashu();
@@ -16,6 +232,8 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
 
   const [showReceiveOptions, setShowReceiveOptions] = useState(false);
   const [showSendOptions, setShowSendOptions] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
+  const [scannerMessage, setScannerMessage] = useState("");
   const [receiveMode, setReceiveMode] = useState<null | "ecash" | "lightning" | "nwcFund">(null);
   const [sendMode, setSendMode] = useState<null | "ecash" | "lightning" | "nwcWithdraw">(null);
 
@@ -158,6 +376,8 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
       setNwcWithdrawState("idle");
       setNwcWithdrawMessage("");
       setNwcWithdrawInvoice("");
+      setShowScanner(false);
+      setScannerMessage("");
     }
   }, [open, nwcConnection]);
 
@@ -198,7 +418,68 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
     return `${parts.join(" ")} • ${mintUrl}`;
   }, [info, mintUrl]);
 
+  const scannerMessageTone = useMemo(() => {
+    if (!scannerMessage) return "info";
+    return /denied|unsupported|not supported|unrecognized|error|unable/i.test(scannerMessage) ? "error" : "info";
+  }, [scannerMessage]);
+
   const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  const handleScannerError = useCallback((message: string) => {
+    setScannerMessage(message);
+  }, []);
+
+  const handleScannerDetected = useCallback(async (rawValue: string) => {
+    const text = rawValue.trim();
+    if (!text) return false;
+
+    if (/^cashu[0-9a-z]+/i.test(text)) {
+      setScannerMessage("");
+      setShowScanner(false);
+      setShowReceiveOptions(false);
+      setShowSendOptions(false);
+      setSendMode(null);
+      setReceiveMode("ecash");
+      setRecvTokenStr(text);
+      setRecvMsg("");
+      return true;
+    }
+
+    const normalized = text.replace(/^lightning:/i, "").trim();
+    const isLightningAddress = /^[^@\s]+@[^@\s]+$/.test(normalized);
+    const isBolt11 = /^ln(bc|tb|sb|bcrt)[0-9]/i.test(normalized);
+
+    if (normalized && (isBolt11 || isLightningAddress)) {
+      setScannerMessage("");
+      setShowScanner(false);
+      setShowReceiveOptions(false);
+      setReceiveMode(null);
+      setShowSendOptions(false);
+      setSendMode("lightning");
+      setLnInput(normalized);
+      setLnAddrAmt("");
+      setLnState("idle");
+      setLnError("");
+      return true;
+    }
+
+    setScannerMessage("Unrecognized code. Scan a Cashu token or lightning invoice.");
+    return false;
+  }, []);
+
+  const openScanner = useCallback(() => {
+    setScannerMessage("");
+    setShowReceiveOptions(false);
+    setReceiveMode(null);
+    setShowSendOptions(false);
+    setSendMode(null);
+    setShowScanner(true);
+  }, []);
+
+  const closeScanner = useCallback(() => {
+    setShowScanner(false);
+    setScannerMessage("");
+  }, []);
 
   async function handleCreateInvoice() {
     setMintError("");
@@ -429,6 +710,19 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
         </div>
         <div className="wallet-modal__cta">
           <button className="accent-button pressable" onClick={()=>setShowReceiveOptions(true)}>Receive</button>
+          <button
+            type="button"
+            className="wallet-modal__scan-button pressable"
+            onClick={openScanner}
+            aria-label="Scan code"
+            title="Scan code"
+          >
+            <svg className="wallet-modal__scan-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 6h2.4l1.1-2h3l1.1 2H17a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" fill="none" />
+              <circle cx="12" cy="12" r="3.2" stroke="currentColor" strokeWidth="1.6" fill="none" />
+              <circle cx="18.25" cy="9.25" r="0.75" fill="currentColor" />
+            </svg>
+          </button>
           <button className="ghost-button pressable" onClick={()=>setShowSendOptions(true)}>Send</button>
         </div>
       </div>
@@ -482,15 +776,17 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
           </div>
           {mintQuote && (
             <div className="bg-surface-muted border border-surface rounded-2xl p-3 text-xs space-y-2">
-              <div className="text-secondary uppercase tracking-wide text-[0.68rem]">Invoice</div>
-              <textarea readOnly className="pill-textarea wallet-textarea" value={mintQuote.request} />
-              <div className="flex flex-wrap gap-2">
-                <a className="ghost-button button-sm pressable" href={`lightning:${mintQuote.request}`}>Open wallet</a>
-                <button
-                  className="ghost-button button-sm pressable"
-                  onClick={async ()=>{ try { await navigator.clipboard.writeText(mintQuote.request); } catch {} }}
-                >Copy</button>
-              </div>
+              <QrCodeCard
+                value={mintQuote.request}
+                label="Invoice"
+                copyLabel="Copy invoice"
+                extraActions={(
+                  <a className="ghost-button button-sm pressable" href={`lightning:${mintQuote.request}`}>
+                    Open wallet
+                  </a>
+                )}
+                size={240}
+              />
               <div className="text-xs text-secondary">Status: {mintStatus}</div>
               {mintError && <div className="text-xs text-rose-400">{mintError}</div>}
             </div>
@@ -513,14 +809,13 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
             {nwcFundState === "error" && nwcFundMessage && <span className="text-rose-400">{nwcFundMessage}</span>}
           </div>
           {nwcFundInvoice && (
-            <div className="bg-surface-muted border border-surface rounded-2xl p-3 space-y-2 text-xs">
-              <div className="text-secondary uppercase tracking-wide text-[0.68rem]">Mint invoice (paid)</div>
-              <textarea readOnly className="pill-textarea wallet-textarea" value={nwcFundInvoice} />
-              <button
-                className="ghost-button button-sm pressable"
-                onClick={async ()=>{ try { await navigator.clipboard.writeText(nwcFundInvoice); } catch {} }}
-              >Copy</button>
-            </div>
+            <QrCodeCard
+              className="bg-surface-muted border border-surface rounded-2xl p-3 text-xs"
+              value={nwcFundInvoice}
+              label="Mint invoice (paid)"
+              copyLabel="Copy invoice"
+              size={240}
+            />
           )}
           {!hasNwcConnection && (
             <div className="text-xs text-secondary">Connect an NWC wallet from the mint balances sheet to enable this option.</div>
@@ -555,16 +850,13 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
             <button className="accent-button button-sm pressable" onClick={handleCreateSendToken} disabled={!mintUrl}>Create token</button>
           </div>
           {sendTokenStr && (
-            <div className="bg-surface-muted border border-surface rounded-2xl p-3 space-y-2 text-xs">
-              <div className="text-secondary uppercase tracking-wide text-[0.68rem]">Token</div>
-              <textarea readOnly className="pill-textarea wallet-textarea" value={sendTokenStr} />
-              <div className="flex flex-wrap gap-2">
-                <button
-                  className="ghost-button button-sm pressable"
-                  onClick={async ()=>{ try { await navigator.clipboard.writeText(sendTokenStr); } catch {} }}
-                >Copy</button>
-              </div>
-            </div>
+            <QrCodeCard
+              className="bg-surface-muted border border-surface rounded-2xl p-3 text-xs"
+              value={sendTokenStr}
+              label="Token"
+              copyLabel="Copy token"
+              size={240}
+            />
           )}
         </div>
       </ActionSheet>
@@ -610,17 +902,27 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
             {nwcWithdrawState === "error" && nwcWithdrawMessage && <span className="text-rose-400">{nwcWithdrawMessage}</span>}
           </div>
           {nwcWithdrawInvoice && (
-            <div className="bg-surface-muted border border-surface rounded-2xl p-3 space-y-2 text-xs">
-              <div className="text-secondary uppercase tracking-wide text-[0.68rem]">Wallet invoice</div>
-              <textarea readOnly className="pill-textarea wallet-textarea" value={nwcWithdrawInvoice} />
-              <button
-                className="ghost-button button-sm pressable"
-                onClick={async ()=>{ try { await navigator.clipboard.writeText(nwcWithdrawInvoice); } catch {} }}
-              >Copy</button>
-            </div>
+            <QrCodeCard
+              className="bg-surface-muted border border-surface rounded-2xl p-3 text-xs"
+              value={nwcWithdrawInvoice}
+              label="Wallet invoice"
+              copyLabel="Copy invoice"
+              size={240}
+            />
           )}
           {!hasNwcConnection && (
             <div className="text-xs text-secondary">Connect an NWC wallet to send funds externally.</div>
+          )}
+        </div>
+      </ActionSheet>
+
+      <ActionSheet open={showScanner} onClose={closeScanner} title="Scan Code">
+        <div className="wallet-section space-y-3">
+          <QrScanner active={showScanner} onDetected={handleScannerDetected} onError={handleScannerError} />
+          {scannerMessage && (
+            <div className={`text-xs text-center ${scannerMessageTone === "error" ? "text-rose-400" : "text-secondary"}`}>
+              {scannerMessage}
+            </div>
           )}
         </div>
       </ActionSheet>
@@ -635,13 +937,13 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
                   <span className="text-tertiary">{expandedIdx===i ? '−' : '+'}</span>
                 </button>
                 {expandedIdx === i && h.detail && (
-                  <div className="space-y-2 text-xs">
-                    <textarea readOnly className="pill-textarea wallet-textarea" value={h.detail} />
-                    <button
-                      className="ghost-button button-sm pressable"
-                      onClick={async ()=>{ try { await navigator.clipboard.writeText(h.detail!); } catch {} }}
-                    >Copy</button>
-                  </div>
+                  <QrCodeCard
+                    className="bg-surface-muted border border-surface rounded-2xl p-3 text-xs"
+                    value={h.detail}
+                    label="Details"
+                    copyLabel="Copy detail"
+                    size={220}
+                  />
                 )}
               </li>
             ))}

@@ -739,7 +739,7 @@ export function CashuWalletModal({
         setBtcUsdPrice(amount);
         setPriceUpdatedAt(Date.now());
         setPriceStatus("idle");
-      } catch (err) {
+      } catch {
         if (!cancelled) {
           setPriceStatus("error");
         }

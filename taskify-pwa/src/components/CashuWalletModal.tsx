@@ -437,13 +437,13 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
 
     if (/^cashu[0-9a-z]+/i.test(text)) {
       setScannerMessage("");
-      setShowScanner(false);
-      setShowReceiveOptions(false);
-      setShowSendOptions(false);
-      setSendMode(null);
-      setReceiveMode("ecash");
       setRecvTokenStr(text);
       setRecvMsg("");
+      setSendMode(null);
+      setReceiveMode("ecash");
+      setShowSendOptions(false);
+      setShowReceiveOptions(true);
+      requestAnimationFrame(() => setShowScanner(false));
       return true;
     }
 
@@ -453,15 +453,15 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
 
     if (normalized && (isBolt11 || isLightningAddress)) {
       setScannerMessage("");
-      setShowScanner(false);
-      setShowReceiveOptions(false);
       setReceiveMode(null);
-      setShowSendOptions(false);
       setSendMode("lightning");
       setLnInput(normalized);
       setLnAddrAmt("");
       setLnState("idle");
       setLnError("");
+      setShowReceiveOptions(false);
+      setShowSendOptions(true);
+      requestAnimationFrame(() => setShowScanner(false));
       return true;
     }
 

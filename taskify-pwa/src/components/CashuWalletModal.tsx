@@ -58,6 +58,56 @@ type LnurlWithdrawData = {
   defaultDescription?: string;
 };
 
+const BOLT11_AMOUNT_MULTIPLIERS = {
+  "": { numerator: 100_000_000_000n, denominator: 1n },
+  m: { numerator: 100_000_000n, denominator: 1n },
+  u: { numerator: 100_000n, denominator: 1n },
+  n: { numerator: 100n, denominator: 1n },
+  p: { numerator: 1n, denominator: 10n },
+} as const satisfies Record<string, { numerator: bigint; denominator: bigint }>;
+
+type Bolt11AmountInfo = {
+  amountMsat: bigint | null;
+};
+
+function decodeBolt11Amount(invoice: string): Bolt11AmountInfo {
+  const trimmed = invoice.trim();
+  if (!trimmed) throw new Error("Missing invoice");
+  const lower = trimmed.toLowerCase();
+  const separatorIdx = lower.indexOf("1");
+  if (separatorIdx <= 2) throw new Error("Invalid BOLT11 invoice");
+  const hrp = lower.slice(0, separatorIdx);
+  if (!hrp.startsWith("ln")) throw new Error("Invalid BOLT11 invoice");
+  const hrpBody = hrp.slice(2);
+  let idx = 0;
+  while (idx < hrpBody.length && /[a-z]/.test(hrpBody[idx])) idx++;
+  const amountPart = hrpBody.slice(idx);
+  if (!amountPart) return { amountMsat: null };
+  const match = amountPart.match(/^(\d+)([a-z]?)$/);
+  if (!match) throw new Error("Unsupported BOLT11 amount encoding");
+  const [, valuePart, unitPart] = match;
+  const value = BigInt(valuePart);
+  const unitKey = (unitPart || "") as keyof typeof BOLT11_AMOUNT_MULTIPLIERS;
+  const multiplier = BOLT11_AMOUNT_MULTIPLIERS[unitKey];
+  if (!multiplier) throw new Error("Unsupported BOLT11 amount unit");
+  const numerator = value * multiplier.numerator;
+  if (numerator % multiplier.denominator !== 0n) {
+    throw new Error("Invoice amount has unsupported precision");
+  }
+  const amountMsat = numerator / multiplier.denominator;
+  return { amountMsat };
+}
+
+function formatMsatAsSat(amountMsat: bigint): string {
+  const wholeSat = amountMsat / 1000n;
+  const remainderMsat = amountMsat % 1000n;
+  if (remainderMsat === 0n) {
+    return `${wholeSat.toString()} sat`;
+  }
+  const decimals = remainderMsat.toString().padStart(3, "0").replace(/0+$/, "");
+  return `${wholeSat.toString()}.${decimals} sat`;
+}
+
 function QrCodeCard({ value, label, copyLabel = "Copy", extraActions, size = 220, className }: { value: string; label: string; copyLabel?: string; extraActions?: React.ReactNode; size?: number; className?: string; }) {
   const trimmed = value?.trim();
   const [copied, setCopied] = useState(false);
@@ -303,6 +353,18 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
   const isLnAddress = useMemo(() => /^[^@\s]+@[^@\s]+$/.test(normalizedLnInput), [normalizedLnInput]);
   const isLnurlInput = useMemo(() => /^lnurl[0-9a-z]+$/i.test(normalizedLnInput), [normalizedLnInput]);
   const isBolt11Input = useMemo(() => /^ln(bc|tb|sb|bcrt)[0-9]/i.test(normalizedLnInput), [normalizedLnInput]);
+  const bolt11Details = useMemo(() => {
+    if (!isBolt11Input) return null;
+    try {
+      const { amountMsat } = decodeBolt11Amount(normalizedLnInput);
+      if (amountMsat === null) {
+        return { message: "Invoice amount: not specified" };
+      }
+      return { message: `Invoice amount: ${formatMsatAsSat(amountMsat)}` };
+    } catch (err: any) {
+      return { error: err?.message || "Unable to decode invoice" };
+    }
+  }, [isBolt11Input, normalizedLnInput]);
   const lnurlRequiresAmount = useMemo(() => {
     if (!isLnurlInput) return false;
     if (!lnurlPayData) return true;
@@ -1403,6 +1465,12 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
             <div className="text-xs text-secondary">
               Limits: {Math.ceil(lnurlPayData.minSendable / 1000)} – {Math.floor(lnurlPayData.maxSendable / 1000)} sats
             </div>
+          )}
+          {bolt11Details?.message && (
+            <div className="text-xs text-secondary">{bolt11Details.message}</div>
+          )}
+          {bolt11Details?.error && (
+            <div className="text-xs text-rose-400">{bolt11Details.error}</div>
           )}
           <div className="flex flex-wrap gap-2 items-center text-xs text-secondary">
             <button

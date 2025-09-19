@@ -1658,7 +1658,7 @@ export function CashuWalletModal({ open, onClose }: { open: boolean; onClose: ()
           {contactsOpen && (
             <div
               className="flex flex-col gap-3 bg-surface-muted border border-surface rounded-2xl p-3 text-xs"
-              style={{ maxHeight: "min(calc(100dvh - 21rem), calc(100vh - 9rem))" }}
+              style={{ maxHeight: "min(calc(100dvh - 23rem), calc(100vh - 9rem))" }}
             >
               <div className="text-secondary text-[11px]">
                 {sortedContacts.length

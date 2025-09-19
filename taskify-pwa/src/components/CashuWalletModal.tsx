@@ -1,15 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BrowserMultiFormatReader, NotFoundException, type IScannerControls } from "@zxing/browser";
 import { QRCodeCanvas } from "qrcode.react";
 import { useCashu } from "../context/CashuContext";
 import { useNwc } from "../context/NwcContext";
 import { loadStore } from "../wallet/storage";
 import { ActionSheet } from "./ActionSheet";
-
-type BarcodeDetectorLike = {
-  detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue: string }>>;
-};
-
-type BarcodeDetectorCtorLike = new (options?: { formats?: string[] }) => BarcodeDetectorLike;
 
 function QrCodeCard({ value, label, copyLabel = "Copy", extraActions, size = 220, className }: { value: string; label: string; copyLabel?: string; extraActions?: React.ReactNode; size?: number; className?: string; }) {
   const trimmed = value?.trim();
@@ -53,9 +48,8 @@ function QrCodeCard({ value, label, copyLabel = "Copy", extraActions, size = 220
 
 function QrScanner({ active, onDetected, onError }: { active: boolean; onDetected: (value: string) => boolean | Promise<boolean>; onError?: (message: string) => void; }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const rafRef = useRef<number>();
-  const detectorRef = useRef<BarcodeDetectorLike | null>(null);
+  const controlsRef = useRef<IScannerControls | null>(null);
+  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const processingRef = useRef(false);
   const lastValueRef = useRef<string | null>(null);
   const resetTimerRef = useRef<number>();
@@ -70,26 +64,34 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
     setError(null);
   }, []);
 
-  function stopStream() {
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = undefined;
+  const stopScanner = useCallback(() => {
+    if (controlsRef.current) {
+      try {
+        controlsRef.current.stop();
+      } catch (err) {
+        console.warn("Failed to stop scanner", err);
+      }
+      controlsRef.current = null;
     }
     const video = videoRef.current;
+    const stream = (video?.srcObject as MediaStream | null) || null;
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+    }
     if (video) {
       video.pause();
       video.srcObject = null;
     }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
+    if (readerRef.current) {
+      readerRef.current.reset();
     }
-    detectorRef.current = null;
-  }
+  }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
     if (!active) {
-      stopStream();
+      stopScanner();
       clearError();
       lastValueRef.current = null;
       processingRef.current = false;
@@ -101,66 +103,39 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
       return;
     }
 
-    let cancelled = false;
-
     async function start() {
       try {
         clearError();
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false,
-        });
-        if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
+        if (!readerRef.current) {
+          readerRef.current = new BrowserMultiFormatReader();
+        } else {
+          readerRef.current.reset();
         }
-        streamRef.current = stream;
+        const reader = readerRef.current;
         const video = videoRef.current;
-        if (!video) {
-          reportError("Unable to access camera feed");
-          return;
-        }
-        video.srcObject = stream;
-        await video.play().catch(() => undefined);
+        if (!reader || !video) throw new Error("Unable to access camera");
 
-        const DetectorCtor = (window as any)?.BarcodeDetector as BarcodeDetectorCtorLike | undefined;
-        if (!DetectorCtor) {
-          reportError("QR scanning not supported in this browser");
-          stopStream();
-          return;
-        }
-
-        try {
-          detectorRef.current = new DetectorCtor({ formats: ["qr_code"] });
-        } catch {
-          detectorRef.current = new DetectorCtor();
-        }
-
-        async function tick() {
-          if (cancelled || !active) return;
-          const detector = detectorRef.current;
-          const vid = videoRef.current;
-          if (!detector || !vid || vid.readyState < 2) {
-            rafRef.current = requestAnimationFrame(tick);
+        const controls = await reader.decodeFromVideoDevice(null, video, async (result, err, ctrl) => {
+          if (cancelled || !active) {
+            ctrl.stop();
             return;
           }
-
-          try {
-            if (!processingRef.current) {
-              const codes = await detector.detect(vid);
-              const match = codes.find((code) => code.rawValue?.trim());
-              const raw = match?.rawValue?.trim();
-              if (raw && raw !== lastValueRef.current) {
+          if (result) {
+            const raw = result.getText()?.trim();
+            if (raw && raw !== lastValueRef.current) {
+              if (!processingRef.current) {
                 processingRef.current = true;
                 let shouldClose = false;
                 try {
                   shouldClose = await onDetected(raw);
-                } catch (err) {
-                  console.warn("QR handler failed", err);
+                } catch (handlerError) {
+                  console.warn("QR handler failed", handlerError);
+                } finally {
+                  processingRef.current = false;
                 }
-                processingRef.current = false;
                 if (shouldClose) {
-                  stopStream();
+                  ctrl.stop();
+                  stopScanner();
                   return;
                 }
                 lastValueRef.current = raw;
@@ -168,22 +143,32 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
                 resetTimerRef.current = window.setTimeout(() => {
                   if (lastValueRef.current === raw) lastValueRef.current = null;
                 }, 1600);
-              } else if (!raw) {
-                lastValueRef.current = null;
               }
+            } else if (!raw) {
+              lastValueRef.current = null;
             }
-          } catch (err) {
-            console.warn("QR detection failed", err);
+          } else if (err && !(err instanceof NotFoundException)) {
+            console.warn("ZXing scanner error", err);
           }
+        });
 
-          rafRef.current = requestAnimationFrame(tick);
+        if (cancelled) {
+          controls.stop();
+          return;
         }
 
-        rafRef.current = requestAnimationFrame(tick);
+        controlsRef.current = controls;
       } catch (err) {
+        if (cancelled) return;
         const message = err instanceof Error ? err.message : String(err);
-        reportError(message);
-        stopStream();
+        if (/NotAllowedError|denied/i.test(message)) {
+          reportError("Camera permission denied");
+        } else if (/NotFoundError|device not found/i.test(message)) {
+          reportError("Camera not available");
+        } else {
+          reportError(message || "Unable to access camera");
+        }
+        stopScanner();
       }
     }
 
@@ -191,7 +176,7 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
 
     return () => {
       cancelled = true;
-      stopStream();
+      stopScanner();
       if (resetTimerRef.current) {
         clearTimeout(resetTimerRef.current);
         resetTimerRef.current = undefined;
@@ -199,7 +184,7 @@ function QrScanner({ active, onDetected, onError }: { active: boolean; onDetecte
       lastValueRef.current = null;
       processingRef.current = false;
     };
-  }, [active, clearError, onDetected, reportError]);
+  }, [active, clearError, onDetected, reportError, stopScanner]);
 
   return (
     <div className="wallet-scanner space-y-3">

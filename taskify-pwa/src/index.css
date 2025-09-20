@@ -535,7 +535,7 @@ html.light .control-matrix__btn {
 /* ================= Board columns ================= */
 .board-column {
   position: relative;
-  background: rgba(255, 255, 255, 0.08);
+  background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow:
     var(--shadow-soft),
@@ -548,7 +548,7 @@ html.light .control-matrix__btn {
 }
 
 html.light .board-column {
-  background: rgba(12, 24, 63, 0.12);
+  background: transparent;
   box-shadow:
     var(--shadow-soft),
     inset 0 1px 0 rgba(255, 255, 255, 0.45);

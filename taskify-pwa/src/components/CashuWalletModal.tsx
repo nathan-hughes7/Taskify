@@ -6,6 +6,7 @@ import qrScannerWorkerPath from "qr-scanner/qr-scanner-worker.min.js?url";
 import { QRCodeCanvas } from "qrcode.react";
 import { useCashu } from "../context/CashuContext";
 import { useNwc } from "../context/NwcContext";
+import { useToast } from "../context/ToastContext";
 import { loadStore } from "../wallet/storage";
 import { LS_LIGHTNING_CONTACTS } from "../localStorageKeys";
 import { LS_NOSTR_SK } from "../nostrKeys";
@@ -336,6 +337,7 @@ export function CashuWalletModal({
 }) {
   const { mintUrl, setMintUrl, balance, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice: payMintInvoice } = useCashu();
   const { status: nwcStatus, connection: nwcConnection, info: nwcInfo, lastError: nwcError, connect: connectNwc, disconnect: disconnectNwc, refreshInfo: refreshNwcInfo, getBalanceMsat: getNwcBalanceMsat, payInvoice: payWithNwc, makeInvoice: makeNwcInvoice } = useNwc();
+  const { show: showToast } = useToast();
 
   interface HistoryItem {
     id: string;
@@ -778,6 +780,7 @@ export function CashuWalletModal({
           }
           const suffix = suffixParts.length ? ` (${suffixParts.join("; ")})` : "";
           setNpubCashClaimMessage(`${baseMessage}${suffix}.`);
+          showToast(baseMessage, 3000);
           const detailParts = [`Address ${identity.address}`];
           if (identity.npub) detailParts.push(`npub ${identity.npub}`);
           if (totalSat) {
@@ -819,7 +822,7 @@ export function CashuWalletModal({
         }
       }
     },
-    [mintUrl, npubCashLightningAddressEnabled, receiveToken, setHistory],
+    [mintUrl, npubCashLightningAddressEnabled, receiveToken, setHistory, showToast],
   );
 
   useEffect(() => {

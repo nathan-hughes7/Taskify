@@ -15,11 +15,30 @@ export type AccentPalette = {
 type RGB = { r: number; g: number; b: number };
 type HSL = { h: number; s: number; l: number };
 
-const CANVAS_SIZE = 96;
-const SAMPLE_STEP = 4; // sample every nth pixel
-const BUCKET_SIZE = 32;
-const MIN_HUE_DISTANCE = 0.22; // ensure noticeably distinct hues (~80°)
-const MIN_SATURATION = 0.2;
+type Sample = {
+  r: number;
+  g: number;
+  b: number;
+  lab: [number, number, number];
+  saturation: number;
+  lightness: number;
+  hue: number;
+  weight: number;
+};
+
+type Cluster = {
+  r: number;
+  g: number;
+  b: number;
+  lab: [number, number, number];
+  saturation: number;
+  lightness: number;
+  weight: number;
+};
+
+const MAX_SAMPLED_PIXELS = 2200;
+const TARGET_CLUSTER_COUNT = 6;
+const MIN_CLUSTER_DISTANCE = 14; // ΔE threshold in Lab space
 
 export const ACCENT_PALETTE_KEYS: Array<keyof AccentPalette> = [
   "fill",
@@ -60,71 +79,16 @@ export async function readFileAsDataURL(file: File): Promise<string> {
 
 export async function buildAccentPalettesFromImage(dataUrl: string): Promise<AccentPalette[]> {
   const image = await loadImage(dataUrl);
-  const candidates = extractPaletteCandidates(image);
-  if (!candidates.length) {
+  const samples = sampleImage(image);
+  if (!samples.length) {
     return [createPalette({ r: 52, g: 199, b: 89 })];
   }
 
-  const segmentBest = new Map<number, PaletteCandidate>();
-  for (const candidate of candidates) {
-    const hue = candidate.hsl.h;
-    const segment = Number.isFinite(hue) ? Math.floor((hue * 360) / 60) % 6 : -1;
-    if (segment < 0) continue;
-    const existing = segmentBest.get(segment);
-    if (!existing || candidate.weight > existing.weight) {
-      segmentBest.set(segment, candidate);
-    }
-  }
+  const clusterCount = Math.min(TARGET_CLUSTER_COUNT, Math.max(3, Math.floor(samples.length / 80)));
+  const clusters = clusterSamples(samples, clusterCount).sort((a, b) => b.weight - a.weight);
+  const accents = selectAccents(clusters, 3);
 
-  let choices = Array.from(segmentBest.values()).sort((a, b) => b.weight - a.weight);
-  if (!choices.length) choices = candidates;
-
-  const selected: RGB[] = [];
-  const selectedHues: number[] = [];
-  for (const candidate of choices) {
-    if (selected.length >= 3) break;
-    if (candidate.hsl.s < MIN_SATURATION) continue;
-    if (selectedHues.some((h) => hueDistance(h, candidate.hsl.h) < MIN_HUE_DISTANCE)) continue;
-    selected.push(candidate.rgb);
-    selectedHues.push(candidate.hsl.h);
-  }
-
-  if (selected.length === 0) {
-    const fallback = candidates[0];
-    selected.push(fallback.rgb);
-    selectedHues.push(fallback.hsl.h);
-  }
-
-  if (selected.length < 3) {
-    const base = selected[0];
-    const variants = generateVariants(base, selectedHues, 3 - selected.length);
-    for (const rgb of variants) {
-      if (selected.length >= 3) break;
-      const hue = rgbToHsl(rgb.r, rgb.g, rgb.b).h;
-      if (selectedHues.some((h) => hueDistance(h, hue) < MIN_HUE_DISTANCE)) continue;
-      selected.push(rgb);
-      selectedHues.push(hue);
-    }
-  }
-
-  if (selected.length < 3) {
-    for (const candidate of candidates) {
-      if (selected.length >= 3) break;
-      if (selectedHues.some((h) => hueDistance(h, candidate.hsl.h) < MIN_HUE_DISTANCE / 1.4)) continue;
-      selected.push(candidate.rgb);
-      selectedHues.push(candidate.hsl.h);
-    }
-  }
-
-  while (selected.length < 3) {
-    const baseHue = rgbToHsl(selected[0].r, selected[0].g, selected[0].b).h;
-    const hue = (baseHue + 0.33 * selected.length) % 1;
-    const rgb = roundColor(hslToRgb(hue, 0.55, clamp01(0.56 - selected.length * 0.08)));
-    selected.push(rgb);
-    selectedHues.push(hue);
-  }
-
-  return selected.slice(0, 3).map((rgb) => createPalette(rgb));
+  return accents.map((cluster) => createPalette({ r: cluster.r, g: cluster.g, b: cluster.b }));
 }
 
 export function normalizeAccentPaletteList(raw: unknown): AccentPalette[] | null {
@@ -148,120 +112,234 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-type PaletteCandidate = { rgb: RGB; hsl: HSL; weight: number };
-
-function extractPaletteCandidates(image: HTMLImageElement): PaletteCandidate[] {
+function sampleImage(image: HTMLImageElement): Sample[] {
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return [];
 
-  const scale = Math.min(1, CANVAS_SIZE / Math.max(image.width, image.height));
-  const width = Math.max(1, Math.round(image.width * scale));
-  const height = Math.max(1, Math.round(image.height * scale));
+  const scale = Math.min(1, Math.sqrt(MAX_SAMPLED_PIXELS / Math.max(1, image.width * image.height)));
+  const width = Math.max(16, Math.round(image.width * scale));
+  const height = Math.max(16, Math.round(image.height * scale));
   canvas.width = width;
   canvas.height = height;
   ctx.drawImage(image, 0, 0, width, height);
+
   const data = ctx.getImageData(0, 0, width, height).data;
+  const samples: Sample[] = [];
 
-  const buckets = new Map<string, { weight: number; total: RGB }>();
-  let totalWeight = 0;
-  let avg: RGB = { r: 0, g: 0, b: 0 };
-
-  for (let i = 0; i < data.length; i += SAMPLE_STEP * 4) {
+  for (let i = 0; i < data.length; i += 4) {
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
     const a = data[i + 3];
-    if (a < 160) continue;
+    if (a < 180) continue;
 
-    const hsl = rgbToHsl(r, g, b);
-    const saturationWeight = clamp01(hsl.s * 1.8 + 0.2);
-    const lightnessCentering = 1 - Math.abs(hsl.l - 0.5) * 1.4;
-    const luminance = relativeLuminance({ r, g, b });
-    const luminancePref = luminance < 0.1 || luminance > 0.92 ? 0.2 : 1;
-    const weight = (saturationWeight + 0.35) * lightnessCentering * luminancePref;
-    if (weight <= 0.01) continue;
+    const { h, s, l } = rgbToHsl(r, g, b);
+    const lab = rgbToLab(r, g, b);
+    const saturationWeight = Math.pow(s, 1.2);
+    const balanceWeight = 1 - Math.abs(l - 0.45);
+    const weight = 0.12 + saturationWeight * 0.6 + balanceWeight * 0.28;
 
-    const key = `${Math.round(r / BUCKET_SIZE)}-${Math.round(g / BUCKET_SIZE)}-${Math.round(b / BUCKET_SIZE)}`;
-    const bucket = buckets.get(key);
-    if (bucket) {
-      bucket.weight += weight;
-      bucket.total.r += r * weight;
-      bucket.total.g += g * weight;
-      bucket.total.b += b * weight;
-    } else {
-      buckets.set(key, {
-        weight,
-        total: { r: r * weight, g: g * weight, b: b * weight },
-      });
+    samples.push({
+      r,
+      g,
+      b,
+      lab,
+      saturation: s,
+      lightness: l,
+      hue: h,
+      weight,
+    });
+  }
+
+  return samples;
+}
+
+function clusterSamples(samples: Sample[], k: number): Cluster[] {
+  if (samples.length <= k) {
+    return samples.map((s) => ({
+      r: s.r,
+      g: s.g,
+      b: s.b,
+      lab: s.lab,
+      saturation: s.saturation,
+      lightness: s.lightness,
+      weight: s.weight,
+    }));
+  }
+
+  const centroids = initializeCentroids(samples, k);
+  const assignments = new Array(samples.length).fill(0);
+
+  for (let iteration = 0; iteration < 7; iteration++) {
+    const totals = Array.from({ length: k }, () => ({
+      weight: 0,
+      r: 0,
+      g: 0,
+      b: 0,
+      lab: [0, 0, 0] as [number, number, number],
+      saturation: 0,
+      lightness: 0,
+    }));
+
+    for (let i = 0; i < samples.length; i++) {
+      const sample = samples[i];
+      let best = 0;
+      let bestDistance = Infinity;
+      for (let c = 0; c < k; c++) {
+        const distance = labDistance(sample.lab, centroids[c]);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = c;
+        }
+      }
+      assignments[i] = best;
+      const total = totals[best];
+      total.weight += sample.weight;
+      total.r += sample.r * sample.weight;
+      total.g += sample.g * sample.weight;
+      total.b += sample.b * sample.weight;
+      total.lab[0] += sample.lab[0] * sample.weight;
+      total.lab[1] += sample.lab[1] * sample.weight;
+      total.lab[2] += sample.lab[2] * sample.weight;
+      total.saturation += sample.saturation * sample.weight;
+      total.lightness += sample.lightness * sample.weight;
     }
 
-    avg.r += r * weight;
-    avg.g += g * weight;
-    avg.b += b * weight;
-    totalWeight += weight;
-  }
-
-  if (totalWeight > 0) {
-    avg = {
-      r: avg.r / totalWeight,
-      g: avg.g / totalWeight,
-      b: avg.b / totalWeight,
-    };
-  }
-
-  let best: RGB | null = null;
-  let bestWeight = 0;
-  for (const bucket of buckets.values()) {
-    if (bucket.weight > bestWeight) {
-      bestWeight = bucket.weight;
-      best = {
-        r: bucket.total.r / bucket.weight,
-        g: bucket.total.g / bucket.weight,
-        b: bucket.total.b / bucket.weight,
-      };
+    for (let c = 0; c < k; c++) {
+      const total = totals[c];
+      if (total.weight === 0) {
+        const random = samples[Math.floor(Math.random() * samples.length)].lab;
+        centroids[c] = [...random];
+        continue;
+      }
+      centroids[c] = [
+        total.lab[0] / total.weight,
+        total.lab[1] / total.weight,
+        total.lab[2] / total.weight,
+      ];
     }
   }
 
-  const candidates: PaletteCandidate[] = [];
-  if (best) {
-    const bestRounded = roundColor(best);
-    candidates.push({ rgb: bestRounded, hsl: rgbToHsl(bestRounded.r, bestRounded.g, bestRounded.b), weight: bestWeight });
+  const clusters: Cluster[] = Array.from({ length: k }, () => ({
+    r: 0,
+    g: 0,
+    b: 0,
+    lab: [0, 0, 0] as [number, number, number],
+    saturation: 0,
+    lightness: 0,
+    weight: 0,
+  }));
+
+  for (let i = 0; i < samples.length; i++) {
+    const idx = assignments[i];
+    const sample = samples[i];
+    const cluster = clusters[idx];
+    cluster.weight += sample.weight;
+    cluster.r += sample.r * sample.weight;
+    cluster.g += sample.g * sample.weight;
+    cluster.b += sample.b * sample.weight;
+    cluster.lab[0] += sample.lab[0] * sample.weight;
+    cluster.lab[1] += sample.lab[1] * sample.weight;
+    cluster.lab[2] += sample.lab[2] * sample.weight;
+    cluster.saturation += sample.saturation * sample.weight;
+    cluster.lightness += sample.lightness * sample.weight;
   }
 
-  for (const bucket of buckets.values()) {
-    const rgb = {
-      r: bucket.total.r / bucket.weight,
-      g: bucket.total.g / bucket.weight,
-      b: bucket.total.b / bucket.weight,
-    };
-    const rounded = roundColor(rgb);
-    const hsl = rgbToHsl(rounded.r, rounded.g, rounded.b);
-    if (!Number.isFinite(hsl.h) || bucket.weight < totalWeight * 0.02) continue;
-    candidates.push({ rgb: rounded, hsl, weight: bucket.weight });
+  return clusters
+    .filter((cluster) => cluster.weight > 0)
+    .map((cluster) => ({
+      r: cluster.r / cluster.weight,
+      g: cluster.g / cluster.weight,
+      b: cluster.b / cluster.weight,
+      lab: [
+        cluster.lab[0] / cluster.weight,
+        cluster.lab[1] / cluster.weight,
+        cluster.lab[2] / cluster.weight,
+      ] as [number, number, number],
+      saturation: cluster.saturation / cluster.weight,
+      lightness: cluster.lightness / cluster.weight,
+      weight: cluster.weight,
+    }));
+}
+
+function initializeCentroids(samples: Sample[], k: number): Array<[number, number, number]> {
+  const sorted = [...samples].sort((a, b) => b.weight - a.weight);
+  const centroids: Array<[number, number, number]> = [];
+
+  if (sorted.length) {
+    centroids.push(sorted[0].lab);
   }
 
-  if (totalWeight > 0) {
-    const avgRounded = roundColor(avg);
-    candidates.push({ rgb: avgRounded, hsl: rgbToHsl(avgRounded.r, avgRounded.g, avgRounded.b), weight: totalWeight * 0.08 });
+  while (centroids.length < k && centroids.length < sorted.length) {
+    let bestSample: Sample | null = null;
+    let bestScore = -Infinity;
+    for (const sample of sorted) {
+      const minDistance = centroids.reduce((min, centroid) => Math.min(min, labDistance(sample.lab, centroid)), Infinity);
+      const score = minDistance * sample.weight * (0.6 + sample.saturation) * (0.6 + (1 - Math.abs(sample.lightness - 0.5)));
+      if (score > bestScore) {
+        bestScore = score;
+        bestSample = sample;
+      }
+    }
+    if (!bestSample) break;
+    centroids.push(bestSample.lab);
   }
 
-  const unique: PaletteCandidate[] = [];
-  for (const candidate of candidates.sort((a, b) => b.weight - a.weight)) {
-    if (unique.some(existing => colorDistance(existing.rgb, candidate.rgb) < 18)) continue;
-    unique.push(candidate);
+  while (centroids.length < k) {
+    const random = samples[Math.floor(Math.random() * samples.length)].lab;
+    centroids.push([...random]);
   }
 
-  return unique;
+  return centroids;
+}
+
+function selectAccents(clusters: Cluster[], count: number): Cluster[] {
+  if (!clusters.length) return [];
+
+  const scored = clusters.map((cluster) => {
+    const vibrancy = 0.5 + cluster.saturation;
+    const balance = 0.6 + (1 - Math.abs(cluster.lightness - 0.5));
+    const score = cluster.weight * vibrancy * balance;
+    return { cluster, score };
+  }).sort((a, b) => b.score - a.score);
+
+  const chosen: Cluster[] = [];
+  const minDistanceSq = MIN_CLUSTER_DISTANCE * MIN_CLUSTER_DISTANCE;
+
+  for (const { cluster } of scored) {
+    if (chosen.length >= count) break;
+    const farEnough = chosen.every((other) => labDistanceSq(cluster.lab, other.lab) > minDistanceSq);
+    if (farEnough) {
+      chosen.push(cluster);
+    }
+  }
+
+  if (chosen.length < count) {
+    for (const { cluster } of scored) {
+      if (chosen.length >= count) break;
+      const duplicate = chosen.some((other) => labDistanceSq(cluster.lab, other.lab) < (MIN_CLUSTER_DISTANCE / 2) ** 2);
+      if (!duplicate) {
+        chosen.push(cluster);
+      }
+    }
+  }
+
+  while (chosen.length < count) {
+    const candidate = scored[chosen.length % scored.length].cluster;
+    chosen.push(candidate);
+  }
+
+  return chosen.slice(0, count);
 }
 
 function createPalette(color: RGB): AccentPalette {
   const baseHsl = rgbToHsl(color.r, color.g, color.b);
-  const targetSat = clamp01(Math.max(baseHsl.s, 0.38) * 1.22 + 0.08);
+  const targetSat = clamp01(Math.max(baseHsl.s, 0.4) * 1.15 + 0.08);
   const targetLight = (() => {
-    if (baseHsl.l < 0.28) return 0.58;
+    if (baseHsl.l < 0.28) return 0.6;
     if (baseHsl.l > 0.78) return 0.48;
-    return clamp01(baseHsl.l * 0.6 + 0.2);
+    return clamp01(baseHsl.l * 0.62 + 0.2);
   })();
   const accentRgb = roundColor(hslToRgb(baseHsl.h, targetSat, targetLight));
   const hover = adjustLightness(accentRgb, 0.12);
@@ -302,11 +380,6 @@ function rgba(color: RGB, alpha: number): string {
   return `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${clamp01(alpha).toFixed(2)})`;
 }
 
-function hueDistance(a: number, b: number): number {
-  const diff = Math.abs(a - b);
-  return Math.min(diff, 1 - diff);
-}
-
 function roundColor(color: RGB): RGB {
   return {
     r: clampChannel(color.r),
@@ -315,31 +388,15 @@ function roundColor(color: RGB): RGB {
   };
 }
 
-function generateVariants(base: RGB, existingHues: number[], count: number): RGB[] {
-  const variants: RGB[] = [];
-  const baseHsl = rgbToHsl(base.r, base.g, base.b);
-  const hueOffsets = [0.33, -0.33, 0.5, -0.5, 0.17, -0.17, 0.25, -0.25];
-  for (const offset of hueOffsets) {
-    if (variants.length >= count) break;
-    const hue = (baseHsl.h + offset + 1) % 1;
-    if (existingHues.some((h) => hueDistance(h, hue) < MIN_HUE_DISTANCE)) continue;
-    const sat = clamp01(Math.max(baseHsl.s, 0.45) + 0.1);
-    const lightBase = baseHsl.l * 0.6 + 0.18;
-    const light = clamp01(offset > 0 ? lightBase + 0.1 : lightBase - 0.08);
-    const rgb = roundColor(hslToRgb(hue, sat, light));
-    variants.push(rgb);
-  }
-  if (variants.length < count) {
-    const complementHue = (baseHsl.h + 0.5) % 1;
-    if (!existingHues.some((h) => hueDistance(h, complementHue) < MIN_HUE_DISTANCE)) {
-      variants.push(roundColor(hslToRgb(complementHue, clamp01(baseHsl.s * 0.8 + 0.2), clamp01(0.52))));
-    }
-  }
-  return variants.slice(0, count);
+function labDistance(a: [number, number, number], b: [number, number, number]): number {
+  return Math.sqrt(labDistanceSq(a, b));
 }
 
-function colorDistance(a: RGB, b: RGB): number {
-  return Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2);
+function labDistanceSq(a: [number, number, number], b: [number, number, number]): number {
+  const dL = a[0] - b[0];
+  const dA = a[1] - b[1];
+  const dB = a[2] - b[2];
+  return dL * dL + dA * dA + dB * dB;
 }
 
 function clampChannel(value: number): number {
@@ -431,4 +488,38 @@ function relativeLuminance(color: RGB): number {
   const g = transform(color.g);
   const b = transform(color.b);
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function rgbToLab(r: number, g: number, b: number): [number, number, number] {
+  let sr = r / 255;
+  let sg = g / 255;
+  let sb = b / 255;
+
+  sr = sr <= 0.04045 ? sr / 12.92 : Math.pow((sr + 0.055) / 1.055, 2.4);
+  sg = sg <= 0.04045 ? sg / 12.92 : Math.pow((sg + 0.055) / 1.055, 2.4);
+  sb = sb <= 0.04045 ? sb / 12.92 : Math.pow((sb + 0.055) / 1.055, 2.4);
+
+  const x = sr * 0.4124 + sg * 0.3576 + sb * 0.1805;
+  const y = sr * 0.2126 + sg * 0.7152 + sb * 0.0722;
+  const z = sr * 0.0193 + sg * 0.1192 + sb * 0.9505;
+
+  return xyzToLab(x, y, z);
+}
+
+function xyzToLab(x: number, y: number, z: number): [number, number, number] {
+  const Xn = 0.95047;
+  const Yn = 1.0;
+  const Zn = 1.08883;
+
+  const fx = labF(x / Xn);
+  const fy = labF(y / Yn);
+  const fz = labF(z / Zn);
+
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+}
+
+function labF(t: number): number {
+  const delta = 6 / 29;
+  if (t > delta ** 3) return Math.cbrt(t);
+  return t / (3 * delta * delta) + 4 / 29;
 }

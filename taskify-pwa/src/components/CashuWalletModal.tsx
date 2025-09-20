@@ -8,6 +8,13 @@ import { useCashu } from "../context/CashuContext";
 import { useNwc } from "../context/NwcContext";
 import { loadStore } from "../wallet/storage";
 import { LS_LIGHTNING_CONTACTS } from "../localStorageKeys";
+import { LS_NOSTR_SK } from "../nostrKeys";
+import {
+  NpubCashError,
+  acknowledgeNpubCashClaims,
+  claimPendingEcashFromNpubCash,
+  deriveNpubCashIdentity,
+} from "../wallet/npubCash";
 import { ActionSheet } from "./ActionSheet";
 
 QrScannerLib.WORKER_PATH = qrScannerWorkerPath;
@@ -316,12 +323,16 @@ export function CashuWalletModal({
   walletConversionEnabled,
   walletPrimaryCurrency,
   setWalletPrimaryCurrency,
+  npubCashLightningAddressEnabled,
+  npubCashAutoClaim,
 }: {
   open: boolean;
   onClose: () => void;
   walletConversionEnabled: boolean;
   walletPrimaryCurrency: "sat" | "usd";
   setWalletPrimaryCurrency: (currency: "sat" | "usd") => void;
+  npubCashLightningAddressEnabled: boolean;
+  npubCashAutoClaim: boolean;
 }) {
   const { mintUrl, setMintUrl, balance, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice: payMintInvoice } = useCashu();
   const { status: nwcStatus, connection: nwcConnection, info: nwcInfo, lastError: nwcError, connect: connectNwc, disconnect: disconnectNwc, refreshInfo: refreshNwcInfo, getBalanceMsat: getNwcBalanceMsat, payInvoice: payWithNwc, makeInvoice: makeNwcInvoice } = useNwc();
@@ -343,7 +354,14 @@ export function CashuWalletModal({
     | { type: "lnurl"; data: string }
     | { type: "paymentRequest"; request: string };
   const [pendingScan, setPendingScan] = useState<PendingScan | null>(null);
-  const [receiveMode, setReceiveMode] = useState<null | "ecash" | "lightning" | "lnurlWithdraw" | "nwcFund">(null);
+  const [receiveMode, setReceiveMode] = useState<
+    | null
+    | "ecash"
+    | "lightning"
+    | "lnurlWithdraw"
+    | "nwcFund"
+    | "npubCashAddress"
+  >(null);
   const [sendMode, setSendMode] = useState<null | "ecash" | "lightning" | "paymentRequest" | "nwcWithdraw">(null);
 
   const [btcUsdPrice, setBtcUsdPrice] = useState<number | null>(null);
@@ -433,8 +451,14 @@ export function CashuWalletModal({
   });
   const [showHistory, setShowHistory] = useState(false);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [npubCashIdentity, setNpubCashIdentity] = useState<{ npub: string; address: string } | null>(null);
+  const [npubCashIdentityError, setNpubCashIdentityError] = useState<string | null>(null);
+  const [npubCashClaimStatus, setNpubCashClaimStatus] = useState<"idle" | "checking" | "success" | "error">("idle");
+  const [npubCashClaimMessage, setNpubCashClaimMessage] = useState("");
   const recvRef = useRef<HTMLTextAreaElement | null>(null);
   const lnRef = useRef<HTMLTextAreaElement | null>(null);
+  const npubCashClaimAbortRef = useRef<AbortController | null>(null);
+  const npubCashClaimingRef = useRef(false);
   const normalizedLnInput = useMemo(() => lnInput.trim().replace(/^lightning:/i, "").trim(), [lnInput]);
   const isLnAddress = useMemo(() => /^[^@\s]+@[^@\s]+$/.test(normalizedLnInput), [normalizedLnInput]);
   const isLnurlInput = useMemo(() => /^lnurl[0-9a-z]+$/i.test(normalizedLnInput), [normalizedLnInput]);
@@ -632,9 +656,212 @@ export function CashuWalletModal({
     }
   }
 
+  const handleClaimNpubCash = useCallback(
+    async (options?: { auto?: boolean }) => {
+      if (!npubCashLightningAddressEnabled) return;
+      if (npubCashClaimingRef.current) return;
+      const auto = options?.auto === true;
+      const storedSk = localStorage.getItem(LS_NOSTR_SK) || "";
+      if (!storedSk) {
+        setNpubCashIdentity(null);
+        const message = "Add your Taskify Nostr key in Settings → Nostr to use npub.cash.";
+        setNpubCashIdentityError(message);
+        if (!auto) {
+          setNpubCashClaimStatus("error");
+          setNpubCashClaimMessage(message);
+        }
+        return;
+      }
+
+      let identity: ReturnType<typeof deriveNpubCashIdentity> | null = null;
+      try {
+        identity = deriveNpubCashIdentity(storedSk);
+        setNpubCashIdentity({ npub: identity.npub, address: identity.address });
+        setNpubCashIdentityError(null);
+      } catch (err: any) {
+        const message = err?.message || "Unable to derive npub.cash address.";
+        setNpubCashIdentity(null);
+        setNpubCashIdentityError(message);
+        if (!auto) {
+          setNpubCashClaimStatus("error");
+          setNpubCashClaimMessage(message);
+        }
+        return;
+      }
+
+      if (!mintUrl) {
+        if (!auto) {
+          setNpubCashClaimStatus("error");
+          setNpubCashClaimMessage("Select an active mint before claiming from npub.cash.");
+        }
+        return;
+      }
+
+      const controller = new AbortController();
+      npubCashClaimAbortRef.current = controller;
+      npubCashClaimingRef.current = true;
+      setNpubCashClaimStatus("checking");
+      setNpubCashClaimMessage("Checking npub.cash for pending tokens…");
+
+      try {
+        const result = await claimPendingEcashFromNpubCash(storedSk, { signal: controller.signal });
+        const tokens = Array.isArray(result.tokens) ? result.tokens : [];
+        const reportedBalance = Number.isFinite(result.balance)
+          ? Math.max(0, Math.floor(result.balance))
+          : 0;
+        if (reportedBalance > 0) {
+          setNpubCashClaimMessage(
+            `npub.cash reports ${reportedBalance} sat${reportedBalance === 1 ? "" : "s"} ready to claim…`,
+          );
+        }
+        if (!tokens.length) {
+          if (reportedBalance > 0) {
+            setNpubCashClaimStatus("error");
+            setNpubCashClaimMessage(
+              `npub.cash reported ${reportedBalance} sat${reportedBalance === 1 ? "" : "s"}, but no token was returned. Please try again later.`,
+            );
+          } else {
+            setNpubCashClaimStatus("idle");
+            setNpubCashClaimMessage("No pending eCash found.");
+          }
+          return;
+        }
+
+        let successCount = 0;
+        let totalSat = 0;
+        let lastError: string | null = null;
+        const successTokens: string[] = [];
+        const crossMintMints = new Set<string>();
+        for (const token of tokens) {
+          try {
+            const normalizedToken = typeof token === "string" ? token.trim() : "";
+            if (!normalizedToken) {
+              continue;
+            }
+            const res = await receiveToken(normalizedToken);
+            successCount += 1;
+            successTokens.push(normalizedToken);
+            const tokenAmount = Array.isArray(res.proofs)
+              ? res.proofs.reduce((sum, proof) => sum + (proof?.amount || 0), 0)
+              : 0;
+            totalSat += tokenAmount;
+            if (res.crossMint && res.usedMintUrl) {
+              crossMintMints.add(res.usedMintUrl);
+            }
+          } catch (err: any) {
+            lastError = err?.message || String(err);
+          }
+        }
+
+        if (lastError) {
+          setNpubCashClaimStatus("error");
+          const prefix = successCount ? `Claimed ${successCount} token${successCount === 1 ? "" : "s"}, but ` : "";
+          setNpubCashClaimMessage(`${prefix}${lastError}`);
+        } else {
+          if (successTokens.length) {
+            try {
+              await acknowledgeNpubCashClaims(storedSk);
+            } catch (ackErr) {
+              console.warn("Failed to acknowledge npub.cash claims", ackErr);
+            }
+          }
+          setNpubCashClaimStatus("success");
+          const baseMessage = totalSat
+            ? `Claimed ${totalSat} sat${totalSat === 1 ? "" : "s"} from npub.cash`
+            : `Claimed ${successCount} token${successCount === 1 ? "" : "s"} from npub.cash`;
+          const suffixParts: string[] = [];
+          if (crossMintMints.size) {
+            suffixParts.push(`stored at ${Array.from(crossMintMints).join(", ")}`);
+          }
+          if (reportedBalance > 0) {
+            suffixParts.push(`npub.cash reported ${reportedBalance} sat${reportedBalance === 1 ? "" : "s"}`);
+          }
+          const suffix = suffixParts.length ? ` (${suffixParts.join("; ")})` : "";
+          setNpubCashClaimMessage(`${baseMessage}${suffix}.`);
+          const detailParts = [`Address ${identity.address}`];
+          if (identity.npub) detailParts.push(`npub ${identity.npub}`);
+          if (totalSat) {
+            detailParts.push(`${totalSat} sat${totalSat === 1 ? "" : "s"}`);
+          }
+          if (crossMintMints.size) {
+            detailParts.push(`Stored at ${Array.from(crossMintMints).join(", ")}`);
+          }
+          if (reportedBalance > 0) {
+            detailParts.push(`npub.cash reported ${reportedBalance} sat${reportedBalance === 1 ? "" : "s"}`);
+          }
+          const summary = totalSat
+            ? `Claimed ${totalSat} sat${totalSat === 1 ? "" : "s"} via npub.cash`
+            : `Claimed ${successCount} token${successCount === 1 ? "" : "s"} via npub.cash`;
+          setHistory((prev) => [
+            {
+              id: `npubcash-${Date.now()}`,
+              summary,
+              detail: detailParts.join(" · "),
+            },
+            ...prev,
+          ]);
+        }
+      } catch (err: any) {
+        if (err?.name === "AbortError") return;
+        if (err instanceof NpubCashError && err.status === 504) {
+          const message = err.message || "npub.cash request timed out. Please try again later.";
+          setNpubCashClaimStatus(auto ? "idle" : "error");
+          setNpubCashClaimMessage(message);
+          return;
+        }
+        const message = err?.message || "Unable to claim eCash from npub.cash.";
+        setNpubCashClaimStatus("error");
+        setNpubCashClaimMessage(message);
+      } finally {
+        npubCashClaimingRef.current = false;
+        if (npubCashClaimAbortRef.current === controller) {
+          npubCashClaimAbortRef.current = null;
+        }
+      }
+    },
+    [mintUrl, npubCashLightningAddressEnabled, receiveToken, setHistory],
+  );
+
   useEffect(() => {
     localStorage.setItem("cashuHistory", JSON.stringify(history));
   }, [history]);
+
+  useEffect(() => {
+    if (!npubCashLightningAddressEnabled) {
+      setNpubCashIdentity(null);
+      setNpubCashIdentityError(null);
+      return;
+    }
+    const storedSk = localStorage.getItem(LS_NOSTR_SK) || "";
+    if (!storedSk) {
+      setNpubCashIdentity(null);
+      setNpubCashIdentityError("Add your Taskify Nostr key in Settings → Nostr to use npub.cash.");
+      return;
+    }
+    try {
+      const identity = deriveNpubCashIdentity(storedSk);
+      setNpubCashIdentity({ npub: identity.npub, address: identity.address });
+      setNpubCashIdentityError(null);
+    } catch (err: any) {
+      setNpubCashIdentity(null);
+      setNpubCashIdentityError(err?.message || "Unable to derive npub.cash address.");
+    }
+  }, [npubCashLightningAddressEnabled, open]);
+
+  useEffect(() => {
+    if (!open || !npubCashLightningAddressEnabled || !npubCashAutoClaim) return;
+    void handleClaimNpubCash({ auto: true });
+  }, [open, npubCashLightningAddressEnabled, npubCashAutoClaim, handleClaimNpubCash]);
+
+  useEffect(() => {
+    return () => {
+      if (npubCashClaimAbortRef.current) {
+        npubCashClaimAbortRef.current.abort();
+        npubCashClaimAbortRef.current = null;
+      }
+      npubCashClaimingRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) {
@@ -1669,6 +1896,15 @@ export function CashuWalletModal({
             <span>eCash token</span>
             <span className="text-tertiary">→</span>
           </button>
+          {npubCashLightningAddressEnabled && (
+            <button
+              className="ghost-button button-sm pressable w-full justify-between"
+              onClick={()=>setReceiveMode("npubCashAddress")}
+            >
+              <span>Lightning address (npub.cash)</span>
+              <span className="text-tertiary">→</span>
+            </button>
+          )}
           <button className="ghost-button button-sm pressable w-full justify-between" onClick={()=>setReceiveMode("lightning")}>
             <span>Lightning invoice</span>
             <span className="text-tertiary">→</span>
@@ -1700,6 +1936,61 @@ export function CashuWalletModal({
             <button className="accent-button button-sm pressable" onClick={handleReceive} disabled={!mintUrl || !recvTokenStr}>Redeem</button>
             {recvMsg && <span className="text-xs">{recvMsg}</span>}
           </div>
+        </div>
+      </ActionSheet>
+
+      <ActionSheet
+        open={receiveMode === "npubCashAddress"}
+        onClose={()=>{
+          setReceiveMode(null);
+          setShowReceiveOptions(false);
+        }}
+        title="npub.cash Lightning address"
+      >
+        <div className="wallet-section space-y-3">
+          {npubCashIdentity ? (
+            <>
+              <QrCodeCard
+                value={npubCashIdentity.address}
+                label="Lightning address"
+                copyLabel="Copy address"
+              />
+              <div className="text-xs text-secondary">
+                Share this address to receive Lightning payments that arrive as Cashu tokens.
+              </div>
+              <div className="text-xs text-secondary break-all">Nostr npub: {npubCashIdentity.npub}</div>
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Claim pending eCash</div>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-secondary">
+                  <button
+                    className="accent-button button-sm pressable"
+                    onClick={() => { void handleClaimNpubCash(); }}
+                    disabled={npubCashClaimStatus === "checking"}
+                  >
+                    {npubCashClaimStatus === "checking" ? "Checking…" : "Claim now"}
+                  </button>
+                  {npubCashAutoClaim && (
+                    <span>Auto-claim runs when you open the wallet.</span>
+                  )}
+                </div>
+                {npubCashClaimMessage && (
+                  <div
+                    className={`text-xs ${
+                      npubCashClaimStatus === "error"
+                        ? "text-rose-500"
+                        : npubCashClaimStatus === "success"
+                          ? "text-emerald-500"
+                          : "text-secondary"
+                    }`}
+                  >
+                    {npubCashClaimMessage}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="text-xs text-secondary">{npubCashIdentityError || "Add your Taskify Nostr key to enable npub.cash."}</div>
+          )}
         </div>
       </ActionSheet>
 

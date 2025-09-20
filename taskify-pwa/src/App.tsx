@@ -4,6 +4,7 @@ import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip
 import { CashuWalletModal } from "./components/CashuWalletModal";
 import { useCashu } from "./context/CashuContext";
 import { LS_LIGHTNING_CONTACTS } from "./localStorageKeys";
+import { LS_NOSTR_RELAYS, LS_NOSTR_SK } from "./nostrKeys";
 import { loadStore as loadProofStore, saveStore as saveProofStore, getActiveMint, setActiveMint } from "./wallet/storage";
 import { encryptToBoard, decryptFromBoard, boardTag } from "./boardCrypto";
 import { useToast } from "./context/ToastContext";
@@ -117,6 +118,8 @@ type Settings = {
   startupView: "main" | "wallet";
   walletConversionEnabled: boolean;
   walletPrimaryCurrency: "sat" | "usd";
+  npubCashLightningAddressEnabled: boolean;
+  npubCashAutoClaim: boolean;
 };
 
 type AccentChoice = {
@@ -192,8 +195,6 @@ const R_NONE: Recurrence = { type: "none" };
 const LS_TASKS = "taskify_tasks_v4";
 const LS_SETTINGS = "taskify_settings_v2";
 const LS_BOARDS = "taskify_boards_v2";
-const LS_NOSTR_RELAYS = "taskify_nostr_relays_v1";
-const LS_NOSTR_SK = "taskify_nostr_sk_v1";
 const LS_TUTORIAL_DONE = "taskify_tutorial_done_v1";
 
 /* ================= Nostr minimal client ================= */
@@ -589,6 +590,8 @@ function useSettings() {
       const startupView = parsed?.startupView === "wallet" ? "wallet" : "main";
       const walletConversionEnabled = parsed?.walletConversionEnabled === true;
       const walletPrimaryCurrency = parsed?.walletPrimaryCurrency === "usd" ? "usd" : "sat";
+      const npubCashLightningAddressEnabled = parsed?.npubCashLightningAddressEnabled === true;
+      const npubCashAutoClaim = npubCashLightningAddressEnabled && parsed?.npubCashAutoClaim === true;
       if (parsed && typeof parsed === "object") {
         delete (parsed as Record<string, unknown>).theme;
         delete (parsed as Record<string, unknown>).backgroundAccents;
@@ -614,6 +617,8 @@ function useSettings() {
         startupView,
         walletConversionEnabled,
         walletPrimaryCurrency: walletConversionEnabled ? walletPrimaryCurrency : "sat",
+        npubCashLightningAddressEnabled,
+        npubCashAutoClaim: npubCashLightningAddressEnabled ? npubCashAutoClaim : false,
       };
     } catch {
       return {
@@ -635,6 +640,8 @@ function useSettings() {
         startupView: "main",
         walletConversionEnabled: false,
         walletPrimaryCurrency: "sat",
+        npubCashLightningAddressEnabled: false,
+        npubCashAutoClaim: false,
       };
     }
   });
@@ -674,6 +681,12 @@ function useSettings() {
         next.walletPrimaryCurrency = "sat";
       } else if (next.walletPrimaryCurrency !== "usd") {
         next.walletPrimaryCurrency = "sat";
+      }
+      if (!next.npubCashLightningAddressEnabled) {
+        next.npubCashLightningAddressEnabled = false;
+        next.npubCashAutoClaim = false;
+      } else if (next.npubCashAutoClaim !== true && next.npubCashAutoClaim !== false) {
+        next.npubCashAutoClaim = false;
       }
       return next;
     });
@@ -3434,6 +3447,8 @@ export default function App() {
           walletConversionEnabled={settings.walletConversionEnabled}
           walletPrimaryCurrency={settings.walletPrimaryCurrency}
           setWalletPrimaryCurrency={(currency) => setSettings({ walletPrimaryCurrency: currency })}
+          npubCashLightningAddressEnabled={settings.npubCashLightningAddressEnabled}
+          npubCashAutoClaim={settings.npubCashLightningAddressEnabled && settings.npubCashAutoClaim}
         />
       )}
     </div>
@@ -5766,6 +5781,40 @@ function SettingsModal({
                   >USD</button>
                 </div>
                 <div className="text-xs text-secondary mt-2">You can also tap the unit label in the wallet header to toggle.</div>
+              </div>
+            )}
+            <div>
+              <div className="text-sm font-medium mb-2">npub.cash lightning address</div>
+              <div className="flex gap-2">
+                <button
+                  className={pillButtonClass(settings.npubCashLightningAddressEnabled)}
+                  onClick={() => setSettings({ npubCashLightningAddressEnabled: true })}
+                >On</button>
+                <button
+                  className={pillButtonClass(!settings.npubCashLightningAddressEnabled)}
+                  onClick={() => setSettings({ npubCashLightningAddressEnabled: false, npubCashAutoClaim: false })}
+                >Off</button>
+              </div>
+              <div className="text-xs text-secondary mt-2">
+                Share a lightning address powered by npub.cash using your Taskify Nostr keys.
+              </div>
+            </div>
+            {settings.npubCashLightningAddressEnabled && (
+              <div>
+                <div className="text-sm font-medium mb-2">Auto-claim npub.cash eCash</div>
+                <div className="flex gap-2">
+                  <button
+                    className={pillButtonClass(settings.npubCashAutoClaim)}
+                    onClick={() => setSettings({ npubCashAutoClaim: true })}
+                  >On</button>
+                  <button
+                    className={pillButtonClass(!settings.npubCashAutoClaim)}
+                    onClick={() => setSettings({ npubCashAutoClaim: false })}
+                  >Off</button>
+                </div>
+                <div className="text-xs text-secondary mt-2">
+                  Automatically claim pending npub.cash tokens each time the wallet opens.
+                </div>
               </div>
             )}
           </div>

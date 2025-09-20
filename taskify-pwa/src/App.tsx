@@ -7,6 +7,7 @@ import { LS_LIGHTNING_CONTACTS } from "./localStorageKeys";
 import { loadStore as loadProofStore, saveStore as saveProofStore, getActiveMint, setActiveMint } from "./wallet/storage";
 import { encryptToBoard, decryptFromBoard, boardTag } from "./boardCrypto";
 import { useToast } from "./context/ToastContext";
+import { AccentPalette, BackgroundImageError, normalizeAccentPalette, normalizeAccentPaletteList, prepareBackgroundImage } from "./theme/palette";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sun
@@ -106,14 +107,30 @@ type Settings = {
   // Base UI font size in pixels; null uses the OS preferred size
   baseFontSize: number | null;
   startBoardByDay: Partial<Record<Weekday, string>>;
-  accent: "green" | "blue";
+  accent: "green" | "blue" | "background";
+  backgroundImage?: string | null;
+  backgroundAccent?: AccentPalette | null;
+  backgroundAccents?: AccentPalette[] | null;
+  backgroundAccentIndex?: number | null;
+  backgroundBlur: "blurred" | "sharp";
   hideCompletedSubtasks: boolean;
   startupView: "main" | "wallet";
   walletConversionEnabled: boolean;
   walletPrimaryCurrency: "sat" | "usd";
 };
 
-const ACCENT_CHOICES = [
+type AccentChoice = {
+  id: "blue" | "green";
+  label: string;
+  fill: string;
+  ring: string;
+  border: string;
+  borderActive: string;
+  shadow: string;
+  shadowActive: string;
+};
+
+const ACCENT_CHOICES: AccentChoice[] = [
   {
     id: "blue",
     label: "iMessage blue",
@@ -134,16 +151,42 @@ const ACCENT_CHOICES = [
     shadow: "0 12px 24px rgba(52, 199, 89, 0.28)",
     shadowActive: "0 18px 32px rgba(52, 199, 89, 0.38)",
   },
-] satisfies Array<{
-  id: Settings["accent"];
-  label: string;
-  fill: string;
-  ring: string;
-  border: string;
-  borderActive: string;
-  shadow: string;
-  shadowActive: string;
-}>;
+];
+
+const CUSTOM_ACCENT_VARIABLES: ReadonlyArray<[string, keyof AccentPalette]> = [
+  ["--accent", "fill"],
+  ["--accent-hover", "hover"],
+  ["--accent-active", "active"],
+  ["--accent-soft", "soft"],
+  ["--accent-border", "border"],
+  ["--accent-on", "on"],
+  ["--accent-glow", "glow"],
+];
+
+function gradientFromPalette(palette: AccentPalette, hasImage: boolean): string {
+  const primary = hexToRgba(palette.fill, 0.24);
+  const secondary = hexToRgba(palette.fill, 0.14);
+  const baseAlpha = hasImage ? 0.65 : 0.95;
+  return `radial-gradient(circle at 18% -10%, ${primary}, transparent 60%),` +
+    `radial-gradient(circle at 82% -12%, ${secondary}, transparent 65%),` +
+    `rgba(6, 9, 18, ${baseAlpha})`;
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  let value = hex.replace(/^#/, "");
+  if (value.length === 3) {
+    value = value.split("").map(ch => ch + ch).join("");
+  }
+  const int = parseInt(value.slice(0, 6), 16);
+  if (Number.isNaN(int)) {
+    return `rgba(52, 199, 89, ${Math.min(1, Math.max(0, alpha))})`;
+  }
+  const r = (int >> 16) & 255;
+  const g = (int >> 8) & 255;
+  const b = int & 255;
+  const clampedAlpha = Math.min(1, Math.max(0, alpha));
+  return `rgba(${r}, ${g}, ${b}, ${clampedAlpha})`;
+}
 
 const R_NONE: Recurrence = { type: "none" };
 const LS_TASKS = "taskify_tasks_v4";
@@ -520,13 +563,36 @@ function useSettings() {
           startBoardByDay[day as Weekday] = value;
         }
       }
-      const accent = parsed?.accent === "green" ? "green" : "blue";
+      const backgroundImage = typeof parsed?.backgroundImage === "string" ? parsed.backgroundImage : null;
+      let backgroundAccents = normalizeAccentPaletteList(parsed?.backgroundAccents) ?? null;
+      let backgroundAccentIndex = typeof parsed?.backgroundAccentIndex === "number" ? parsed.backgroundAccentIndex : null;
+      let backgroundAccent = normalizeAccentPalette(parsed?.backgroundAccent) ?? null;
+      if (!backgroundAccents || backgroundAccents.length === 0) {
+        backgroundAccents = null;
+        backgroundAccentIndex = null;
+      } else {
+        if (backgroundAccentIndex == null || backgroundAccentIndex < 0 || backgroundAccentIndex >= backgroundAccents.length) {
+          backgroundAccentIndex = 0;
+        }
+        if (!backgroundAccent) backgroundAccent = backgroundAccents[backgroundAccentIndex];
+      }
+      if (!backgroundImage) {
+        backgroundAccents = null;
+        backgroundAccentIndex = null;
+        backgroundAccent = null;
+      }
+      const backgroundBlur = parsed?.backgroundBlur === "blurred" ? "blurred" : "sharp";
+      let accent: Settings["accent"] = "blue";
+      if (parsed?.accent === "green") accent = "green";
+      else if (parsed?.accent === "background" && backgroundImage && backgroundAccent) accent = "background";
       const hideCompletedSubtasks = parsed?.hideCompletedSubtasks === true;
       const startupView = parsed?.startupView === "wallet" ? "wallet" : "main";
       const walletConversionEnabled = parsed?.walletConversionEnabled === true;
       const walletPrimaryCurrency = parsed?.walletPrimaryCurrency === "usd" ? "usd" : "sat";
       if (parsed && typeof parsed === "object") {
         delete (parsed as Record<string, unknown>).theme;
+        delete (parsed as Record<string, unknown>).backgroundAccents;
+        delete (parsed as Record<string, unknown>).backgroundAccentIndex;
       }
       return {
         weekStart: 0,
@@ -540,6 +606,11 @@ function useSettings() {
         baseFontSize,
         startBoardByDay,
         accent,
+        backgroundImage,
+        backgroundAccent,
+        backgroundAccents,
+        backgroundAccentIndex,
+        backgroundBlur,
         startupView,
         walletConversionEnabled,
         walletPrimaryCurrency: walletConversionEnabled ? walletPrimaryCurrency : "sat",
@@ -555,6 +626,11 @@ function useSettings() {
         baseFontSize: null,
         startBoardByDay: {},
         accent: "blue",
+        backgroundImage: null,
+        backgroundAccent: null,
+        backgroundAccents: null,
+        backgroundAccentIndex: null,
+        backgroundBlur: "sharp",
         hideCompletedSubtasks: false,
         startupView: "main",
         walletConversionEnabled: false,
@@ -565,6 +641,35 @@ function useSettings() {
   const setSettings = useCallback((s: Partial<Settings>) => {
     setSettingsRaw(prev => {
       const next = { ...prev, ...s };
+      if (!next.backgroundImage) {
+        next.backgroundImage = null;
+        next.backgroundAccent = null;
+        next.backgroundAccents = null;
+        next.backgroundAccentIndex = null;
+      } else {
+        next.backgroundAccent = normalizeAccentPalette(next.backgroundAccent) ?? next.backgroundAccent ?? null;
+        const normalizedList = normalizeAccentPaletteList(next.backgroundAccents);
+        next.backgroundAccents = normalizedList && normalizedList.length ? normalizedList : null;
+        if (next.backgroundAccents?.length) {
+          if (typeof next.backgroundAccentIndex !== "number" || next.backgroundAccentIndex < 0 || next.backgroundAccentIndex >= next.backgroundAccents.length) {
+            next.backgroundAccentIndex = 0;
+          }
+          next.backgroundAccent = next.backgroundAccents[next.backgroundAccentIndex];
+        } else {
+          next.backgroundAccents = null;
+          next.backgroundAccentIndex = null;
+          if (next.backgroundAccent) {
+            next.backgroundAccents = [next.backgroundAccent];
+            next.backgroundAccentIndex = 0;
+          }
+        }
+      }
+      if (next.backgroundBlur !== "sharp" && next.backgroundBlur !== "blurred") {
+        next.backgroundBlur = "sharp";
+      }
+      if (next.accent === "background" && (!next.backgroundImage || !next.backgroundAccent)) {
+        next.accent = "blue";
+      }
       if (!next.walletConversionEnabled) {
         next.walletPrimaryCurrency = "sat";
       } else if (next.walletPrimaryCurrency !== "usd") {
@@ -730,6 +835,7 @@ export default function App() {
   const currentBoard = boards.find(b => b.id === currentBoardId);
   const visibleBoards = useMemo(() => boards.filter(b => !b.archived && !b.hidden), [boards]);
 
+
   useEffect(() => {
     const current = boards.find(b => b.id === currentBoardId);
     if (current && !current.archived && !current.hidden) return;
@@ -796,10 +902,49 @@ export default function App() {
   useEffect(() => {
     try {
       const root = document.documentElement;
+      const style = root.style;
       if (settings.accent === "green") root.setAttribute("data-accent", "green");
       else root.removeAttribute("data-accent");
-    } catch {}
-  }, [settings.accent]);
+
+      const palette = settings.accent === "background" ? settings.backgroundAccent ?? null : null;
+      const hasBackgroundImage = Boolean(settings.backgroundImage);
+      for (const [cssVar, key] of CUSTOM_ACCENT_VARIABLES) {
+        if (palette) style.setProperty(cssVar, palette[key]);
+        else style.removeProperty(cssVar);
+      }
+      if (palette) {
+        style.setProperty("--background-gradient", gradientFromPalette(palette, hasBackgroundImage));
+      } else {
+        style.removeProperty("--background-gradient");
+      }
+    } catch (err) {
+      console.error('Failed to apply accent palette', err);
+    }
+  }, [settings.accent, settings.backgroundAccent, settings.backgroundImage]);
+
+  useEffect(() => {
+    try {
+      const root = document.documentElement;
+      const style = root.style;
+      if (settings.backgroundImage) {
+        style.setProperty("--background-image", `url("${settings.backgroundImage}")`);
+        style.setProperty("--background-image-opacity", "1");
+        const blurMode = settings.backgroundBlur;
+        const overlay = blurMode === "sharp" ? "0.1" : "0.18";
+        style.setProperty("--background-overlay-opacity", overlay);
+        style.setProperty("--background-image-filter", blurMode === "sharp" ? "none" : "blur(36px)");
+        style.setProperty("--background-image-scale", blurMode === "sharp" ? "1.02" : "1.08");
+      } else {
+        style.removeProperty("--background-image");
+        style.removeProperty("--background-image-opacity");
+        style.removeProperty("--background-overlay-opacity");
+        style.removeProperty("--background-image-filter");
+        style.removeProperty("--background-image-scale");
+      }
+    } catch (err) {
+      console.error('Failed to apply background image', err);
+    }
+  }, [settings.backgroundImage, settings.backgroundBlur]);
 
   // Nostr pool + merge indexes
   const pool = useMemo(() => createNostrPool(), []);
@@ -1138,8 +1283,6 @@ export default function App() {
   // upcoming drawer (out-of-the-way FAB)
   const [showUpcoming, setShowUpcoming] = useState(false);
 
-  // confetti
-  const confettiRef = useRef<HTMLDivElement>(null);
   // fly-to-completed overlay + target
   const flyLayerRef = useRef<HTMLDivElement>(null);
   const completedTabRef = useRef<HTMLButtonElement>(null);
@@ -1162,27 +1305,6 @@ export default function App() {
     if (el) inlineInputRefs.current.set(key, el);
     else inlineInputRefs.current.delete(key);
   }, []);
-  function burst() {
-    const el = confettiRef.current;
-    if (!el) return;
-    for (let i = 0; i < 18; i++) {
-      const s = document.createElement("span");
-      s.textContent = ["🎉", "✨", "🎊", "💥"][i % 4];
-      s.style.position = "absolute";
-      s.style.left = Math.random() * 100 + "%";
-      s.style.top = "-10px";
-      s.style.transition = "transform 1s ease, opacity 1.1s ease";
-      el.appendChild(s);
-      requestAnimationFrame(() => {
-        s.style.transform = `translateY(${
-          80 + Math.random() * 120
-        }px) rotate(${(Math.random() * 360) | 0}deg)`;
-        s.style.opacity = "0";
-        setTimeout(() => el.removeChild(s), 1200);
-      });
-    }
-  }
-
   function flyToCompleted(from: DOMRect) {
     const layer = flyLayerRef.current;
     const targetEl = completedTabRef.current;
@@ -2064,7 +2186,6 @@ export default function App() {
       }
       return updated;
     });
-    burst();
   }
 
   function toggleSubtask(taskId: string, subId: string) {
@@ -2469,7 +2590,6 @@ export default function App() {
       <div className="mx-auto max-w-7xl space-y-5">
         {/* Header */}
         <header className="relative space-y-3">
-          <div ref={confettiRef} className="pointer-events-none absolute inset-x-0 -top-2 z-20 h-0" />
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex flex-col gap-1 justify-end -translate-y-[2px]">
               <h1 className="text-3xl font-semibold tracking-tight">
@@ -2521,7 +2641,7 @@ export default function App() {
                   createPortal(
                     <div
                       ref={boardDropListRef}
-                      className="surface-panel fixed z-50 w-56 p-2"
+                      className="glass-panel fixed z-50 w-56 p-2"
                       style={{ top: boardDropPos.top, left: boardDropPos.left }}
                       onDragOver={e => {
                         if (!draggingTaskId) return;
@@ -2560,7 +2680,7 @@ export default function App() {
               </div>
             </div>
             <div className="ml-auto">
-              <div className="control-matrix">
+              <div className="control-matrix glass-panel">
                 <button
                   className="control-matrix__btn pressable"
                   onClick={() => setNostrRefresh(n => n + 1)}
@@ -2595,7 +2715,7 @@ export default function App() {
                     className="h-[18px] w-[18px]"
                     fill="none"
                     viewBox="0 0 24 24"
-                    stroke="currentColor"
+                    stroke="#fff"
                     strokeWidth={1.8}
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -2644,7 +2764,7 @@ export default function App() {
                       className="h-[18px] w-[18px]"
                       fill="none"
                       viewBox="0 0 24 24"
-                      stroke="currentColor"
+                      stroke="#fff"
                       strokeWidth={1.8}
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -2698,7 +2818,7 @@ export default function App() {
 
         {/* Add bar */}
         {(view === "board" || !settings.completedTab) && currentBoard && !settings.inlineAdd && (
-          <div className="flex flex-wrap gap-2 items-center mb-4">
+          <div className="glass-panel flex flex-wrap gap-2 items-center w-full p-3 mb-4">
             <input
               ref={newTitleRef}
               value={newTitle}
@@ -2974,7 +3094,7 @@ export default function App() {
           )
         ) : (
           // Completed view
-          <div className="surface-panel p-4">
+          <div className="surface-panel board-column p-4">
             <div className="flex items-center gap-2 mb-3">
               <div className="text-lg font-semibold">Completed</div>
               <div className="ml-auto">
@@ -3611,7 +3731,7 @@ function Card({
   const titleRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
   const [isStacked, setIsStacked] = useState(false);
-  const iconSizeStyle = useMemo(() => ({ '--icon-size': '2.2rem' } as React.CSSProperties), []);
+  const iconSizeStyle = useMemo(() => ({ '--icon-size': '1.85rem' } as React.CSSProperties), []);
   const visibleSubtasks = useMemo(() => (
     hideCompletedSubtasks
       ? (task.subtasks?.filter((st) => !st.completed) ?? [])
@@ -3732,24 +3852,13 @@ function Card({
           style={iconSizeStyle}
           data-active={task.completed}
         >
-          {task.completed ? (
+          {task.completed && (
             <svg width="18" height="18" viewBox="0 0 24 24" className="pointer-events-none">
               <path
                 d="M20.285 6.707l-10.09 10.09-4.48-4.48"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth={2.2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          ) : (
-            <svg width="18" height="18" viewBox="0 0 24 24" className="pointer-events-none">
-              <path
-                d="M6 12l3.5 3.5L18 7"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.9}
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
@@ -4713,6 +4822,60 @@ function SettingsModal({
   const [donateState, setDonateState] = useState<"idle" | "sending" | "done" | "error">("idle");
   const [donateMsg, setDonateMsg] = useState("");
   const pillButtonClass = useCallback((active: boolean) => `${active ? "accent-button" : "ghost-button"} pressable`, []);
+  const backgroundInputRef = useRef<HTMLInputElement | null>(null);
+  const backgroundAccentHex = settings.backgroundAccent ? settings.backgroundAccent.fill.toUpperCase() : null;
+
+  const handleBackgroundImageSelection = useCallback(async (file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      showToast("Please choose an image file");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      showToast("Image too large. Please pick something under 8 MB.");
+      return;
+    }
+    try {
+      const { dataUrl, palettes } = await prepareBackgroundImage(file);
+      const primary = palettes[0] ?? null;
+      setSettings({
+        backgroundImage: dataUrl,
+        backgroundAccents: palettes,
+        backgroundAccentIndex: primary ? 0 : null,
+        backgroundAccent: primary,
+        accent: primary ? "background" : "blue",
+      });
+      showToast("Background updated");
+    } catch (err) {
+      if (err instanceof BackgroundImageError) {
+        showToast(err.message);
+      } else {
+        console.error("Failed to process background image", err);
+        showToast("Could not load that image");
+      }
+    }
+  }, [setSettings, showToast]);
+
+  const clearBackgroundImage = useCallback(() => {
+    setSettings({
+      backgroundImage: null,
+      backgroundAccent: null,
+      backgroundAccents: null,
+      backgroundAccentIndex: null,
+      accent: "blue",
+    });
+    showToast("Background cleared");
+  }, [setSettings, showToast]);
+  const photoAccents = settings.backgroundAccents ?? [];
+  const handleSelectPhotoAccent = useCallback((index: number) => {
+    const palette = settings.backgroundAccents?.[index];
+    if (!palette) return;
+    setSettings({
+      backgroundAccent: palette,
+      backgroundAccentIndex: index,
+      accent: "background",
+    });
+  }, [setSettings, settings.backgroundAccents]);
 
   useEffect(() => {
     const listEl = boardListRef.current;
@@ -5351,8 +5514,88 @@ function SettingsModal({
           {showViewAdvanced && (
             <div className="mt-4 border-t border-neutral-800 pt-4 space-y-4">
               <div>
+                <div className="text-sm font-medium mb-2">Background</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    className="accent-button button-sm pressable"
+                    onClick={() => backgroundInputRef.current?.click()}
+                  >
+                    Upload image
+                  </button>
+                  {settings.backgroundImage && (
+                    <button
+                      className="ghost-button button-sm pressable"
+                      onClick={clearBackgroundImage}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <input
+                  ref={backgroundInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files && event.target.files[0] ? event.target.files[0] : null;
+                    handleBackgroundImageSelection(file);
+                    event.currentTarget.value = "";
+                  }}
+                />
+                <div className="text-xs text-secondary mt-2">Upload a photo to replace the gradient background. Taskify blurs it and matches the accent color automatically.</div>
+                {settings.backgroundImage && (
+                  <div className="mt-3 space-y-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="relative w-16 h-12 overflow-hidden rounded-xl border border-surface bg-surface-muted">
+                        <div
+                          className="absolute inset-0"
+                          style={{
+                            backgroundImage: `url(${settings.backgroundImage})`,
+                            backgroundSize: 'cover',
+                            backgroundPosition: 'center',
+                          }}
+                        />
+                      </div>
+                      {settings.backgroundAccent && backgroundAccentHex && (
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-secondary">
+                          <span className="inline-flex items-center gap-1 rounded-full border border-surface bg-surface-muted px-2 py-1">
+                            <span
+                              className="w-3 h-3 rounded-full"
+                              style={{
+                                background: settings.backgroundAccent.fill,
+                                border: '1px solid rgba(255, 255, 255, 0.35)',
+                              }}
+                            />
+                            <span>{backgroundAccentHex}</span>
+                          </span>
+                          <span>{settings.accent === 'background' ? 'Accent follows the photo color you picked.' : 'Pick a photo accent below to sync buttons and badges.'}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <div className="text-xs text-secondary mb-1">Background clarity</div>
+                      <div className="flex gap-2">
+                        <button
+                          className={pillButtonClass(settings.backgroundBlur !== 'sharp')}
+                          onClick={() => setSettings({ backgroundBlur: 'blurred' })}
+                        >
+                          Blurred
+                        </button>
+                        <button
+                          className={pillButtonClass(settings.backgroundBlur === 'sharp')}
+                          onClick={() => setSettings({ backgroundBlur: 'sharp' })}
+                        >
+                          Sharp
+                        </button>
+                      </div>
+                      <div className="text-xs text-secondary mt-2">Blur softens distractions; Sharp keeps the photo crisp behind your boards.</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div>
                 <div className="text-sm font-medium mb-2">Accent color</div>
-                <div className="flex gap-3">
+                <div className="flex flex-wrap gap-3">
                   {ACCENT_CHOICES.map((choice) => {
                     const active = settings.accent === choice.id;
                     return (
@@ -5377,7 +5620,43 @@ function SettingsModal({
                     );
                   })}
                 </div>
-                <div className="text-xs text-secondary mt-2">Switch the highlight color used across buttons, badges, and focus states.</div>
+                {photoAccents.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    <div className="text-xs text-secondary uppercase tracking-[0.12em]">Photo accents</div>
+                    <div className="flex flex-wrap gap-3">
+                      {photoAccents.map((palette, index) => {
+                        const active = settings.accent === 'background' && settings.backgroundAccentIndex === index;
+                        return (
+                          <button
+                            key={`photo-accent-${index}`}
+                            type="button"
+                            className={`accent-swatch pressable ${active ? 'accent-swatch--active' : ''}`}
+                            style={{
+                              "--swatch-color": palette.fill,
+                              "--swatch-ring": palette.ring,
+                              "--swatch-border": palette.border,
+                              "--swatch-border-active": palette.borderActive,
+                              "--swatch-shadow": palette.shadow,
+                              "--swatch-active-shadow": palette.shadowActive,
+                            } as React.CSSProperties}
+                            aria-label={`Photo accent ${index + 1}`}
+                            aria-pressed={active}
+                            onClick={() => handleSelectPhotoAccent(index)}
+                          >
+                            <span className="sr-only">Photo accent {index + 1}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                <div className="text-xs text-secondary mt-2">
+                  {photoAccents.length > 0
+                    ? settings.accent === 'background'
+                      ? 'Buttons, badges, and focus states now use the photo accent you chose.'
+                      : 'Choose one of your photo accents above or stick with the presets.'
+                    : 'Switch the highlight color used across buttons, badges, and focus states.'}
+                </div>
               </div>
               <div>
                 <div className="text-sm font-medium mb-2">Week starts on</div>

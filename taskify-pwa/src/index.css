@@ -677,10 +677,21 @@ html.light .board-column[data-drop-over="true"] {
   letter-spacing: -0.02em;
 }
 
+.wallet-balance-card__secondary {
+  margin-top: 0.45rem;
+  font-size: clamp(1rem, 3vw, 1.3rem);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
 .wallet-balance-card__meta {
   margin-top: 0.5rem;
   font-size: 0.85rem;
   color: var(--text-secondary);
+}
+
+.wallet-balance-card__meta > div + div {
+  margin-top: 0.25rem;
 }
 
 .wallet-modal__cta {

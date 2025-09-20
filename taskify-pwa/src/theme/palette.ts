@@ -77,6 +77,186 @@ export async function readFileAsDataURL(file: File): Promise<string> {
   });
 }
 
+const DEFAULT_BACKGROUND_MAX_DIMENSION = 1600;
+const DEFAULT_BACKGROUND_MAX_BYTES = 760 * 1024; // keep payload well under Safari localStorage limits
+
+const BACKGROUND_IMAGE_ERROR_MESSAGES = {
+  decode_failed: "Could not read that photo. Try exporting it as JPEG and upload again.",
+  processing_failed: "We hit a snag preparing that photo. Please try a different one.",
+  too_large: "That photo is too large to store offline. Try cropping or resizing it first.",
+} as const;
+
+export class BackgroundImageError extends Error {
+  readonly code: keyof typeof BACKGROUND_IMAGE_ERROR_MESSAGES;
+
+  constructor(code: keyof typeof BACKGROUND_IMAGE_ERROR_MESSAGES, message?: string) {
+    super(message ?? BACKGROUND_IMAGE_ERROR_MESSAGES[code]);
+    this.name = "BackgroundImageError";
+    this.code = code;
+  }
+}
+
+type PreparedImageOptions = {
+  maxDimension?: number;
+  maxBytes?: number;
+};
+
+type DecodedImage = {
+  source: CanvasImageSource;
+  width: number;
+  height: number;
+  cleanup?: () => void;
+  fallbackDataUrl?: string;
+};
+
+export async function prepareBackgroundImage(
+  file: File,
+  options?: PreparedImageOptions,
+): Promise<{ dataUrl: string; palettes: AccentPalette[] }> {
+  const maxDimension = options?.maxDimension ?? DEFAULT_BACKGROUND_MAX_DIMENSION;
+  const maxBytes = options?.maxBytes ?? DEFAULT_BACKGROUND_MAX_BYTES;
+
+  let decoded: DecodedImage;
+  try {
+    decoded = await decodeImageFile(file);
+  } catch (err) {
+    if (err instanceof BackgroundImageError) throw err;
+    throw new BackgroundImageError("decode_failed", err instanceof Error ? err.message : String(err));
+  }
+
+  try {
+    const dataUrl = renderCompressedDataUrl(decoded, { maxDimension, maxBytes });
+    const palettes = await buildAccentPalettesFromImage(dataUrl);
+    return { dataUrl, palettes };
+  } finally {
+    decoded.cleanup?.();
+  }
+}
+
+async function decodeImageFile(file: File): Promise<DecodedImage> {
+  if (typeof createImageBitmap === "function") {
+    try {
+      const bitmap = await createImageBitmap(file);
+      return {
+        source: bitmap,
+        width: bitmap.width,
+        height: bitmap.height,
+        cleanup: () => bitmap.close(),
+      };
+    } catch (err) {
+      console.warn("createImageBitmap failed", err);
+    }
+  }
+
+  let dataUrl: string;
+  try {
+    dataUrl = await readFileAsDataURL(file);
+  } catch (err) {
+    throw new BackgroundImageError("decode_failed", err instanceof Error ? err.message : String(err));
+  }
+
+  try {
+    const image = await loadImage(dataUrl);
+    const width = image.naturalWidth || image.width;
+    const height = image.naturalHeight || image.height;
+    if (!width || !height) {
+      throw new BackgroundImageError("decode_failed");
+    }
+    return {
+      source: image,
+      width,
+      height,
+      fallbackDataUrl: dataUrl,
+    };
+  } catch (err) {
+    if (err instanceof BackgroundImageError) throw err;
+    throw new BackgroundImageError("decode_failed", err instanceof Error ? err.message : String(err));
+  }
+}
+
+function renderCompressedDataUrl(
+  decoded: DecodedImage,
+  { maxDimension, maxBytes }: { maxDimension: number; maxBytes: number },
+): string {
+  const { source, width, height, fallbackDataUrl } = decoded;
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) {
+    if (fallbackDataUrl) return fallbackDataUrl;
+    throw new BackgroundImageError("processing_failed");
+  }
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  const mimeCandidates: Array<"image/webp" | "image/jpeg"> = ["image/webp", "image/jpeg"];
+  const qualitySteps = [0.85, 0.75, 0.65, 0.55];
+  const maxResizeAttempts = 5;
+
+  const largestSide = Math.max(width, height);
+  let scale = largestSide > 0 ? Math.min(1, maxDimension / largestSide) : 1;
+  if (!Number.isFinite(scale) || scale <= 0) scale = 1;
+
+  let targetWidth = Math.max(1, Math.round(width * scale));
+  let targetHeight = Math.max(1, Math.round(height * scale));
+  let bestCandidate: { dataUrl: string; bytes: number } | null = null;
+
+  for (let resizeAttempt = 0; resizeAttempt < maxResizeAttempts; resizeAttempt += 1) {
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    ctx.clearRect(0, 0, targetWidth, targetHeight);
+    ctx.drawImage(source, 0, 0, targetWidth, targetHeight);
+
+    for (const mimeType of mimeCandidates) {
+      for (const quality of qualitySteps) {
+        const encoded = encodeCanvas(canvas, mimeType, quality);
+        if (!encoded) continue;
+        const bytes = estimateDataUrlBytes(encoded);
+        if (!bestCandidate || bytes < bestCandidate.bytes) {
+          bestCandidate = { dataUrl: encoded, bytes };
+        }
+        if (bytes <= maxBytes) {
+          return encoded;
+        }
+      }
+    }
+
+    targetWidth = Math.max(1, Math.round(targetWidth * 0.82));
+    targetHeight = Math.max(1, Math.round(targetHeight * 0.82));
+  }
+
+  if (bestCandidate && bestCandidate.bytes <= maxBytes) {
+    return bestCandidate.dataUrl;
+  }
+
+  if (fallbackDataUrl) {
+    const fallbackBytes = estimateDataUrlBytes(fallbackDataUrl);
+    if (fallbackBytes <= maxBytes) {
+      return fallbackDataUrl;
+    }
+  }
+
+  throw new BackgroundImageError("too_large");
+}
+
+function encodeCanvas(canvas: HTMLCanvasElement, mimeType: "image/webp" | "image/jpeg", quality: number): string | null {
+  try {
+    const dataUrl = canvas.toDataURL(mimeType, quality);
+    if (mimeType === "image/jpeg" && dataUrl.startsWith("data:image/jpeg")) return dataUrl;
+    if (mimeType === "image/webp" && dataUrl.startsWith("data:image/webp")) return dataUrl;
+  } catch (err) {
+    console.warn("Failed to encode canvas", err);
+  }
+  return null;
+}
+
+function estimateDataUrlBytes(dataUrl: string): number {
+  const commaIndex = dataUrl.indexOf(",");
+  if (commaIndex === -1) return 0;
+  const base64 = dataUrl.slice(commaIndex + 1);
+  return Math.floor((base64.length * 3) / 4);
+}
+
 export async function buildAccentPalettesFromImage(dataUrl: string): Promise<AccentPalette[]> {
   const image = await loadImage(dataUrl);
   const samples = sampleImage(image);

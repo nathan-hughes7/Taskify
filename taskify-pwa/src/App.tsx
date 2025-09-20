@@ -7,7 +7,7 @@ import { LS_LIGHTNING_CONTACTS } from "./localStorageKeys";
 import { loadStore as loadProofStore, saveStore as saveProofStore, getActiveMint, setActiveMint } from "./wallet/storage";
 import { encryptToBoard, decryptFromBoard, boardTag } from "./boardCrypto";
 import { useToast } from "./context/ToastContext";
-import { AccentPalette, buildAccentPalettesFromImage, normalizeAccentPalette, normalizeAccentPaletteList, readFileAsDataURL } from "./theme/palette";
+import { AccentPalette, BackgroundImageError, normalizeAccentPalette, normalizeAccentPaletteList, prepareBackgroundImage } from "./theme/palette";
 
 /* ================= Types ================= */
 type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sun
@@ -4870,8 +4870,7 @@ function SettingsModal({
       return;
     }
     try {
-      const dataUrl = await readFileAsDataURL(file);
-      const palettes = await buildAccentPalettesFromImage(dataUrl);
+      const { dataUrl, palettes } = await prepareBackgroundImage(file);
       const primary = palettes[0] ?? null;
       setSettings({
         backgroundImage: dataUrl,
@@ -4882,8 +4881,12 @@ function SettingsModal({
       });
       showToast("Background updated");
     } catch (err) {
-      console.error("Failed to process background image", err);
-      showToast("Could not load that image");
+      if (err instanceof BackgroundImageError) {
+        showToast(err.message);
+      } else {
+        console.error("Failed to process background image", err);
+        showToast("Could not load that image");
+      }
     }
   }, [setSettings, showToast]);
 

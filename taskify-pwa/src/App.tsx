@@ -1283,8 +1283,6 @@ export default function App() {
   // upcoming drawer (out-of-the-way FAB)
   const [showUpcoming, setShowUpcoming] = useState(false);
 
-  // confetti
-  const confettiRef = useRef<HTMLDivElement>(null);
   // fly-to-completed overlay + target
   const flyLayerRef = useRef<HTMLDivElement>(null);
   const completedTabRef = useRef<HTMLButtonElement>(null);
@@ -1307,27 +1305,6 @@ export default function App() {
     if (el) inlineInputRefs.current.set(key, el);
     else inlineInputRefs.current.delete(key);
   }, []);
-  function burst() {
-    const el = confettiRef.current;
-    if (!el) return;
-    for (let i = 0; i < 18; i++) {
-      const s = document.createElement("span");
-      s.textContent = ["🎉", "✨", "🎊", "💥"][i % 4];
-      s.style.position = "absolute";
-      s.style.left = Math.random() * 100 + "%";
-      s.style.top = "-10px";
-      s.style.transition = "transform 1s ease, opacity 1.1s ease";
-      el.appendChild(s);
-      requestAnimationFrame(() => {
-        s.style.transform = `translateY(${
-          80 + Math.random() * 120
-        }px) rotate(${(Math.random() * 360) | 0}deg)`;
-        s.style.opacity = "0";
-        setTimeout(() => el.removeChild(s), 1200);
-      });
-    }
-  }
-
   function flyToCompleted(from: DOMRect) {
     const layer = flyLayerRef.current;
     const targetEl = completedTabRef.current;
@@ -2209,7 +2186,6 @@ export default function App() {
       }
       return updated;
     });
-    burst();
   }
 
   function toggleSubtask(taskId: string, subId: string) {
@@ -2614,7 +2590,6 @@ export default function App() {
       <div className="mx-auto max-w-7xl space-y-5">
         {/* Header */}
         <header className="relative space-y-3">
-          <div ref={confettiRef} className="pointer-events-none absolute inset-x-0 -top-2 z-20 h-0" />
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex flex-col gap-1 justify-end -translate-y-[2px]">
               <h1 className="text-3xl font-semibold tracking-tight">

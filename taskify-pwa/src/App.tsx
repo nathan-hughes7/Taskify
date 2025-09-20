@@ -3873,7 +3873,7 @@ function Card({
           onClick={handleCompleteClick}
           aria-label={task.completed ? 'Mark incomplete' : 'Complete task'}
           title={task.completed ? 'Mark incomplete' : 'Mark complete'}
-          className="icon-button pressable flex-shrink-0"
+          className="icon-button pressable flex-shrink-0 task-card__complete-button"
           style={iconSizeStyle}
           data-active={task.completed}
         >

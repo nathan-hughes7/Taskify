@@ -3756,7 +3756,7 @@ function Card({
   const titleRef = useRef<HTMLDivElement>(null);
   const [overBefore, setOverBefore] = useState(false);
   const [isStacked, setIsStacked] = useState(false);
-  const iconSizeStyle = useMemo(() => ({ '--icon-size': '2.2rem' } as React.CSSProperties), []);
+  const iconSizeStyle = useMemo(() => ({ '--icon-size': '1.85rem' } as React.CSSProperties), []);
   const visibleSubtasks = useMemo(() => (
     hideCompletedSubtasks
       ? (task.subtasks?.filter((st) => !st.completed) ?? [])

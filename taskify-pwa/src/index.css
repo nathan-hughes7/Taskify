@@ -688,14 +688,20 @@ html.light .task-card:hover {
 }
 
 .task-card[data-state="completed"] {
-  opacity: 0.82;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.06));
-  border-color: rgba(255, 255, 255, 0.16);
+  opacity: 1;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.08));
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow:
+    var(--shadow-soft),
+    0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 html.light .task-card[data-state="completed"] {
-  background: linear-gradient(180deg, rgba(12, 24, 63, 0.1), rgba(12, 24, 63, 0.04));
-  border-color: rgba(12, 24, 63, 0.18);
+  background: linear-gradient(180deg, rgba(12, 24, 63, 0.14), rgba(12, 24, 63, 0.05));
+  border-color: rgba(12, 24, 63, 0.22);
+  box-shadow:
+    var(--shadow-soft),
+    0 0 0 1px rgba(12, 24, 63, 0.08);
 }
 
 .task-card[data-form="stacked"] {

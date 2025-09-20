@@ -581,7 +581,7 @@ function useSettings() {
         backgroundAccentIndex = null;
         backgroundAccent = null;
       }
-      const backgroundBlur = parsed?.backgroundBlur === "sharp" ? "sharp" : "blurred";
+      const backgroundBlur = parsed?.backgroundBlur === "blurred" ? "blurred" : "sharp";
       let accent: Settings["accent"] = "blue";
       if (parsed?.accent === "green") accent = "green";
       else if (parsed?.accent === "background" && backgroundImage && backgroundAccent) accent = "background";
@@ -630,7 +630,7 @@ function useSettings() {
         backgroundAccent: null,
         backgroundAccents: null,
         backgroundAccentIndex: null,
-        backgroundBlur: "blurred",
+        backgroundBlur: "sharp",
         hideCompletedSubtasks: false,
         startupView: "main",
         walletConversionEnabled: false,
@@ -664,8 +664,8 @@ function useSettings() {
           }
         }
       }
-      if (next.backgroundBlur !== "sharp") {
-        next.backgroundBlur = "blurred";
+      if (next.backgroundBlur !== "sharp" && next.backgroundBlur !== "blurred") {
+        next.backgroundBlur = "sharp";
       }
       if (next.accent === "background" && (!next.backgroundImage || !next.backgroundAccent)) {
         next.accent = "blue";
@@ -929,9 +929,11 @@ export default function App() {
       if (settings.backgroundImage) {
         style.setProperty("--background-image", `url("${settings.backgroundImage}")`);
         style.setProperty("--background-image-opacity", "1");
-        style.setProperty("--background-overlay-opacity", settings.backgroundBlur === "sharp" ? "0.5" : "0.68");
-        style.setProperty("--background-image-filter", settings.backgroundBlur === "sharp" ? "none" : "blur(54px)");
-        style.setProperty("--background-image-scale", settings.backgroundBlur === "sharp" ? "1.02" : "1.12");
+        const blurMode = settings.backgroundBlur;
+        const overlay = blurMode === "sharp" ? "0.1" : "0.18";
+        style.setProperty("--background-overlay-opacity", overlay);
+        style.setProperty("--background-image-filter", blurMode === "sharp" ? "none" : "blur(36px)");
+        style.setProperty("--background-image-scale", blurMode === "sharp" ? "1.02" : "1.08");
       } else {
         style.removeProperty("--background-image");
         style.removeProperty("--background-image-opacity");
@@ -3117,7 +3119,7 @@ export default function App() {
           )
         ) : (
           // Completed view
-          <div className="surface-panel p-4">
+          <div className="surface-panel board-column p-4">
             <div className="flex items-center gap-2 mb-3">
               <div className="text-lg font-semibold">Completed</div>
               <div className="ml-auto">

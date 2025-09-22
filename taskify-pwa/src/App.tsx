@@ -1306,6 +1306,18 @@ export default function App() {
   const boardDropListRef = useRef<HTMLDivElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const upcomingButtonRef = useRef<HTMLButtonElement>(null);
+  const upcomingDragOffsetRef = useRef(0);
+  const upcomingDragMovedRef = useRef(false);
+  const [upcomingButtonY, setUpcomingButtonY] = useState<number | null>(null);
+  const [draggingUpcomingButton, setDraggingUpcomingButton] = useState(false);
+  const clampUpcomingButtonY = useCallback((y: number) => {
+    if (typeof window === "undefined") return y;
+    const margin = 24;
+    const buttonHeight = upcomingButtonRef.current?.offsetHeight ?? 56;
+    const max = Math.max(margin, window.innerHeight - buttonHeight - margin);
+    const clamped = Math.min(Math.max(y, margin), max);
+    return Number.isFinite(clamped) ? clamped : margin;
+  }, []);
   const columnRefs = useRef(new Map<string, HTMLDivElement>());
   const inlineInputRefs = useRef(new Map<string, HTMLInputElement>());
 
@@ -1318,6 +1330,53 @@ export default function App() {
     if (el) inlineInputRefs.current.set(key, el);
     else inlineInputRefs.current.delete(key);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setUpcomingButtonY((prev) => {
+      const button = upcomingButtonRef.current;
+      const buttonHeight = button?.offsetHeight ?? 56;
+      const initial = prev ?? window.innerHeight - buttonHeight - 80;
+      return clampUpcomingButtonY(initial);
+    });
+  }, [clampUpcomingButtonY]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    function handleResize() {
+      setUpcomingButtonY((prev) => (prev == null ? prev : clampUpcomingButtonY(prev)));
+    }
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [clampUpcomingButtonY]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!draggingUpcomingButton) return;
+
+    function handlePointerMove(event: PointerEvent) {
+      event.preventDefault();
+      const proposed = event.clientY - upcomingDragOffsetRef.current;
+      setUpcomingButtonY(clampUpcomingButtonY(proposed));
+      upcomingDragMovedRef.current = true;
+    }
+
+    function endDrag() {
+      setDraggingUpcomingButton(false);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+    window.addEventListener("blur", endDrag);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", endDrag);
+      window.removeEventListener("pointercancel", endDrag);
+      window.removeEventListener("blur", endDrag);
+    };
+  }, [draggingUpcomingButton, clampUpcomingButtonY]);
   function flyToCompleted(from: DOMRect) {
     const layer = flyLayerRef.current;
     const targetEl = completedTabRef.current;
@@ -3181,9 +3240,32 @@ export default function App() {
       {/* Floating Upcoming Drawer Button */}
       <button
         ref={upcomingButtonRef}
-        className={`fixed bottom-20 right-4 px-3 py-2 rounded-full bg-surface-muted border border-surface shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
-        onClick={() => setShowUpcoming(true)}
-        title="Upcoming (hidden) tasks"
+        className={`fixed right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full border border-surface bg-surface-muted shadow-lg transition-transform relative ${upcomingHover ? 'scale-110' : ''} ${draggingUpcomingButton ? 'cursor-grabbing' : 'cursor-grab'}`}
+        style={upcomingButtonY != null ? { top: `${upcomingButtonY}px` } : { bottom: "5rem" }}
+        aria-label={`Upcoming tasks${upcoming.length ? ` (${upcoming.length})` : ""}`}
+        title={`Upcoming tasks${upcoming.length ? ` (${upcoming.length})` : ""}`}
+        onPointerDown={(event) => {
+          if (event.pointerType === "mouse" && event.button !== 0) return;
+          const button = upcomingButtonRef.current;
+          if (!button) return;
+          const rect = button.getBoundingClientRect();
+          upcomingDragOffsetRef.current = event.clientY - rect.top;
+          upcomingDragMovedRef.current = false;
+          setDraggingUpcomingButton(true);
+        }}
+        onPointerUp={() => {
+          setTimeout(() => {
+            upcomingDragMovedRef.current = false;
+          }, 0);
+        }}
+        onClick={(event) => {
+          if (upcomingDragMovedRef.current) {
+            event.preventDefault();
+            upcomingDragMovedRef.current = false;
+            return;
+          }
+          setShowUpcoming(true);
+        }}
         onDragOver={(e) => { e.preventDefault(); setUpcomingHover(true); }}
         onDragLeave={() => setUpcomingHover(false)}
         onDrop={(e) => {
@@ -3193,7 +3275,31 @@ export default function App() {
           handleDragEnd();
         }}
       >
-        Upcoming {upcoming.length ? `(${upcoming.length})` : ""}
+        <span className="sr-only">Open upcoming tasks</span>
+        <svg
+          className="h-6 w-6 text-primary"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="4" y="5.5" width="16" height="14" rx="3" />
+          <path d="M4 11h16" />
+          <path d="M8 3.5v4" />
+          <path d="M16 3.5v4" />
+        </svg>
+        {upcoming.length > 0 && (
+          <span
+            className="absolute -top-1 -left-1 min-w-[1.4rem] rounded-full px-1 py-[0.125rem] text-center text-[0.65rem] font-semibold leading-none shadow-lg"
+            style={{ background: "var(--accent)", color: "var(--accent-on)" }}
+            aria-hidden="true"
+          >
+            {upcoming.length > 9 ? "9+" : upcoming.length}
+          </span>
+        )}
       </button>
 
       {/* Upcoming Drawer */}

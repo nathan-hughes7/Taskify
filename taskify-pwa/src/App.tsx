@@ -82,6 +82,8 @@ type Task = {
   };
 };
 
+type TaskBounty = NonNullable<Task["bounty"]>;
+
 type ListColumn = { id: string; name: string };
 
 type BoardBase = {
@@ -120,6 +122,90 @@ type Settings = {
   walletPrimaryCurrency: "sat" | "usd";
   npubCashLightningAddressEnabled: boolean;
   npubCashAutoClaim: boolean;
+};
+
+type AppleIntentAddTaskPayload = {
+  title?: string | null;
+  note?: string | null;
+  boardId?: string | null;
+  boardName?: string | null;
+  boardKind?: "week" | "lists" | null;
+  columnId?: string | null;
+  columnName?: string | null;
+  due?: string | null;
+  weekday?: Weekday | null;
+  openBoard?: boolean | null;
+  recurrence?: unknown;
+  subtasks?: string[] | null;
+  streak?: number | null;
+  bounty?: Partial<Task["bounty"]> | null;
+  hiddenUntil?: string | null;
+};
+
+type AppleIntentRequest =
+  | { kind: "add-task"; payload: AppleIntentAddTaskPayload }
+  | { kind: "complete-task"; payload: { taskId?: string | null; title?: string | null; boardId?: string | null; reopen?: boolean | null } }
+  | { kind: "open-board"; payload: { boardId?: string | null; boardName?: string | null; boardKind?: "week" | "lists" | null } };
+
+type AppleIntentResponse = {
+  status: "ok" | "error";
+  message?: string;
+  taskId?: string;
+  boardId?: string;
+};
+
+type AppleContextTask = {
+  id: string;
+  boardId: string;
+  boardName: string;
+  title: string;
+  dueISO: string;
+  columnLabel?: string;
+  streak?: number;
+  recurrence?: Recurrence;
+  bountyState?: TaskBounty["state"];
+  bountyAmount?: number;
+  hiddenUntilISO?: string;
+};
+
+type AppleContextBoard = {
+  id: string;
+  name: string;
+  kind: Board["kind"];
+  summary: string;
+  outstandingCount: number;
+  nextActions: AppleContextTask[];
+};
+
+type AppleFocusSuggestion = {
+  focus: string;
+  boardId: string;
+  boardName: string;
+  reason: string;
+  nextTaskId?: string | null;
+};
+
+type AppleContextSnapshot = {
+  generatedAt: string;
+  boards: AppleContextBoard[];
+  nextActions: AppleContextTask[];
+  focusSuggestions: AppleFocusSuggestion[];
+};
+
+type AppleBoardDirectoryEntry = {
+  id: string;
+  name: string;
+  kind: Board["kind"];
+  columns?: { id: string; name: string }[];
+  defaultForWeekdays: Weekday[];
+  storageKeys: { tasks: string; boards: string; settings: string };
+};
+
+type AppleIntegrationBridge = {
+  version: string;
+  runIntent: (intent: AppleIntentRequest) => AppleIntentResponse;
+  getContextSnapshot: () => AppleContextSnapshot;
+  listBoards: () => AppleBoardDirectoryEntry[];
 };
 
 type AccentChoice = {
@@ -218,6 +304,7 @@ declare global {
       getPublicKey: () => Promise<string>;
       signEvent: (e: NostrUnsignedEvent) => Promise<NostrEvent>;
     };
+    taskifyAppleIntegration?: AppleIntegrationBridge;
   }
 }
 
@@ -243,6 +330,373 @@ function loadDefaultRelays(): string[] {
 
 function saveDefaultRelays(relays: string[]) {
   localStorage.setItem(LS_NOSTR_RELAYS, JSON.stringify(relays));
+}
+
+const WEEKDAY_NAME_TO_INDEX: Record<string, Weekday> = (() => {
+  const map: Record<string, Weekday> = {} as any;
+  WD_FULL.forEach((name, index) => {
+    map[name.toLowerCase()] = index as Weekday;
+    map[WD_SHORT[index].toLowerCase()] = index as Weekday;
+  });
+  map["today"] = new Date().getDay() as Weekday;
+  return map;
+})();
+
+function decodeIntentPayload(value: string | null): any {
+  if (!value) return {};
+  const attempts = [value];
+  try { attempts.push(decodeURIComponent(value)); } catch {}
+  if (typeof atob === "function") {
+    try { attempts.push(atob(value)); } catch {}
+  }
+  for (const candidate of attempts) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {}
+  }
+  return {};
+}
+
+function parseBooleanInput(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "off"].includes(normalized)) return false;
+  }
+  if (typeof value === "number") return value !== 0;
+  return null;
+}
+
+function parseWeekdayValue(value: unknown): Weekday | null {
+  if (typeof value === "number" && value >= 0 && value <= 6) return value as Weekday;
+  if (typeof value === "string" && value.trim()) {
+    const normalized = value.trim().toLowerCase();
+    if (normalized in WEEKDAY_NAME_TO_INDEX) return WEEKDAY_NAME_TO_INDEX[normalized];
+    const numeric = Number(normalized);
+    if (Number.isInteger(numeric) && numeric >= 0 && numeric <= 6) return numeric as Weekday;
+  }
+  return null;
+}
+
+function parseDueExpression(value: string | null | undefined, weekStart: Weekday): string | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  const now = new Date();
+  if (normalized === "today") return startOfDay(now).toISOString();
+  if (normalized === "tomorrow") {
+    const dt = startOfDay(now);
+    dt.setDate(dt.getDate() + 1);
+    return dt.toISOString();
+  }
+  if (normalized === "next-week") {
+    const nextWeek = startOfWeek(now, weekStart);
+    nextWeek.setDate(nextWeek.getDate() + 7);
+    return nextWeek.toISOString();
+  }
+  if (normalized === "start-of-week") {
+    return startOfWeek(now, weekStart).toISOString();
+  }
+  const weekday = parseWeekdayValue(normalized);
+  if (weekday !== null) return isoForWeekday(weekday);
+  const plusDays = /^\+?(\d+)d$/.exec(normalized) || /^in-(\d+)-days$/.exec(normalized);
+  if (plusDays) {
+    const dt = startOfDay(now);
+    dt.setDate(dt.getDate() + Number(plusDays[1]));
+    return dt.toISOString();
+  }
+  const dateMatch = /(\d{4})-(\d{2})-(\d{2})/.exec(normalized);
+  if (dateMatch) {
+    const dt = new Date(`${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}T00:00`);
+    if (!Number.isNaN(dt.getTime())) return dt.toISOString();
+  }
+  return null;
+}
+
+function parseSubtasksInput(input: unknown): string[] | null {
+  if (!input) return null;
+  if (Array.isArray(input)) {
+    const arr = input
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean);
+    return arr.length ? arr : null;
+  }
+  if (typeof input === "string") {
+    const parts = input
+      .split(/[\n|]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return parts.length ? parts : null;
+  }
+  return null;
+}
+
+function buildSubtasksFromInput(input: unknown): Subtask[] | undefined {
+  const parsed = parseSubtasksInput(input);
+  if (!parsed || !parsed.length) return undefined;
+  return parsed.map((title) => ({ id: crypto.randomUUID(), title }));
+}
+
+function buildBountyFromPayload(payload: Partial<TaskBounty> | null | undefined): TaskBounty | undefined {
+  if (!payload) return undefined;
+  const hasMeaningfulData = Object.keys(payload).length > 0;
+  if (!hasMeaningfulData) return undefined;
+  const now = new Date().toISOString();
+  return {
+    id: payload.id || crypto.randomUUID(),
+    token: payload.token || "",
+    amount: typeof payload.amount === "number" ? payload.amount : undefined,
+    mint: payload.mint,
+    lock: payload.lock || "none",
+    owner: payload.owner,
+    sender: payload.sender,
+    receiver: payload.receiver,
+    state: payload.state || "locked",
+    updatedAt: payload.updatedAt || now,
+    enc: payload.enc,
+  };
+}
+
+function normalizeText(value: string | null | undefined): string {
+  return value ? value.trim().toLowerCase() : "";
+}
+
+function parseRecurrenceInput(raw: unknown, dueISO: string): Recurrence | undefined {
+  if (!raw) return undefined;
+  const dueDate = new Date(dueISO);
+  const weekday = dueDate.getDay() as Weekday;
+  if (typeof raw === "string") {
+    const normalized = raw.trim().toLowerCase();
+    if (!normalized || normalized === "none") return undefined;
+    if (normalized === "daily") return { type: "daily" };
+    if (normalized === "weekly") return { type: "weekly", days: [weekday] };
+    const everyMatch = /^every-(\d+)-(day|week)s?$/.exec(normalized);
+    if (everyMatch) {
+      const amount = Number(everyMatch[1]);
+      if (everyMatch[2].startsWith("day")) return { type: "every", n: Math.max(1, amount), unit: "day" };
+      return { type: "every", n: Math.max(1, amount), unit: "week" };
+    }
+    try {
+      const parsed = JSON.parse(normalized);
+      if (parsed && typeof parsed === "object") return parseRecurrenceInput(parsed, dueISO);
+    } catch {}
+    return undefined;
+  }
+  if (typeof raw === "object") {
+    const candidate = raw as Recurrence;
+    if (candidate && typeof (candidate as any).type === "string") {
+      if (candidate.type === "weekly" && (!candidate.days || !candidate.days.length)) {
+        return { ...candidate, days: [weekday] };
+      }
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function buildAppleBoardDirectory(boards: Board[], settings: Settings): AppleBoardDirectoryEntry[] {
+  const overrides = settings.startBoardByDay || {};
+  return boards
+    .filter((board) => !board.archived && !board.hidden)
+    .map((board) => {
+      const defaultForWeekdays: Weekday[] = [];
+      for (const [day, boardId] of Object.entries(overrides)) {
+        if (boardId === board.id) {
+          const dayNumber = Number(day);
+          if (!Number.isNaN(dayNumber) && dayNumber >= 0 && dayNumber <= 6) {
+            defaultForWeekdays.push(dayNumber as Weekday);
+          }
+        }
+      }
+      return {
+        id: board.id,
+        name: board.name,
+        kind: board.kind,
+        columns: board.kind === "lists" ? board.columns.map((c) => ({ id: c.id, name: c.name })) : undefined,
+        defaultForWeekdays,
+        storageKeys: { tasks: LS_TASKS, boards: LS_BOARDS, settings: LS_SETTINGS },
+      };
+    });
+}
+
+function buildFocusSuggestions(boards: AppleContextBoard[], settings: Settings, now: Date): AppleFocusSuggestion[] {
+  const suggestions: AppleFocusSuggestion[] = [];
+  const todayBoardId = settings.startBoardByDay?.[now.getDay() as Weekday];
+  const boardMap = new Map(boards.map((b) => [b.id, b] as const));
+  const seen = new Set<string>();
+  if (todayBoardId) {
+    const board = boardMap.get(todayBoardId);
+    if (board) {
+      suggestions.push({
+        focus: "Work",
+        boardId: board.id,
+        boardName: board.name,
+        reason: board.summary,
+        nextTaskId: board.nextActions[0]?.id ?? null,
+      });
+      seen.add(board.id);
+    }
+  }
+  const weekBoard = boards.find((b) => b.kind === "week" && !seen.has(b.id));
+  if (weekBoard) {
+    suggestions.push({
+      focus: "Personal",
+      boardId: weekBoard.id,
+      boardName: weekBoard.name,
+      reason: weekBoard.summary,
+      nextTaskId: weekBoard.nextActions[0]?.id ?? null,
+    });
+    seen.add(weekBoard.id);
+  }
+  const overdueBoard = boards
+    .filter((b) => /overdue/i.test(b.summary) && !seen.has(b.id))
+    .sort((a, b) => b.outstandingCount - a.outstandingCount)[0];
+  if (overdueBoard) {
+    suggestions.push({
+      focus: "Catch Up",
+      boardId: overdueBoard.id,
+      boardName: overdueBoard.name,
+      reason: overdueBoard.summary,
+      nextTaskId: overdueBoard.nextActions[0]?.id ?? null,
+    });
+    seen.add(overdueBoard.id);
+  }
+  return suggestions.slice(0, 3);
+}
+
+function buildAppleContextSnapshot(boards: Board[], tasks: Task[], settings: Settings): AppleContextSnapshot {
+  const visibleBoards = boards.filter((board) => !board.archived && !board.hidden);
+  const now = new Date();
+  const todayStart = startOfDay(now).getTime();
+  const boardSummaries: AppleContextBoard[] = visibleBoards.map((board) => {
+    const tasksForBoard = tasks.filter((task) => task.boardId === board.id && !task.completed);
+    const visibleTasks = tasksForBoard.filter((task) => {
+      if (!task.hiddenUntilISO) return true;
+      const hiddenUntil = new Date(task.hiddenUntilISO).getTime();
+      return hiddenUntil <= now.getTime();
+    });
+    const sorted = [...visibleTasks].sort((a, b) => new Date(a.dueISO).getTime() - new Date(b.dueISO).getTime());
+    const nextActions: AppleContextTask[] = sorted.slice(0, 5).map((task) => {
+      const dueDate = new Date(task.dueISO);
+      let columnLabel: string | undefined;
+      if (board.kind === "week") {
+        columnLabel = task.column === "bounties" ? "Bounties" : WD_FULL[dueDate.getDay()] || "Week";
+      } else if (board.kind === "lists") {
+        columnLabel = board.columns.find((c) => c.id === task.columnId)?.name || board.columns[0]?.name;
+      }
+      return {
+        id: task.id,
+        boardId: board.id,
+        boardName: board.name,
+        title: task.title,
+        dueISO: task.dueISO,
+        columnLabel,
+        streak: task.streak,
+        recurrence: task.recurrence,
+        bountyState: task.bounty?.state,
+        bountyAmount: task.bounty?.amount,
+        hiddenUntilISO: task.hiddenUntilISO,
+      };
+    });
+    const overdue = tasksForBoard.filter((task) => new Date(task.dueISO).getTime() < todayStart);
+    const dueToday = tasksForBoard.filter((task) => startOfDay(new Date(task.dueISO)).getTime() === todayStart);
+    const summaryParts: string[] = [];
+    if (overdue.length) summaryParts.push(`${overdue.length} overdue`);
+    if (dueToday.length) summaryParts.push(`${dueToday.length} due today`);
+    if (!summaryParts.length) summaryParts.push("All caught up");
+    return {
+      id: board.id,
+      name: board.name,
+      kind: board.kind,
+      summary: summaryParts.join(", "),
+      outstandingCount: tasksForBoard.length,
+      nextActions,
+    };
+  });
+  const flattened = boardSummaries.flatMap((board) => board.nextActions);
+  return {
+    generatedAt: now.toISOString(),
+    boards: boardSummaries,
+    nextActions: flattened.slice(0, 10),
+    focusSuggestions: buildFocusSuggestions(boardSummaries, settings, now),
+  };
+}
+
+function parseAppleIntentParams(params: URLSearchParams): AppleIntentRequest | null {
+  const payloadRaw = params.get("payload") || params.get("data");
+  const payload = decodeIntentPayload(payloadRaw);
+  const intentValue =
+    payload.intent ||
+    payload.kind ||
+    params.get("ai-intent") ||
+    params.get("intent") ||
+    params.get("action");
+  if (!intentValue || typeof intentValue !== "string") return null;
+  const kind = intentValue.trim().toLowerCase();
+  if (!kind) return null;
+  if (kind === "add-task" || kind === "addtask") {
+    const subtasks =
+      parseSubtasksInput(params.get("subtasks")) ||
+      parseSubtasksInput(params.getAll("subtask")) ||
+      parseSubtasksInput(payload.subtasks);
+    const weekday =
+      parseWeekdayValue(params.get("weekday")) ||
+      parseWeekdayValue(payload.weekday) ||
+      parseWeekdayValue(payload.day);
+    const streakValue = payload.streak ?? params.get("streak");
+    const streak = typeof streakValue === "number" ? streakValue : Number(streakValue);
+    const openBoardValue =
+      parseBooleanInput(params.get("openBoard")) ??
+      parseBooleanInput(params.get("focusBoard")) ??
+      parseBooleanInput(payload.openBoard);
+    return {
+      kind: "add-task",
+      payload: {
+        title: params.get("title") ?? payload.title ?? null,
+        note: params.get("note") ?? payload.note ?? null,
+        boardId: params.get("boardId") ?? payload.boardId ?? null,
+        boardName: params.get("boardName") ?? params.get("board") ?? payload.boardName ?? null,
+        boardKind: payload.boardKind ?? null,
+        columnId: params.get("columnId") ?? payload.columnId ?? null,
+        columnName: params.get("column") ?? payload.columnName ?? payload.column ?? null,
+        due: params.get("due") ?? payload.due ?? payload.dueISO ?? null,
+        weekday,
+        openBoard: openBoardValue,
+        recurrence: payload.recurrence ?? params.get("recurrence"),
+        subtasks: subtasks ?? null,
+        streak: Number.isFinite(streak) ? Number(streak) : null,
+        bounty: payload.bounty ?? null,
+        hiddenUntil: payload.hiddenUntil ?? params.get("hiddenUntil"),
+      },
+    };
+  }
+  if (kind === "complete-task" || kind === "completetask") {
+    const reopen =
+      parseBooleanInput(params.get("reopen")) ??
+      parseBooleanInput(payload.reopen);
+    return {
+      kind: "complete-task",
+      payload: {
+        taskId: params.get("taskId") ?? payload.taskId ?? null,
+        title: params.get("title") ?? payload.title ?? null,
+        boardId: params.get("boardId") ?? payload.boardId ?? null,
+        reopen,
+      },
+    };
+  }
+  if (kind === "open-board" || kind === "openboard" || kind === "show-board") {
+    return {
+      kind: "open-board",
+      payload: {
+        boardId: params.get("boardId") ?? payload.boardId ?? null,
+        boardName: params.get("boardName") ?? params.get("board") ?? payload.boardName ?? null,
+        boardKind: payload.boardKind ?? null,
+      },
+    };
+  }
+  return null;
 }
 
 type NostrPool = {
@@ -847,6 +1301,33 @@ export default function App() {
   const [currentBoardId, setCurrentBoardId] = useState(() => pickStartupBoard(boards, settings.startBoardByDay));
   const currentBoard = boards.find(b => b.id === currentBoardId);
   const visibleBoards = useMemo(() => boards.filter(b => !b.archived && !b.hidden), [boards]);
+
+  const resolveIntentBoard = useCallback((payload: AppleIntentAddTaskPayload): Board | undefined => {
+    const visible = visibleBoards;
+    const normalizedId = payload.boardId?.trim();
+    if (normalizedId) {
+      if (normalizedId === "current" && currentBoard && !currentBoard.archived && !currentBoard.hidden) {
+        return currentBoard;
+      }
+      const byId = visible.find((board) => board.id === normalizedId);
+      if (byId) return byId;
+    }
+    if (payload.boardName) {
+      const normalized = normalizeText(payload.boardName);
+      if (normalized) {
+        const exact = visible.find((board) => normalizeText(board.name) === normalized);
+        if (exact) return exact;
+        const partial = visible.find((board) => normalizeText(board.name).includes(normalized));
+        if (partial) return partial;
+      }
+    }
+    if (payload.boardKind) {
+      const byKind = visible.find((board) => board.kind === payload.boardKind);
+      if (byKind) return byKind;
+    }
+    if (currentBoard && !currentBoard.archived && !currentBoard.hidden) return currentBoard;
+    return visible[0];
+  }, [currentBoard, visibleBoards]);
 
 
   useEffect(() => {
@@ -2301,6 +2782,201 @@ export default function App() {
         publishTaskDeleted(t).catch(() => {});
     setTasks(prev => prev.filter(t => !(t.completed && (!t.bounty || t.bounty.state === 'claimed'))));
   }
+
+  function runAppleIntent(intent: AppleIntentRequest): AppleIntentResponse {
+    if (intent.kind === "add-task") {
+      const payload = intent.payload;
+      const title = (payload.title ?? "").trim();
+      if (!title) return { status: "error", message: "Task title is required" };
+      const board = resolveIntentBoard(payload);
+      if (!board) return { status: "error", message: "Board not found" };
+      let dueISO = parseDueExpression(payload.due, settings.weekStart);
+      let column: Task["column"] | undefined;
+      let columnId: string | undefined;
+      let targetWeekday = payload.weekday ?? null;
+      const columnHint = normalizeText(payload.columnName) || normalizeText(payload.columnId);
+      if (board.kind === "week") {
+        if (columnHint.includes("bount")) {
+          column = "bounties";
+          if (!dueISO) {
+            const base = startOfDay(new Date());
+            dueISO = base.toISOString();
+          }
+        } else {
+          column = "day";
+          if (targetWeekday === null) {
+            if (dueISO) targetWeekday = new Date(dueISO).getDay() as Weekday;
+            else targetWeekday = new Date().getDay() as Weekday;
+          }
+          dueISO = dueISO ?? isoForWeekday(targetWeekday ?? (new Date().getDay() as Weekday));
+        }
+      } else {
+        if (payload.columnId && board.columns.some((c) => c.id === payload.columnId)) {
+          columnId = payload.columnId;
+        } else if (payload.columnName) {
+          const normalizedColumn = normalizeText(payload.columnName);
+          if (normalizedColumn) {
+            const match = board.columns.find((c) => normalizeText(c.name) === normalizedColumn);
+            columnId = match?.id;
+          }
+        }
+        if (!columnId) columnId = board.columns[0]?.id;
+        if (!dueISO) {
+          const base = startOfDay(new Date());
+          dueISO = base.toISOString();
+        }
+      }
+      if (!dueISO) dueISO = new Date().toISOString();
+      const recurrence = parseRecurrenceInput(payload.recurrence, dueISO);
+      const streak =
+        typeof payload.streak === "number"
+          ? payload.streak
+          : recurrence && (recurrence.type === "daily" || recurrence.type === "weekly")
+            ? 0
+            : undefined;
+      const subtasks = buildSubtasksFromInput(payload.subtasks);
+      const bounty = buildBountyFromPayload(payload.bounty);
+      const hiddenUntilISO = payload.hiddenUntil
+        ? (() => {
+            const dt = new Date(payload.hiddenUntil!);
+            return Number.isNaN(dt.getTime()) ? undefined : dt.toISOString();
+          })()
+        : undefined;
+      const id = crypto.randomUUID();
+      let createdTask: Task | null = null;
+      setTasks((prev) => {
+        const nextOrder = nextOrderForBoard(board.id, prev);
+        const task: Task = {
+          id,
+          boardId: board.id,
+          createdBy: nostrPK || undefined,
+          title,
+          note: payload.note?.trim() ? payload.note : undefined,
+          dueISO,
+          completed: false,
+          order: nextOrder,
+          column,
+          columnId,
+          recurrence: recurrence || undefined,
+          seriesId: recurrence ? id : undefined,
+          streak,
+          subtasks,
+          bounty,
+          hiddenUntilISO,
+        };
+        applyHiddenForFuture(task);
+        createdTask = task;
+        const out = [...prev, task];
+        return settings.showFullWeekRecurring && task.recurrence ? ensureWeekRecurrences(out, [task]) : out;
+      });
+      if (createdTask) maybePublishTask(createdTask).catch(() => {});
+      if (payload.openBoard) setCurrentBoardId(createdTask?.boardId || board.id);
+      showToast(`Added “${title}”`);
+      return { status: "ok", taskId: createdTask?.id || id, boardId: board.id };
+    }
+    if (intent.kind === "complete-task") {
+      const { taskId, title, boardId, reopen } = intent.payload;
+      const normalizedTitle = normalizeText(title);
+      const target = tasks.find((task) => {
+        if (taskId && task.id === taskId) return true;
+        if (normalizedTitle && normalizeText(task.title) === normalizedTitle) {
+          if (!boardId || boardId === task.boardId) return true;
+        }
+        return false;
+      });
+      if (!target) return { status: "error", message: "Task not found" };
+      if (reopen) {
+        restoreTask(target.id);
+        showToast(`Reopened “${target.title}”`);
+        return { status: "ok", taskId: target.id, boardId: target.boardId };
+      }
+      if (!target.completed) {
+        completeTask(target.id);
+        showToast(`Completed “${target.title}”`);
+      } else {
+        showToast(`“${target.title}” is already complete`);
+      }
+      return { status: "ok", taskId: target.id, boardId: target.boardId };
+    }
+    if (intent.kind === "open-board") {
+      const board = resolveIntentBoard({
+        boardId: intent.payload.boardId ?? null,
+        boardName: intent.payload.boardName ?? null,
+        boardKind: intent.payload.boardKind ?? null,
+      });
+      if (!board) return { status: "error", message: "Board not found" };
+      setCurrentBoardId(board.id);
+      showToast(`Opened ${board.name}`);
+      return { status: "ok", boardId: board.id };
+    }
+    return { status: "error", message: "Unsupported intent" };
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    const intent = parseAppleIntentParams(url.searchParams);
+    if (!intent) return;
+    const redirectParam = url.searchParams.get("redirect");
+    const response = runAppleIntent(intent);
+    const paramsToStrip = [
+      "payload",
+      "data",
+      "ai-intent",
+      "intent",
+      "action",
+      "title",
+      "note",
+      "due",
+      "boardId",
+      "boardName",
+      "board",
+      "column",
+      "columnId",
+      "weekday",
+      "openBoard",
+      "focusBoard",
+      "subtasks",
+      "subtask",
+      "recurrence",
+      "streak",
+      "taskId",
+      "reopen",
+      "hiddenUntil",
+      "redirect",
+    ];
+    let changed = false;
+    for (const key of paramsToStrip) {
+      if (url.searchParams.has(key)) {
+        url.searchParams.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) {
+      const cleaned = `${url.pathname}${url.search}${url.hash}`;
+      window.history.replaceState({}, "", cleaned);
+    }
+    if (response.status === "ok" && redirectParam) {
+      try { window.location.href = decodeURIComponent(redirectParam); }
+      catch { window.location.href = redirectParam; }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const bridge: AppleIntegrationBridge = {
+      version: "1.0.0",
+      runIntent: (intent) => runAppleIntent(intent),
+      getContextSnapshot: () => buildAppleContextSnapshot(boards, tasks, settings),
+      listBoards: () => buildAppleBoardDirectory(boards, settings),
+    };
+    window.taskifyAppleIntegration = bridge;
+    return () => {
+      if (window.taskifyAppleIntegration === bridge) delete window.taskifyAppleIntegration;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boards, settings, tasks, nostrPK]);
 
   function postponeTaskOneWeek(id: string) {
     let updated: Task | undefined;

@@ -1262,6 +1262,28 @@ export default function App() {
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [trashHover, setTrashHover] = useState(false);
   const [upcomingHover, setUpcomingHover] = useState(false);
+  const [upcomingButtonPosition, setUpcomingButtonPosition] = useState<{
+    side: "left" | "right";
+    y: number;
+  }>(() => {
+    if (typeof window === "undefined") {
+      return { side: "right", y: 280 };
+    }
+    const margin = 16;
+    const buttonSize = 44;
+    const maxY = Math.max(margin, window.innerHeight - buttonSize - margin);
+    return { side: "right", y: maxY };
+  });
+  const [upcomingDragPosition, setUpcomingDragPosition] = useState<{ x: number; y: number } | null>(null);
+  const upcomingDragState = useRef<{
+    pointerId: number;
+    originX: number;
+    originY: number;
+    startX: number;
+    startY: number;
+  } | null>(null);
+  const upcomingDragMoved = useRef(false);
+  const [upcomingDragging, setUpcomingDragging] = useState(false);
   const [boardDropOpen, setBoardDropOpen] = useState(false);
   const [boardDropPos, setBoardDropPos] = useState<{ top: number; left: number } | null>(null);
   const boardDropTimer = useRef<number>();
@@ -1306,6 +1328,144 @@ export default function App() {
   const boardDropListRef = useRef<HTMLDivElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const upcomingButtonRef = useRef<HTMLButtonElement>(null);
+  const getUpcomingButtonSize = useCallback(() => {
+    const el = upcomingButtonRef.current;
+    return {
+      width: el?.offsetWidth ?? 44,
+      height: el?.offsetHeight ?? 44,
+    };
+  }, []);
+  const clampUpcomingButtonY = useCallback(
+    (y: number) => {
+      if (typeof window === "undefined") return y;
+      const margin = 16;
+      const { height } = getUpcomingButtonSize();
+      const maxY = Math.max(margin, window.innerHeight - height - margin);
+      return Math.min(Math.max(margin, y), maxY);
+    },
+    [getUpcomingButtonSize]
+  );
+  const clampUpcomingButtonX = useCallback(
+    (x: number) => {
+      if (typeof window === "undefined") return x;
+      const margin = 16;
+      const { width } = getUpcomingButtonSize();
+      const maxX = Math.max(margin, window.innerWidth - width - margin);
+      return Math.min(Math.max(margin, x), maxX);
+    },
+    [getUpcomingButtonSize]
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleResize = () => {
+      setUpcomingButtonPosition((prev) => {
+        const clampedY = clampUpcomingButtonY(prev.y);
+        return clampedY === prev.y ? prev : { ...prev, y: clampedY };
+      });
+      setUpcomingDragPosition((prev) => {
+        if (!prev) return prev;
+        const clampedX = clampUpcomingButtonX(prev.x);
+        const clampedY = clampUpcomingButtonY(prev.y);
+        if (clampedX === prev.x && clampedY === prev.y) return prev;
+        return { x: clampedX, y: clampedY };
+      });
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [clampUpcomingButtonX, clampUpcomingButtonY]);
+
+  const handleUpcomingPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      const rect = upcomingButtonRef.current?.getBoundingClientRect();
+      const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0;
+      let originX = upcomingButtonPosition.side === "left" ? 16 : upcomingButtonPosition.side === "right" ? Math.max(16, viewportWidth - getUpcomingButtonSize().width - 16) : 16;
+      let originY = upcomingButtonPosition.y;
+      if (rect) {
+        originX = rect.left;
+        originY = rect.top;
+      }
+      upcomingDragState.current = {
+        pointerId: e.pointerId,
+        originX,
+        originY,
+        startX: e.clientX,
+        startY: e.clientY,
+      };
+      upcomingDragMoved.current = false;
+      setUpcomingDragging(true);
+      setUpcomingDragPosition({ x: originX, y: originY });
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    [getUpcomingButtonSize, upcomingButtonPosition.side, upcomingButtonPosition.y]
+  );
+
+  const handleUpcomingPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      if (!upcomingDragState.current) return;
+      e.preventDefault();
+      const { originX, originY, startX, startY } = upcomingDragState.current;
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+      if (!upcomingDragMoved.current && (Math.abs(deltaY) > 1 || Math.abs(deltaX) > 1)) {
+        upcomingDragMoved.current = true;
+      }
+      setUpcomingDragPosition({
+        x: clampUpcomingButtonX(originX + deltaX),
+        y: clampUpcomingButtonY(originY + deltaY),
+      });
+    },
+    [clampUpcomingButtonX, clampUpcomingButtonY]
+  );
+
+  const handleUpcomingPointerEnd = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      if (!upcomingDragState.current) return;
+      if (upcomingDragState.current.pointerId === e.pointerId) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+      const { originX, originY, startX, startY } = upcomingDragState.current;
+      const finalX = clampUpcomingButtonX(originX + (e.clientX - startX));
+      const finalY = clampUpcomingButtonY(originY + (e.clientY - startY));
+      setUpcomingButtonPosition(() => {
+        if (typeof window === "undefined") {
+          return { side: "right", y: finalY };
+        }
+        const margin = 16;
+        const { width } = getUpcomingButtonSize();
+        const leftPos = margin;
+        const rightPos = Math.max(margin, window.innerWidth - width - margin);
+        const side = Math.abs(finalX - leftPos) <= Math.abs(finalX - rightPos) ? "left" : "right";
+        return { side, y: finalY };
+      });
+      setUpcomingDragPosition(null);
+      upcomingDragState.current = null;
+      setUpcomingDragging(false);
+    },
+    [clampUpcomingButtonX, clampUpcomingButtonY, getUpcomingButtonSize]
+  );
+
+  const handleUpcomingPointerCancel = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      if (!upcomingDragState.current) return;
+      if (upcomingDragState.current.pointerId === e.pointerId) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+      upcomingDragState.current = null;
+      upcomingDragMoved.current = false;
+      setUpcomingDragPosition(null);
+      setUpcomingDragging(false);
+    },
+    []
+  );
+
+  const handleUpcomingButtonClick = useCallback(() => {
+    if (upcomingDragMoved.current) {
+      upcomingDragMoved.current = false;
+      return;
+    }
+    setShowUpcoming(true);
+  }, []);
   const columnRefs = useRef(new Map<string, HTMLDivElement>());
   const inlineInputRefs = useRef(new Map<string, HTMLInputElement>());
 
@@ -3181,8 +3341,19 @@ export default function App() {
       {/* Floating Upcoming Drawer Button */}
       <button
         ref={upcomingButtonRef}
-        className={`fixed bottom-20 right-4 px-3 py-2 rounded-full bg-surface-muted border border-surface shadow-lg text-sm transition-transform ${upcomingHover ? 'scale-110' : ''}`}
-        onClick={() => setShowUpcoming(true)}
+        type="button"
+        aria-label={`Open upcoming tasks${upcoming.length ? ` (${upcoming.length})` : ""}`}
+        className={`fixed z-50 flex h-11 w-11 items-center justify-center rounded-full border border-neutral-700 bg-neutral-900 text-white shadow-lg transition-transform duration-150 ${upcomingHover ? 'scale-110' : ''} ${upcomingDragging ? 'cursor-grabbing' : 'cursor-grab'} relative`}
+        style={{
+          top: `${(upcomingDragPosition ?? { y: upcomingButtonPosition.y }).y}px`,
+          ...(upcomingDragPosition
+            ? { left: `${upcomingDragPosition.x}px` }
+            : upcomingButtonPosition.side === "left"
+              ? { left: "1rem" }
+              : { right: "1rem" }),
+          touchAction: "none",
+        }}
+        onClick={handleUpcomingButtonClick}
         title="Upcoming (hidden) tasks"
         onDragOver={(e) => { e.preventDefault(); setUpcomingHover(true); }}
         onDragLeave={() => setUpcomingHover(false)}
@@ -3192,8 +3363,17 @@ export default function App() {
           if (id) postponeTaskOneWeek(id);
           handleDragEnd();
         }}
+        onPointerDown={handleUpcomingPointerDown}
+        onPointerMove={handleUpcomingPointerMove}
+        onPointerUp={handleUpcomingPointerEnd}
+        onPointerCancel={handleUpcomingPointerCancel}
       >
-        Upcoming {upcoming.length ? `(${upcoming.length})` : ""}
+        <CalendarIcon className="h-5 w-5" />
+        {upcoming.length > 0 && (
+          <span className="pointer-events-none absolute -top-1 -right-1 flex min-h-[1.25rem] min-w-[1.25rem] items-center justify-center rounded-full border border-white/40 bg-white/20 px-1 text-[0.65rem] font-semibold leading-[1.2rem] text-white backdrop-blur shadow-md">
+            {upcoming.length > 99 ? "99+" : upcoming.length}
+          </span>
+        )}
       </button>
 
       {/* Upcoming Drawer */}
@@ -3954,6 +4134,27 @@ function IconButton({
     >
       {children}
     </button>
+  );
+}
+
+function CalendarIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <rect x={3.8} y={4.6} width={16.4} height={16} rx={2.6} />
+      <path d="M4 9.5h16" />
+      <path d="M16 3v3" />
+      <path d="M8 3v3" />
+      <rect x={8.9} y={13} width={6.2} height={5} rx={1.2} fill="currentColor" stroke="none" />
+    </svg>
   );
 }
 

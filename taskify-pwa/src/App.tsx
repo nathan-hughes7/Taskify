@@ -1974,6 +1974,28 @@ export default function App() {
     return changed ? out : arr;
   }
 
+  function buildImportedTask(raw: string, overrides: Partial<Task> = {}): Task | null {
+    if (!currentBoard) return null;
+    try {
+      const parsed: any = JSON.parse(raw);
+      if (!(parsed && typeof parsed === "object" && parsed.title && parsed.dueISO)) return null;
+      const nextOrder = nextOrderForBoard(currentBoard.id, tasks);
+      const id = crypto.randomUUID();
+      const imported: Task = {
+        ...parsed,
+        id,
+        boardId: currentBoard.id,
+        order: typeof parsed.order === "number" ? parsed.order : nextOrder,
+        ...overrides,
+      };
+      if (imported.recurrence) imported.seriesId = imported.seriesId || id;
+      else imported.seriesId = undefined;
+      return imported;
+    } catch {
+      return null;
+    }
+  }
+
   function addTask(keepKeyboard = false) {
     if (!currentBoard) return;
 
@@ -1981,35 +2003,24 @@ export default function App() {
 
     const raw = newTitle.trim();
     if (raw) {
-      try {
-        const parsed: any = JSON.parse(raw);
-        if (parsed && typeof parsed === "object" && parsed.title && parsed.dueISO) {
-          const nextOrder = nextOrderForBoard(currentBoard.id, tasks);
-          const id = crypto.randomUUID();
-          const imported: Task = {
-            ...parsed,
-            id,
-            seriesId: parsed.recurrence ? (parsed.seriesId || id) : undefined,
-            boardId: currentBoard.id,
-            order: typeof parsed.order === "number" ? parsed.order : nextOrder,
-          };
-          applyHiddenForFuture(imported);
-          animateTaskArrival(originRect, imported, currentBoard);
-          setTasks(prev => {
-            const out = [...prev, imported];
-            return settings.showFullWeekRecurring && imported.recurrence ? ensureWeekRecurrences(out, [imported]) : out;
-          });
-          maybePublishTask(imported).catch(() => {});
-          setNewTitle("");
-          setNewImages([]);
-          setQuickRule("none");
-          setAddCustomRule(R_NONE);
-          setScheduleDate("");
-          if (keepKeyboard) newTitleRef.current?.focus();
-          else newTitleRef.current?.blur();
-          return;
-        }
-      } catch {}
+      const imported = buildImportedTask(raw);
+      if (imported) {
+        applyHiddenForFuture(imported);
+        animateTaskArrival(originRect, imported, currentBoard);
+        setTasks(prev => {
+          const out = [...prev, imported];
+          return settings.showFullWeekRecurring && imported.recurrence ? ensureWeekRecurrences(out, [imported]) : out;
+        });
+        maybePublishTask(imported).catch(() => {});
+        setNewTitle("");
+        setNewImages([]);
+        setQuickRule("none");
+        setAddCustomRule(R_NONE);
+        setScheduleDate("");
+        if (keepKeyboard) newTitleRef.current?.focus();
+        else newTitleRef.current?.blur();
+        return;
+      }
     }
 
     const title = raw || (newImages.length ? "Image" : "");
@@ -2070,6 +2081,35 @@ export default function App() {
     if (!raw) return;
 
     const originRect = inlineInputRefs.current.get(key)?.getBoundingClientRect() || null;
+    const inlineOverrides: Partial<Task> = { createdBy: nostrPK || undefined };
+
+    if (currentBoard?.kind === "week") {
+      if (key === "bounties") {
+        inlineOverrides.column = "bounties";
+        inlineOverrides.columnId = undefined;
+      } else {
+        inlineOverrides.column = "day";
+        inlineOverrides.columnId = undefined;
+        inlineOverrides.dueISO = isoForWeekday(Number(key) as Weekday);
+      }
+    } else {
+      inlineOverrides.columnId = key;
+      inlineOverrides.column = undefined;
+    }
+
+    const imported = buildImportedTask(raw, inlineOverrides);
+    if (imported) {
+      applyHiddenForFuture(imported);
+      animateTaskArrival(originRect, imported, currentBoard);
+      setTasks(prev => {
+        const out = [...prev, imported];
+        return settings.showFullWeekRecurring && imported.recurrence ? ensureWeekRecurrences(out, [imported]) : out;
+      });
+      maybePublishTask(imported).catch(() => {});
+      setInlineTitles(prev => ({ ...prev, [key]: "" }));
+      return;
+    }
+
     let dueISO = isoForWeekday(0);
     const nextOrder = nextOrderForBoard(currentBoard.id, tasks);
     const id = crypto.randomUUID();

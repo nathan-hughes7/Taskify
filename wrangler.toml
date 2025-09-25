@@ -1,0 +1,30 @@
+name = "taskify-worker"
+main = "worker/src/index.ts"
+compatibility_date = "2024-03-01"
+workers_dev = true
+
+[assets]
+directory = "taskify-pwa/dist"
+binding = "ASSETS"
+
+[triggers]
+crons = ["*/1 * * * *"]
+
+[[kv_namespaces]]
+binding = "TASKIFY_DEVICES"
+id = "replace-with-devices-namespace-id"
+preview_id = "replace-with-devices-preview-id"
+
+[[kv_namespaces]]
+binding = "TASKIFY_REMINDERS"
+id = "replace-with-reminders-namespace-id"
+preview_id = "replace-with-reminders-preview-id"
+
+[[kv_namespaces]]
+binding = "TASKIFY_PENDING"
+id = "replace-with-pending-namespace-id"
+preview_id = "replace-with-pending-preview-id"
+
+[vars]
+VAPID_PUBLIC_KEY = ""
+VAPID_SUBJECT = "mailto:you@example.com"

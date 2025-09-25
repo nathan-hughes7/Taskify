@@ -78,9 +78,75 @@ type Task = {
       | {
           alg: "nip04";         // encrypted to receiver's nostr pubkey (nip04 format)
           data: string;          // ciphertext returned by nip04.encrypt
-        };
+      };
   };
+  dueTimeEnabled?: boolean;       // whether a specific due time is set
+  reminders?: ReminderPreset[];   // preset reminder offsets before due time
 };
+
+type ReminderPreset = "5m" | "15m" | "1h" | "1d";
+
+type PushPlatform = "ios" | "android";
+
+type PushPreferences = {
+  enabled: boolean;
+  platform: PushPlatform;
+  deviceId?: string;
+  subscriptionId?: string;
+  permission?: NotificationPermission;
+};
+
+const REMINDER_PRESETS: ReadonlyArray<{ id: ReminderPreset; label: string; badge: string; minutes: number }> = [
+  { id: "5m", label: "5 minutes before", badge: "5m", minutes: 5 },
+  { id: "15m", label: "15 minutes before", badge: "15m", minutes: 15 },
+  { id: "1h", label: "1 hour before", badge: "1h", minutes: 60 },
+  { id: "1d", label: "1 day before", badge: "1d", minutes: 1440 },
+];
+
+const REMINDER_IDS = new Set<ReminderPreset>(REMINDER_PRESETS.map((opt) => opt.id as ReminderPreset));
+const REMINDER_MINUTES = new Map<ReminderPreset, number>(REMINDER_PRESETS.map((opt) => [opt.id, opt.minutes] as const));
+
+const DEFAULT_PUSH_PREFERENCES: PushPreferences = {
+  enabled: false,
+  platform: "ios",
+  permission: (typeof Notification !== 'undefined' ? Notification.permission : 'default') as NotificationPermission,
+};
+
+const RAW_WORKER_BASE = (import.meta as any)?.env?.VITE_WORKER_BASE_URL || "";
+const WORKER_BASE_URL = RAW_WORKER_BASE ? String(RAW_WORKER_BASE).replace(/\/$/, "") : "";
+const VAPID_PUBLIC_KEY = (import.meta as any)?.env?.VITE_VAPID_PUBLIC_KEY || "";
+
+function sanitizeReminderList(value: unknown): ReminderPreset[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const dedup = new Set<ReminderPreset>();
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    if (REMINDER_IDS.has(item as ReminderPreset)) dedup.add(item as ReminderPreset);
+  }
+  return [...dedup];
+}
+
+function reminderPresetToMinutes(id: ReminderPreset): number {
+  return REMINDER_MINUTES.get(id) ?? 0;
+}
+
+function taskHasReminders(task: Task): boolean {
+  return !!task.dueTimeEnabled && Array.isArray(task.reminders) && task.reminders.length > 0;
+}
+
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const decode = typeof atob === 'function'
+    ? atob
+    : (() => { throw new Error('No base64 decoder available in this environment'); });
+  const rawData = decode(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i += 1) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
 
 type ListColumn = { id: string; name: string };
 
@@ -120,6 +186,7 @@ type Settings = {
   walletPrimaryCurrency: "sat" | "usd";
   npubCashLightningAddressEnabled: boolean;
   npubCashAutoClaim: boolean;
+  pushNotifications: PushPreferences;
 };
 
 type AccentChoice = {
@@ -192,7 +259,8 @@ function hexToRgba(hex: string, alpha: number): string {
 }
 
 const R_NONE: Recurrence = { type: "none" };
-const LS_TASKS = "taskify_tasks_v4";
+const LS_TASKS = "taskify_tasks_v5";
+const LS_TASKS_LEGACY = ["taskify_tasks_v4"] as const;
 const LS_SETTINGS = "taskify_settings_v2";
 const LS_BOARDS = "taskify_boards_v2";
 const LS_TUTORIAL_DONE = "taskify_tutorial_done_v1";
@@ -479,15 +547,53 @@ function startOfDay(d: Date) {
   nd.setHours(0, 0, 0, 0);
   return nd;
 }
+
+function isoDatePart(iso: string): string {
+  if (typeof iso === 'string' && iso.length >= 10) return iso.slice(0, 10);
+  try { return new Date(iso).toISOString().slice(0, 10); } catch { return new Date().toISOString().slice(0, 10); }
+}
+
+function isoTimePart(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+function isoFromDateTime(dateStr: string, timeStr?: string): string {
+  if (dateStr) {
+    if (timeStr) {
+      const withTime = new Date(`${dateStr}T${timeStr}`);
+      if (!Number.isNaN(withTime.getTime())) return withTime.toISOString();
+    }
+    const midnight = new Date(`${dateStr}T00:00`);
+    if (!Number.isNaN(midnight.getTime())) return midnight.toISOString();
+  }
+  const parsed = new Date(dateStr);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  return new Date().toISOString();
+}
+
+function formatTimeLabel(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
 function isoForWeekday(target: Weekday, base = new Date()): string {
   const today = startOfDay(base);
   const diff = target - (today.getDay() as Weekday);
   return new Date(today.getTime() + diff * 86400000).toISOString();
 }
 function nextOccurrence(currentISO: string, rule: Recurrence): string | null {
-  const cur = startOfDay(new Date(currentISO));
-  const addDays = (d: number) =>
-    startOfDay(new Date(cur.getTime() + d * 86400000)).toISOString();
+  const currentDate = new Date(currentISO);
+  const curDay = startOfDay(currentDate);
+  const timeOffset = currentDate.getTime() - curDay.getTime();
+  const addDays = (d: number) => {
+    const nextDay = startOfDay(new Date(curDay.getTime() + d * 86400000));
+    return new Date(nextDay.getTime() + timeOffset).toISOString();
+  };
   let next: string | null = null;
   switch (rule.type) {
     case "none":
@@ -506,9 +612,9 @@ function nextOccurrence(currentISO: string, rule: Recurrence): string | null {
     case "every":
       next = addDays(rule.unit === "day" ? rule.n : rule.n * 7); break;
     case "monthlyDay": {
-      const y = cur.getFullYear(), m = cur.getMonth();
-      const n = new Date(y, m + 1, Math.min(rule.day, 28));
-      next = startOfDay(n).toISOString();
+      const y = curDay.getFullYear(), m = curDay.getMonth();
+      const n = startOfDay(new Date(y, m + 1, Math.min(rule.day, 28)));
+      next = new Date(n.getTime() + timeOffset).toISOString();
       break;
     }
   }
@@ -592,6 +698,17 @@ function useSettings() {
       const walletPrimaryCurrency = parsed?.walletPrimaryCurrency === "usd" ? "usd" : "sat";
       const npubCashLightningAddressEnabled = parsed?.npubCashLightningAddressEnabled === true;
       const npubCashAutoClaim = npubCashLightningAddressEnabled && parsed?.npubCashAutoClaim === true;
+      const pushRaw = parsed?.pushNotifications;
+      const pushPreferences: PushPreferences = {
+        enabled: pushRaw?.enabled === true,
+        platform: pushRaw?.platform === "android" ? "android" : "ios",
+        deviceId: typeof pushRaw?.deviceId === 'string' ? pushRaw.deviceId : undefined,
+        subscriptionId: typeof pushRaw?.subscriptionId === 'string' ? pushRaw.subscriptionId : undefined,
+        permission:
+          pushRaw?.permission === 'granted' || pushRaw?.permission === 'denied'
+            ? pushRaw.permission
+            : DEFAULT_PUSH_PREFERENCES.permission,
+      };
       if (parsed && typeof parsed === "object") {
         delete (parsed as Record<string, unknown>).theme;
         delete (parsed as Record<string, unknown>).backgroundAccents;
@@ -619,6 +736,7 @@ function useSettings() {
         walletPrimaryCurrency: walletConversionEnabled ? walletPrimaryCurrency : "sat",
         npubCashLightningAddressEnabled,
         npubCashAutoClaim: npubCashLightningAddressEnabled ? npubCashAutoClaim : false,
+        pushNotifications: { ...DEFAULT_PUSH_PREFERENCES, ...pushPreferences },
       };
     } catch {
       return {
@@ -642,12 +760,16 @@ function useSettings() {
         walletPrimaryCurrency: "sat",
         npubCashLightningAddressEnabled: false,
         npubCashAutoClaim: false,
+        pushNotifications: { ...DEFAULT_PUSH_PREFERENCES },
       };
     }
   });
   const setSettings = useCallback((s: Partial<Settings>) => {
     setSettingsRaw(prev => {
       const next = { ...prev, ...s };
+      if (s.pushNotifications) {
+        next.pushNotifications = { ...prev.pushNotifications, ...DEFAULT_PUSH_PREFERENCES, ...s.pushNotifications };
+      }
       if (!next.backgroundImage) {
         next.backgroundImage = null;
         next.backgroundAccent = null;
@@ -793,23 +915,57 @@ function useBoards() {
 
 function useTasks() {
   const [tasks, setTasks] = useState<Task[]>(() => {
-    try {
-      const raw = JSON.parse(localStorage.getItem(LS_TASKS) || "[]");
-      if (Array.isArray(raw)) {
-        const orderMap = new Map<string, number>();
-        return raw.map((t: Task) => {
-          const next = orderMap.get(t.boardId) ?? 0;
-          const order = typeof t.order === 'number' ? t.order : next;
-          orderMap.set(t.boardId, order + 1);
-          return { ...t, order } as Task;
-        });
+    const loadStored = (): any[] => {
+      try {
+        const current = localStorage.getItem(LS_TASKS);
+        if (current) {
+          const parsed = JSON.parse(current);
+          if (Array.isArray(parsed)) return parsed;
+        }
+      } catch {}
+      for (const legacy of LS_TASKS_LEGACY) {
+        try {
+          const raw = localStorage.getItem(legacy);
+          if (!raw) continue;
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed;
+        } catch {}
       }
       return [];
-    } catch { return []; }
+    };
+
+    const rawTasks = loadStored();
+    const orderMap = new Map<string, number>();
+    return rawTasks
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const fallbackBoard = typeof (entry as any).boardId === 'string' ? (entry as any).boardId : 'week-default';
+        const boardId = fallbackBoard;
+        const next = orderMap.get(boardId) ?? 0;
+        const explicitOrder = typeof (entry as any).order === 'number' ? (entry as any).order : next;
+        orderMap.set(boardId, explicitOrder + 1);
+        const dueISO = typeof (entry as any).dueISO === 'string' ? (entry as any).dueISO : new Date().toISOString();
+        const dueTimeEnabled = typeof (entry as any).dueTimeEnabled === 'boolean' ? (entry as any).dueTimeEnabled : undefined;
+        const reminders = sanitizeReminderList((entry as any).reminders);
+        const id = typeof (entry as any).id === 'string' ? (entry as any).id : crypto.randomUUID();
+        return {
+          ...(entry as Task),
+          id,
+          boardId,
+          order: explicitOrder,
+          dueISO,
+          ...(typeof dueTimeEnabled === 'boolean' ? { dueTimeEnabled } : {}),
+          ...(reminders !== undefined ? { reminders } : {}),
+        } as Task;
+      })
+      .filter((t): t is Task => !!t);
   });
   useEffect(() => {
     try {
       localStorage.setItem(LS_TASKS, JSON.stringify(tasks));
+      for (const legacy of LS_TASKS_LEGACY) {
+        try { localStorage.removeItem(legacy); } catch {}
+      }
     } catch (err) {
       console.error('Failed to save tasks', err);
     }
@@ -1238,6 +1394,9 @@ export default function App() {
     return new Date().getDay() as Weekday;
   });
   const [scheduleDate, setScheduleDate] = useState<string>("");
+  const [scheduleTime, setScheduleTime] = useState<string>("");
+  const [pushWorkState, setPushWorkState] = useState<"idle" | "enabling" | "disabling">("idle");
+  const [pushError, setPushError] = useState<string | null>(null);
   const [inlineTitles, setInlineTitles] = useState<Record<string, string>>({});
 
   function handleBoardSelect(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -1613,6 +1772,47 @@ export default function App() {
     [tasksForBoard]
   );
 
+  const reminderTasks = useMemo(() => tasks.filter(taskHasReminders), [tasks]);
+  const reminderPayloadRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const pushPrefs = settings.pushNotifications;
+    if (!pushPrefs?.enabled || !pushPrefs.deviceId || !pushPrefs.subscriptionId) {
+      reminderPayloadRef.current = null;
+      return;
+    }
+    if (!WORKER_BASE_URL) {
+      return;
+    }
+
+    const remindersPayload = reminderTasks
+      .map((task) => ({
+        taskId: task.id,
+        boardId: task.boardId,
+        dueISO: task.dueISO,
+        title: task.title,
+        minutesBefore: (task.reminders ?? []).map(reminderPresetToMinutes).sort((a, b) => a - b),
+      }))
+      .sort((a, b) => a.taskId.localeCompare(b.taskId));
+    const payloadString = JSON.stringify(remindersPayload);
+    if (reminderPayloadRef.current === payloadString) return;
+    reminderPayloadRef.current = payloadString;
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      syncRemindersToWorker(pushPrefs, reminderTasks, { signal: controller.signal }).catch((err) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        console.error('Reminder sync failed', err);
+        setPushError(err instanceof Error ? err.message : 'Failed to sync reminders');
+      });
+    }, 400);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [reminderTasks, settings.pushNotifications]);
+
   /* ---------- Helpers ---------- */
   function resolveQuickRule(): Recurrence {
     switch (quickRule) {
@@ -1688,6 +1888,8 @@ export default function App() {
     const colTag = (b.kind === "week") ? (t.column === "bounties" ? "bounties" : "day") : (t.columnId || "");
     const tags: string[][] = [["d", t.id],["b", bTag],["col", String(colTag)],["status", status]];
     const body: any = { title: t.title, note: t.note || "", dueISO: t.dueISO, completedAt: t.completedAt, completedBy: t.completedBy, recurrence: t.recurrence, hiddenUntilISO: t.hiddenUntilISO, createdBy: t.createdBy, order: t.order, streak: t.streak, seriesId: t.seriesId };
+    body.dueTimeEnabled = typeof t.dueTimeEnabled === 'boolean' ? t.dueTimeEnabled : null;
+    body.reminders = Array.isArray(t.reminders) ? t.reminders : null;
     // Include explicit nulls to signal removals when undefined
     body.images = (typeof t.images === 'undefined') ? null : t.images;
     body.bounty = (typeof t.bounty === 'undefined') ? null : t.bounty;
@@ -1793,6 +1995,17 @@ export default function App() {
     }
     const status = tagValue(ev, "status");
     const col = tagValue(ev, "col");
+    const hasDueTimeField = Object.prototype.hasOwnProperty.call(payload, 'dueTimeEnabled');
+    const incomingDueTime = hasDueTimeField
+      ? (payload.dueTimeEnabled === null ? undefined : typeof payload.dueTimeEnabled === 'boolean' ? payload.dueTimeEnabled : undefined)
+      : undefined;
+    const hasRemindersField = Object.prototype.hasOwnProperty.call(payload, 'reminders');
+    let incomingReminders: ReminderPreset[] | undefined;
+    if (hasRemindersField) {
+      if (payload.reminders === null) incomingReminders = [];
+      else if (Array.isArray(payload.reminders)) incomingReminders = sanitizeReminderList(payload.reminders) ?? [];
+      else incomingReminders = [];
+    }
       const base: Task = {
         id: taskId,
         boardId: lb.id,
@@ -1810,6 +2023,8 @@ export default function App() {
       seriesId: payload.seriesId,
       subtasks: Array.isArray(payload.subtasks) ? payload.subtasks : undefined,
     };
+    if (hasDueTimeField) base.dueTimeEnabled = incomingDueTime;
+    if (hasRemindersField) base.reminders = incomingReminders;
     if (lb.kind === "week") base.column = col === "bounties" ? "bounties" : "day";
     else if (lb.kind === "lists") base.columnId = col || (lb.columns[0]?.id || "");
     setTasks(prev => {
@@ -1881,6 +2096,162 @@ export default function App() {
       }
     });
   }, [setTasks, tagValue]);
+
+  async function syncRemindersToWorker(push: PushPreferences, reminderTasks: Task[], options?: { signal?: AbortSignal }) {
+    if (!WORKER_BASE_URL) throw new Error('Set VITE_WORKER_BASE_URL to enable push notifications');
+    if (!push.deviceId || !push.subscriptionId) return;
+    const remindersPayload = reminderTasks
+      .map((task) => ({
+        taskId: task.id,
+        boardId: task.boardId,
+        dueISO: task.dueISO,
+        title: task.title,
+        minutesBefore: (task.reminders ?? []).map(reminderPresetToMinutes).sort((a, b) => a - b),
+      }))
+      .sort((a, b) => a.taskId.localeCompare(b.taskId));
+    const res = await fetch(`${WORKER_BASE_URL}/api/reminders`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceId: push.deviceId,
+        subscriptionId: push.subscriptionId,
+        reminders: remindersPayload,
+      }),
+      signal: options?.signal,
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to sync reminders (${res.status})`);
+    }
+  }
+
+  async function enablePushNotifications(platform: PushPlatform): Promise<void> {
+    if (pushWorkState === 'enabling') return;
+    setPushWorkState('enabling');
+    setPushError(null);
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        throw new Error('Push notifications are not supported on this device.');
+      }
+      if (!VAPID_PUBLIC_KEY) {
+        throw new Error('Missing VAPID public key (VITE_VAPID_PUBLIC_KEY).');
+      }
+      if (!WORKER_BASE_URL) {
+        throw new Error('Missing worker base URL (VITE_WORKER_BASE_URL).');
+      }
+
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        throw new Error('Notifications permission was not granted.');
+      }
+
+      const registration = await navigator.serviceWorker.ready;
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        });
+      }
+
+      const deviceId = settings.pushNotifications.deviceId || crypto.randomUUID();
+      const subscriptionJson = subscription.toJSON();
+
+      const res = await fetch(`${WORKER_BASE_URL}/api/devices`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId,
+          platform,
+          subscription: subscriptionJson,
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(`Failed to register device (${res.status})`);
+      }
+      let subscriptionId: string | undefined;
+      try {
+        const data = await res.json();
+        if (data && typeof data.subscriptionId === 'string') subscriptionId = data.subscriptionId;
+      } catch {}
+
+      const updated: PushPreferences = {
+        ...settings.pushNotifications,
+        enabled: true,
+        platform,
+        deviceId,
+        subscriptionId,
+        permission,
+      };
+
+      const reminderTasks = tasks.filter(taskHasReminders);
+      const remindersPayloadString = JSON.stringify(
+        reminderTasks
+          .map((task) => ({
+            taskId: task.id,
+            boardId: task.boardId,
+            dueISO: task.dueISO,
+            title: task.title,
+            minutesBefore: (task.reminders ?? []).map(reminderPresetToMinutes).sort((a, b) => a - b),
+          }))
+          .sort((a, b) => a.taskId.localeCompare(b.taskId)),
+      );
+      reminderPayloadRef.current = remindersPayloadString;
+      await syncRemindersToWorker(updated, reminderTasks);
+
+      setSettings({ pushNotifications: updated });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to enable push notifications';
+      setPushError(message);
+      if (typeof Notification !== 'undefined') {
+        setSettings({ pushNotifications: { ...settings.pushNotifications, permission: Notification.permission } });
+      }
+      throw err;
+    } finally {
+      setPushWorkState('idle');
+    }
+  }
+
+  async function disablePushNotifications(): Promise<void> {
+    if (pushWorkState === 'disabling') return;
+    setPushWorkState('disabling');
+    setPushError(null);
+    try {
+      if ('serviceWorker' in navigator) {
+        try {
+          const registration = await navigator.serviceWorker.ready;
+          const subscription = await registration.pushManager.getSubscription();
+          if (subscription) await subscription.unsubscribe();
+        } catch {}
+      }
+
+      if (WORKER_BASE_URL && settings.pushNotifications.deviceId) {
+        try {
+          await fetch(`${WORKER_BASE_URL}/api/devices/${settings.pushNotifications.deviceId}`, {
+            method: 'DELETE',
+          });
+        } catch {}
+      }
+
+      setSettings({
+        pushNotifications: {
+          ...settings.pushNotifications,
+          enabled: false,
+          subscriptionId: undefined,
+          permission: (typeof Notification !== 'undefined' ? Notification.permission : settings.pushNotifications.permission),
+        },
+      });
+      reminderPayloadRef.current = null;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to disable push notifications';
+      setPushError(message);
+      if (typeof Notification !== 'undefined') {
+        setSettings({ pushNotifications: { ...settings.pushNotifications, permission: Notification.permission } });
+      }
+      throw err;
+    } finally {
+      setPushWorkState('idle');
+    }
+  }
 
   async function handleAddPaste(e: React.ClipboardEvent<HTMLInputElement>) {
     const items = e.clipboardData?.items;
@@ -1974,6 +2345,37 @@ export default function App() {
     return changed ? out : arr;
   }
 
+<<<<<<< Updated upstream
+=======
+  function buildImportedTask(raw: string, overrides: Partial<Task> = {}): Task | null {
+    if (!currentBoard) return null;
+    try {
+      const parsed: any = JSON.parse(raw);
+      if (!(parsed && typeof parsed === "object" && parsed.title && parsed.dueISO)) return null;
+      const nextOrder = nextOrderForBoard(currentBoard.id, tasks);
+      const id = crypto.randomUUID();
+      const dueISO = typeof parsed.dueISO === 'string' ? parsed.dueISO : new Date().toISOString();
+      const dueTimeEnabled = typeof parsed.dueTimeEnabled === 'boolean' ? parsed.dueTimeEnabled : undefined;
+      const reminders = sanitizeReminderList(parsed.reminders);
+      const imported: Task = {
+        ...parsed,
+        id,
+        boardId: currentBoard.id,
+        order: typeof parsed.order === "number" ? parsed.order : nextOrder,
+        dueISO,
+        ...(typeof dueTimeEnabled === 'boolean' ? { dueTimeEnabled } : {}),
+        ...(reminders !== undefined ? { reminders } : {}),
+        ...overrides,
+      };
+      if (imported.recurrence) imported.seriesId = imported.seriesId || id;
+      else imported.seriesId = undefined;
+      return imported;
+    } catch {
+      return null;
+    }
+  }
+
+>>>>>>> Stashed changes
   function addTask(keepKeyboard = false) {
     if (!currentBoard) return;
 
@@ -1981,6 +2383,7 @@ export default function App() {
 
     const raw = newTitle.trim();
     if (raw) {
+<<<<<<< Updated upstream
       try {
         const parsed: any = JSON.parse(raw);
         if (parsed && typeof parsed === "object" && parsed.title && parsed.dueISO) {
@@ -2010,6 +2413,27 @@ export default function App() {
           return;
         }
       } catch {}
+=======
+      const imported = buildImportedTask(raw);
+      if (imported) {
+        applyHiddenForFuture(imported);
+        animateTaskArrival(originRect, imported, currentBoard);
+        setTasks(prev => {
+          const out = [...prev, imported];
+          return settings.showFullWeekRecurring && imported.recurrence ? ensureWeekRecurrences(out, [imported]) : out;
+        });
+        maybePublishTask(imported).catch(() => {});
+        setNewTitle("");
+        setNewImages([]);
+        setQuickRule("none");
+        setAddCustomRule(R_NONE);
+        setScheduleDate("");
+        setScheduleTime("");
+        if (keepKeyboard) newTitleRef.current?.focus();
+        else newTitleRef.current?.blur();
+        return;
+      }
+>>>>>>> Stashed changes
     }
 
     const title = raw || (newImages.length ? "Image" : "");
@@ -2018,8 +2442,11 @@ export default function App() {
     const candidate = resolveQuickRule();
     const recurrence = candidate.type === "none" ? undefined : candidate;
     let dueISO = isoForWeekday(0);
+    let dueTimeFlag = false;
     if (scheduleDate) {
-      dueISO = new Date(scheduleDate + "T00:00").toISOString();
+      const hasTime = !!scheduleTime;
+      dueTimeFlag = hasTime;
+      dueISO = isoFromDateTime(scheduleDate, hasTime ? scheduleTime : undefined);
     } else if (currentBoard?.kind === "week" && dayChoice !== "bounties") {
       dueISO = isoForWeekday(dayChoice as Weekday);
     }
@@ -2038,6 +2465,7 @@ export default function App() {
       order: nextOrder,
       streak: recurrence && (recurrence.type === "daily" || recurrence.type === "weekly") ? 0 : undefined,
     };
+    if (dueTimeFlag) t.dueTimeEnabled = true;
     if (newImages.length) t.images = newImages;
     if (currentBoard?.kind === "week") {
       t.column = dayChoice === "bounties" ? "bounties" : "day";
@@ -2060,6 +2488,7 @@ export default function App() {
     setQuickRule("none");
     setAddCustomRule(R_NONE);
     setScheduleDate("");
+    setScheduleTime("");
     if (keepKeyboard) newTitleRef.current?.focus();
     else newTitleRef.current?.blur();
   }
@@ -2873,6 +3302,7 @@ export default function App() {
                     const v = e.target.value;
                     setDayChoice(v === "bounties" ? "bounties" : (Number(v) as Weekday));
                     setScheduleDate("");
+                    setScheduleTime("");
                   }}
                   className="pill-select flex-1 min-w-0 truncate"
                 >
@@ -2934,7 +3364,7 @@ export default function App() {
                       ref={el => setColumnRef(`week-day-${day}`, el)}
                       key={day}
                       title={WD_SHORT[day]}
-                      onTitleClick={() => { setDayChoice(day); setScheduleDate(""); }}
+                      onTitleClick={() => { setDayChoice(day); setScheduleDate(""); setScheduleTime(""); }}
                       onDropCard={(payload) => moveTask(payload.id, { type: "day", day }, payload.beforeId)}
                       onDropEnd={handleDragEnd}
                       data-day={day}
@@ -2989,7 +3419,7 @@ export default function App() {
                   <DroppableColumn
                     ref={el => setColumnRef("week-bounties", el)}
                     title="Bounties"
-                    onTitleClick={() => { setDayChoice("bounties"); setScheduleDate(""); }}
+                    onTitleClick={() => { setDayChoice("bounties"); setScheduleDate(""); setScheduleTime(""); }}
                     onDropCard={(payload) => moveTask(payload.id, { type: "bounties" }, payload.beforeId)}
                     onDropEnd={handleDragEnd}
                     scrollable={settings.inlineAdd}
@@ -3134,7 +3564,7 @@ export default function App() {
                           </div>
                           <div className="text-xs text-secondary">
                             {currentBoard?.kind === "week"
-                              ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
+                              ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}${t.dueTimeEnabled ? ` at ${formatTimeLabel(t.dueISO)}` : ""}`
                               : "Completed item"}
                             {t.completedAt ? ` • Completed ${new Date(t.completedAt).toLocaleString()}` : ""}
                             {settings.streaksEnabled &&
@@ -3214,7 +3644,7 @@ export default function App() {
                       <div className="text-sm font-medium leading-[1.15]">{renderTitleWithLink(t.title, t.note)}</div>
                       <div className="text-xs text-secondary">
                         {currentBoard?.kind === "week"
-                          ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}`
+                          ? `Scheduled ${WD_SHORT[new Date(t.dueISO).getDay() as Weekday]}${t.dueTimeEnabled ? ` at ${formatTimeLabel(t.dueISO)}` : ""}`
                           : "Hidden item"}
                         {t.hiddenUntilISO ? ` • Reveals ${new Date(t.hiddenUntilISO).toLocaleDateString()}` : ""}
                       </div>
@@ -3389,6 +3819,10 @@ export default function App() {
           onGenerateKey={rotateNostrKey}
           onSetKey={setCustomNostrKey}
           onRestartTutorial={handleRestartTutorial}
+          pushWorkState={pushWorkState}
+          pushError={pushError}
+          onEnablePush={enablePushNotifications}
+          onDisablePush={disablePushNotifications}
           onShareBoard={(boardId, relayCsv) => {
             const r = (relayCsv || "").split(",").map(s=>s.trim()).filter(Boolean);
             const relays = r.length ? r : defaultRelays;
@@ -3899,6 +4333,11 @@ function Card({
                 <span>{task.streak}</span>
               </div>
             )}
+          {task.dueTimeEnabled && (
+            <div className="text-xs text-secondary">
+              Due at {formatTimeLabel(task.dueISO)}
+            </div>
+          )}
         </div>
       </div>
 
@@ -3981,13 +4420,25 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
   const dragSubtaskIdRef = useRef<string | null>(null);
   const [rule, setRule] = useState<Recurrence>(task.recurrence ?? R_NONE);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [scheduledDate, setScheduledDate] = useState(task.dueISO.slice(0,10));
+  const initialDate = isoDatePart(task.dueISO);
+  const initialTime = isoTimePart(task.dueISO);
+  const defaultHasTime = task.dueTimeEnabled ?? false;
+  const [hasDueTime, setHasDueTime] = useState<boolean>(defaultHasTime);
+  const [scheduledDate, setScheduledDate] = useState(initialDate);
+  const [scheduledTime, setScheduledTime] = useState<string>(initialTime);
+  const [reminderSelection, setReminderSelection] = useState<ReminderPreset[]>(task.reminders ?? []);
   const [bountyAmount, setBountyAmount] = useState<number | "">(task.bounty?.amount ?? "");
   const [, setBountyState] = useState<Task["bounty"]["state"]>(task.bounty?.state || "locked");
   const [encryptWhenAttach, setEncryptWhenAttach] = useState(true);
   const { createSendToken, receiveToken, mintUrl } = useCashu();
   const [lockToRecipient, setLockToRecipient] = useState(false);
   const [recipientInput, setRecipientInput] = useState("");
+
+  useEffect(() => {
+    if (!hasDueTime && reminderSelection.length) {
+      setReminderSelection([]);
+    }
+  }, [hasDueTime, reminderSelection]);
 
   function normalizePubkey(input: string): string | null {
     const s = (input || "").trim();
@@ -4089,12 +4540,36 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
     reorderSubtasks(sourceHint, id, position);
   }, [reorderSubtasks]);
 
+  function handleDueTimeToggle(next: boolean) {
+    setHasDueTime(next);
+    if (next && !scheduledTime) {
+      if (initialTime) {
+        setScheduledTime(initialTime);
+      } else {
+        const now = new Date();
+        const fallback = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        setScheduledTime(fallback);
+      }
+    }
+  }
+
+  function toggleReminder(id: ReminderPreset) {
+    setReminderSelection((prev) => {
+      const exists = prev.includes(id);
+      const next = exists ? prev.filter((item) => item !== id) : [...prev, id];
+      return [...next].sort((a, b) => (REMINDER_MINUTES.get(a) ?? 0) - (REMINDER_MINUTES.get(b) ?? 0));
+    });
+  }
+
   function buildTask(overrides: Partial<Task> = {}): Task {
-    const dueISO = new Date(scheduledDate + "T00:00").toISOString();
-    const due = startOfDay(new Date(dueISO));
+    const baseDate = scheduledDate || isoDatePart(task.dueISO);
+    const hasTime = hasDueTime && !!scheduledTime;
+    const dueISO = isoFromDateTime(baseDate, hasTime ? scheduledTime : undefined);
+    const due = startOfDay(new Date(`${baseDate}T00:00`));
     const nowSow = startOfWeek(new Date(), weekStart);
     const dueSow = startOfWeek(due, weekStart);
     const hiddenUntilISO = dueSow.getTime() > nowSow.getTime() ? dueSow.toISOString() : undefined;
+    const reminderValues = hasTime ? [...reminderSelection] : [];
     return {
       ...task,
       title,
@@ -4104,6 +4579,8 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
       recurrence: rule.type === "none" ? undefined : rule,
       dueISO,
       hiddenUntilISO,
+      dueTimeEnabled: hasTime ? true : undefined,
+      reminders: reminderValues,
       ...overrides,
     };
   }
@@ -4207,14 +4684,66 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
 
         <div>
           <label htmlFor="edit-schedule" className="block mb-1 text-sm font-medium">Scheduled for</label>
-          <input
-            id="edit-schedule"
-            type="date"
-            value={scheduledDate}
-            onChange={e=>setScheduledDate(e.target.value)}
-            className="pill-input w-full"
-            title="Scheduled date"
-          />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <input
+              id="edit-schedule"
+              type="date"
+              value={scheduledDate}
+              onChange={e=>setScheduledDate(e.target.value)}
+              className="pill-input w-full sm:max-w-[13rem]"
+              title="Scheduled date"
+            />
+            <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+              <label className="flex items-center gap-2 text-xs sm:text-sm text-secondary">
+                <input
+                  type="checkbox"
+                  checked={hasDueTime}
+                  onChange={(e) => handleDueTimeToggle(e.target.checked)}
+                />
+                Add due time
+              </label>
+              <input
+                type="time"
+                value={scheduledTime}
+                onChange={(e) => setScheduledTime(e.target.value)}
+                className="pill-input w-full sm:w-auto sm:min-w-[8.5rem]"
+                title="Scheduled time"
+                disabled={!hasDueTime}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="wallet-section space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-medium">Notifications</div>
+            {reminderSelection.length > 0 && (
+              <div className="ml-auto text-xs text-secondary">
+                {reminderSelection.map((id) => REMINDER_PRESETS.find((opt) => opt.id === id)?.badge || id).join(', ')}
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {REMINDER_PRESETS.map((opt) => {
+              const active = reminderSelection.includes(opt.id);
+              const cls = active ? 'accent-button button-sm pressable' : 'ghost-button button-sm pressable';
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className={cls}
+                  onClick={() => toggleReminder(opt.id)}
+                  disabled={!hasDueTime}
+                  title={opt.label}
+                >
+                  {opt.badge}
+                </button>
+              );
+            })}
+          </div>
+          {!hasDueTime && (
+            <div className="text-xs text-secondary">Set a due time to enable reminders.</div>
+          )}
         </div>
 
         {/* Recurrence section */}
@@ -4792,6 +5321,10 @@ function SettingsModal({
   onBoardChanged,
   onRestartTutorial,
   onClose,
+  pushWorkState,
+  pushError,
+  onEnablePush,
+  onDisablePush,
 }: {
   settings: Settings;
   boards: Board[];
@@ -4810,6 +5343,10 @@ function SettingsModal({
   onBoardChanged: (boardId: string, options?: { republishTasks?: boolean }) => void;
   onRestartTutorial: () => void;
   onClose: () => void;
+  pushWorkState: "idle" | "enabling" | "disabling";
+  pushError: string | null;
+  onEnablePush: (platform: PushPlatform) => Promise<void>;
+  onDisablePush: () => Promise<void>;
 }) {
   const [newBoardName, setNewBoardName] = useState("");
   const [manageBoardId, setManageBoardId] = useState<string | null>(null);
@@ -4839,7 +5376,13 @@ function SettingsModal({
   const pillButtonClass = useCallback((active: boolean) => `${active ? "accent-button" : "ghost-button"} pressable`, []);
   const backgroundInputRef = useRef<HTMLInputElement | null>(null);
   const backgroundAccentHex = settings.backgroundAccent ? settings.backgroundAccent.fill.toUpperCase() : null;
-
+  const pushPrefs = settings.pushNotifications ?? DEFAULT_PUSH_PREFERENCES;
+  const pushSupported = typeof window !== 'undefined' && 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
+  const workerConfigured = !!WORKER_BASE_URL;
+  const vapidConfigured = !!VAPID_PUBLIC_KEY;
+  const pushBusy = pushWorkState !== 'idle';
+  const permissionLabel = pushPrefs.permission ?? (typeof Notification !== 'undefined' ? Notification.permission : 'default');
+  
   const handleBackgroundImageSelection = useCallback(async (file: File | null) => {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
@@ -4870,6 +5413,22 @@ function SettingsModal({
       }
     }
   }, [setSettings, showToast]);
+
+  const updatePush = useCallback((patch: Partial<PushPreferences>) => {
+    setSettings({ pushNotifications: { ...pushPrefs, ...patch } });
+  }, [pushPrefs, setSettings]);
+
+  const handleEnablePush = useCallback(async () => {
+    try {
+      await onEnablePush(pushPrefs.platform);
+    } catch {}
+  }, [onEnablePush, pushPrefs.platform]);
+
+  const handleDisablePush = useCallback(async () => {
+    try {
+      await onDisablePush();
+    } catch {}
+  }, [onDisablePush]);
 
   const clearBackgroundImage = useCallback(() => {
     setSettings({
@@ -5745,6 +6304,64 @@ function SettingsModal({
               </div>
             </div>
           )}
+        </section>
+
+        {/* Push notifications */}
+        <section className="wallet-section space-y-3">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="text-sm font-medium">Push notifications</div>
+            <span className={`ml-auto text-xs ${pushPrefs.enabled ? 'text-emerald-400' : 'text-secondary'}`}>
+              {pushPrefs.enabled ? 'Enabled' : 'Disabled'}
+            </span>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <div className="text-sm font-medium mb-2">Platform</div>
+              <div className="flex gap-2">
+                <button
+                  className={pillButtonClass(pushPrefs.platform === 'ios')}
+                  onClick={() => updatePush({ platform: 'ios' })}
+                >iOS</button>
+                <button
+                  className={pillButtonClass(pushPrefs.platform === 'android')}
+                  onClick={() => updatePush({ platform: 'android' })}
+                >Android</button>
+              </div>
+              <div className="text-xs text-secondary mt-2">
+                Pick the platform where you plan to install Taskify as a PWA.
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <button
+                className={`${pushPrefs.enabled ? 'ghost-button' : 'accent-button'} button-sm pressable w-full sm:w-auto`}
+                onClick={pushPrefs.enabled ? handleDisablePush : handleEnablePush}
+                disabled={pushBusy || !pushSupported || !workerConfigured || !vapidConfigured}
+              >
+                {pushBusy ? 'Working…' : pushPrefs.enabled ? 'Disable push' : 'Enable push'}
+              </button>
+              <div className="text-xs text-secondary sm:ml-auto">
+                Permission: {permissionLabel}
+              </div>
+            </div>
+            {!pushSupported && (
+              <div className="text-xs text-secondary">
+                Push notifications require installing Taskify on iOS or Android and using a browser that supports the Push API.
+              </div>
+            )}
+            {(!workerConfigured || !vapidConfigured) && (
+              <div className="text-xs text-secondary">
+                Configure VITE_WORKER_BASE_URL and VITE_VAPID_PUBLIC_KEY to enable push registration.
+              </div>
+            )}
+            {pushError && (
+              <div className="text-xs text-rose-400 break-words">{pushError}</div>
+            )}
+            {pushPrefs.enabled && pushPrefs.deviceId && (
+              <div className="text-xs text-secondary break-words">
+                Device ID: {pushPrefs.deviceId}
+              </div>
+            )}
+          </div>
         </section>
 
         {/* Wallet */}

@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import type { Proof } from "@cashu/cashu-ts";
 import { getDecodedToken } from "@cashu/cashu-ts";
 import { CashuManager } from "../wallet/CashuManager";
-import { getActiveMint, setActiveMint as persistActiveMint } from "../wallet/storage";
+import { getActiveMint, loadStore, setActiveMint as persistActiveMint } from "../wallet/storage";
 
 type MintInfo = {
   name?: string;
@@ -15,6 +15,7 @@ type CashuContextType = {
   mintUrl: string;
   setMintUrl: (url: string) => Promise<void>;
   balance: number;
+  totalBalance: number;
   proofs: Proof[];
   info: MintInfo | null;
   createMintInvoice: (amount: number, description?: string) => Promise<{ request: string; quote: string; expiry: number }>;
@@ -32,14 +33,34 @@ export function CashuProvider({ children }: { children: React.ReactNode }) {
   const [manager, setManager] = useState<CashuManager | null>(null);
   const [ready, setReady] = useState(false);
   const [balance, setBalance] = useState(0);
+  const [totalBalance, setTotalBalance] = useState(() => calculateTotalBalance());
   const [proofs, setProofs] = useState<Proof[]>([]);
   const [info, setInfo] = useState<MintInfo | null>(null);
+
+  function calculateTotalBalance(): number {
+    try {
+      const store = loadStore();
+      return Object.values(store).reduce((outerTotal, proofsForMint) => {
+        if (!Array.isArray(proofsForMint)) return outerTotal;
+        const mintProofs = proofsForMint as Proof[];
+        const mintSum = mintProofs.reduce((sum, proof) => sum + (proof?.amount || 0), 0);
+        return outerTotal + mintSum;
+      }, 0);
+    } catch {
+      return 0;
+    }
+  }
+
+  const refreshTotalBalance = useCallback(() => {
+    setTotalBalance(calculateTotalBalance());
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     async function boot() {
       setReady(false);
       setInfo(null);
+      refreshTotalBalance();
       if (!mintUrl) {
         setManager(null);
         setBalance(0);
@@ -56,6 +77,7 @@ export function CashuProvider({ children }: { children: React.ReactNode }) {
         setProofs(m.proofs);
         const mi = await m.wallet.getMintInfo();
         setInfo({ name: mi?.name, unit: (mi as any)?.unit ?? "sat", version: mi?.version });
+        refreshTotalBalance();
       } catch (e) {
         console.error("Failed to init Cashu", e);
         setManager(null);
@@ -65,7 +87,7 @@ export function CashuProvider({ children }: { children: React.ReactNode }) {
     }
     boot();
     return () => { cancelled = true; };
-  }, [mintUrl]);
+  }, [mintUrl, refreshTotalBalance]);
 
   const setMintUrl = useCallback(async (url: string) => {
     const clean = url.trim().replace(/\/$/, "");
@@ -90,8 +112,9 @@ export function CashuProvider({ children }: { children: React.ReactNode }) {
     const proofs = await manager.claimMint(quoteId, amount);
     setBalance(manager.balance);
     setProofs(manager.proofs);
+    refreshTotalBalance();
     return proofs;
-  }, [manager]);
+  }, [manager, refreshTotalBalance]);
 
   const receiveToken = useCallback(async (encoded: string) => {
     if (!manager) throw new Error("Wallet not ready");
@@ -107,6 +130,7 @@ export function CashuProvider({ children }: { children: React.ReactNode }) {
         const other = new CashuManager(tokenMint);
         await other.init();
         const proofs = await other.receiveToken(encoded);
+        refreshTotalBalance();
         // Do not touch current manager balance/proofs because active mint differs.
         return { proofs, usedMintUrl: other.mintUrl, activeMintUrl: manager.mintUrl, crossMint: true };
       }
@@ -117,30 +141,34 @@ export function CashuProvider({ children }: { children: React.ReactNode }) {
     const proofs = await manager.receiveToken(encoded);
     setBalance(manager.balance);
     setProofs(manager.proofs);
+    refreshTotalBalance();
     return { proofs, usedMintUrl: manager.mintUrl, activeMintUrl: manager.mintUrl, crossMint: false };
-  }, [manager]);
+  }, [manager, refreshTotalBalance]);
 
   const createSendToken = useCallback(async (amount: number) => {
     if (!manager) throw new Error("Wallet not ready");
     const res = await manager.createSendToken(amount);
     setBalance(manager.balance);
     setProofs(manager.proofs);
+    refreshTotalBalance();
     return { token: res.token, proofs: res.send, mintUrl: manager.mintUrl };
-  }, [manager]);
+  }, [manager, refreshTotalBalance]);
 
   const payInvoice = useCallback(async (invoice: string) => {
     if (!manager) throw new Error("Wallet not ready");
     const res = await manager.payInvoice(invoice);
     setBalance(manager.balance);
     setProofs(manager.proofs);
+    refreshTotalBalance();
     return { state: (res.quote as any)?.state ?? "" };
-  }, [manager]);
+  }, [manager, refreshTotalBalance]);
 
   const value = useMemo<CashuContextType>(() => ({
     ready,
     mintUrl,
     setMintUrl,
     balance,
+    totalBalance,
     proofs,
     info,
     createMintInvoice,
@@ -149,7 +177,7 @@ export function CashuProvider({ children }: { children: React.ReactNode }) {
     receiveToken,
     createSendToken,
     payInvoice,
-  }), [ready, mintUrl, setMintUrl, balance, proofs, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice]);
+  }), [ready, mintUrl, setMintUrl, balance, totalBalance, proofs, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice]);
 
   return <CashuContext.Provider value={value}>{children}</CashuContext.Provider>;
 }

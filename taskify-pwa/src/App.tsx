@@ -2499,6 +2499,35 @@ export default function App() {
     if (!raw) return;
 
     const originRect = inlineInputRefs.current.get(key)?.getBoundingClientRect() || null;
+    const inlineOverrides: Partial<Task> = { createdBy: nostrPK || undefined };
+
+    if (currentBoard?.kind === "week") {
+      if (key === "bounties") {
+        inlineOverrides.column = "bounties";
+        inlineOverrides.columnId = undefined;
+      } else {
+        inlineOverrides.column = "day";
+        inlineOverrides.columnId = undefined;
+        inlineOverrides.dueISO = isoForWeekday(Number(key) as Weekday);
+      }
+    } else {
+      inlineOverrides.columnId = key;
+      inlineOverrides.column = undefined;
+    }
+
+    const imported = buildImportedTask(raw, inlineOverrides);
+    if (imported) {
+      applyHiddenForFuture(imported);
+      animateTaskArrival(originRect, imported, currentBoard);
+      setTasks(prev => {
+        const out = [...prev, imported];
+        return settings.showFullWeekRecurring && imported.recurrence ? ensureWeekRecurrences(out, [imported]) : out;
+      });
+      maybePublishTask(imported).catch(() => {});
+      setInlineTitles(prev => ({ ...prev, [key]: "" }));
+      return;
+    }
+
     let dueISO = isoForWeekday(0);
     const nextOrder = nextOrderForBoard(currentBoard.id, tasks);
     const id = crypto.randomUUID();

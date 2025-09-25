@@ -335,7 +335,18 @@ export function CashuWalletModal({
   npubCashLightningAddressEnabled: boolean;
   npubCashAutoClaim: boolean;
 }) {
-  const { mintUrl, setMintUrl, balance, info, createMintInvoice, checkMintQuote, claimMint, receiveToken, createSendToken, payInvoice: payMintInvoice } = useCashu();
+  const {
+    mintUrl,
+    setMintUrl,
+    totalBalance,
+    info,
+    createMintInvoice,
+    checkMintQuote,
+    claimMint,
+    receiveToken,
+    createSendToken,
+    payInvoice: payMintInvoice,
+  } = useCashu();
   const { status: nwcStatus, connection: nwcConnection, info: nwcInfo, lastError: nwcError, connect: connectNwc, disconnect: disconnectNwc, refreshInfo: refreshNwcInfo, getBalanceMsat: getNwcBalanceMsat, payInvoice: payWithNwc, makeInvoice: makeNwcInvoice } = useNwc();
   const { show: showToast } = useToast();
 
@@ -1021,8 +1032,8 @@ export function CashuWalletModal({
 
   const usdBalance = useMemo(() => {
     if (!walletConversionEnabled || btcUsdPrice == null || btcUsdPrice <= 0) return null;
-    return (balance / SATS_PER_BTC) * btcUsdPrice;
-  }, [walletConversionEnabled, btcUsdPrice, balance]);
+    return (totalBalance / SATS_PER_BTC) * btcUsdPrice;
+  }, [walletConversionEnabled, btcUsdPrice, totalBalance]);
 
   const primaryCurrency = effectivePrimaryCurrency === "usd" ? "usd" : "sat";
   const unitLabel = primaryCurrency === "usd" ? "USD" : "SAT";
@@ -1085,19 +1096,19 @@ export function CashuWalletModal({
       }
       return formatUsdAmount(usdBalance);
     }
-    return `${satFormatter.format(Math.max(0, Math.floor(balance)))} sat`;
-  }, [primaryCurrency, usdBalance, walletConversionEnabled, priceStatus, formatUsdAmount, satFormatter, balance]);
+    return `${satFormatter.format(Math.max(0, Math.floor(totalBalance)))} sat`;
+  }, [primaryCurrency, usdBalance, walletConversionEnabled, priceStatus, formatUsdAmount, satFormatter, totalBalance]);
 
   const secondaryAmountDisplay = useMemo(() => {
     if (!walletConversionEnabled) return null;
     if (primaryCurrency === "usd") {
-      return `≈ ${satFormatter.format(Math.max(0, Math.floor(balance)))} sat`;
+      return `≈ ${satFormatter.format(Math.max(0, Math.floor(totalBalance)))} sat`;
     }
     if (usdBalance == null) {
       return priceStatus === "error" ? "USD unavailable" : "Fetching price…";
     }
     return `≈ ${formatUsdAmount(usdBalance)}`;
-  }, [walletConversionEnabled, primaryCurrency, satFormatter, balance, usdBalance, priceStatus, formatUsdAmount]);
+  }, [walletConversionEnabled, primaryCurrency, satFormatter, totalBalance, usdBalance, priceStatus, formatUsdAmount]);
 
   const priceMeta = useMemo(() => {
     if (!walletConversionEnabled) return null;

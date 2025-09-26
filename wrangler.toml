@@ -38,5 +38,5 @@ id = "45bbad6e354443ff9b101d61a27e5dd9"
 binding = "TASKIFY_DB"
 database_name = "taskify-notifications"
 # TODO: replace with your D1 database ID after running `wrangler d1 create`
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "1f1f5293-4694-4319-b56b-320faa325bf1"
 migrations_dir = "worker/migrations"

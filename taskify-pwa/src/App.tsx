@@ -5583,6 +5583,7 @@ function SettingsModal({
   const [relaysCsv, setRelaysCsv] = useState("");
   const [customSk, setCustomSk] = useState("");
   const [showViewAdvanced, setShowViewAdvanced] = useState(false);
+  const [showPushAdvanced, setShowPushAdvanced] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [reloadNeeded, setReloadNeeded] = useState(false);
   const [newDefaultRelay, setNewDefaultRelay] = useState("");
@@ -6266,10 +6267,8 @@ function SettingsModal({
               <div className="flex flex-wrap gap-2">
                 <button className={pillButtonClass(settings.baseFontSize == null)} onClick={() => setSettings({ baseFontSize: null })}>System</button>
                 <button className={pillButtonClass(settings.baseFontSize === 14)} onClick={() => setSettings({ baseFontSize: 14 })}>Small</button>
-                <button className={pillButtonClass(settings.baseFontSize === 16)} onClick={() => setSettings({ baseFontSize: 16 })}>Default</button>
-                <button className={pillButtonClass(settings.baseFontSize === 18)} onClick={() => setSettings({ baseFontSize: 18 })}>Large</button>
-                <button className={pillButtonClass(settings.baseFontSize === 20)} onClick={() => setSettings({ baseFontSize: 20 })}>X-Large</button>
-                <button className={pillButtonClass(settings.baseFontSize === 22)} onClick={() => setSettings({ baseFontSize: 22 })}>XX-Large</button>
+                <button className={pillButtonClass(settings.baseFontSize === 20)} onClick={() => setSettings({ baseFontSize: 20 })}>Large</button>
+                <button className={pillButtonClass(settings.baseFontSize === 22)} onClick={() => setSettings({ baseFontSize: 22 })}>X-Large</button>
               </div>
               <div className="text-xs text-secondary mt-2">Scales the entire UI. Defaults to a compact size.</div>
             </div>
@@ -6281,10 +6280,148 @@ function SettingsModal({
               </div>
             </div>
             <div>
-              <div className="text-sm font-medium mb-2">Add tasks within lists</div>
-              <div className="flex gap-2">
-                <button className={pillButtonClass(settings.inlineAdd)} onClick={() => setSettings({ inlineAdd: true })}>Inline</button>
-                <button className={pillButtonClass(!settings.inlineAdd)} onClick={() => setSettings({ inlineAdd: false })}>Top bar</button>
+              <div className="text-sm font-medium mb-2">Background</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  className="accent-button button-sm pressable"
+                  onClick={() => backgroundInputRef.current?.click()}
+                >
+                  Upload image
+                </button>
+                {settings.backgroundImage && (
+                  <button
+                    className="ghost-button button-sm pressable"
+                    onClick={clearBackgroundImage}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+              <input
+                ref={backgroundInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files && event.target.files[0] ? event.target.files[0] : null;
+                  handleBackgroundImageSelection(file);
+                  event.currentTarget.value = "";
+                }}
+              />
+              <div className="text-xs text-secondary mt-2">Upload a photo to replace the gradient background. Taskify blurs it and matches the accent color automatically.</div>
+              {settings.backgroundImage && (
+                <div className="mt-3 space-y-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="relative w-16 h-12 overflow-hidden rounded-xl border border-surface bg-surface-muted">
+                      <div
+                        className="absolute inset-0"
+                        style={{
+                          backgroundImage: `url(${settings.backgroundImage})`,
+                          backgroundSize: 'cover',
+                          backgroundPosition: 'center',
+                        }}
+                      />
+                    </div>
+                    {settings.backgroundAccent && backgroundAccentHex && (
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-secondary">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-surface bg-surface-muted px-2 py-1">
+                          <span
+                            className="w-3 h-3 rounded-full"
+                            style={{
+                              background: settings.backgroundAccent.fill,
+                              border: '1px solid rgba(255, 255, 255, 0.35)',
+                            }}
+                          />
+                          <span>{backgroundAccentHex}</span>
+                        </span>
+                        <span>{settings.accent === 'background' ? 'Accent follows the photo color you picked.' : 'Pick a photo accent below to sync buttons and badges.'}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="text-xs text-secondary mb-1">Background clarity</div>
+                    <div className="flex gap-2">
+                      <button
+                        className={pillButtonClass(settings.backgroundBlur !== 'sharp')}
+                        onClick={() => setSettings({ backgroundBlur: 'blurred' })}
+                      >
+                        Blurred
+                      </button>
+                      <button
+                        className={pillButtonClass(settings.backgroundBlur === 'sharp')}
+                        onClick={() => setSettings({ backgroundBlur: 'sharp' })}
+                      >
+                        Sharp
+                      </button>
+                    </div>
+                    <div className="text-xs text-secondary mt-2">Blur softens distractions; Sharp keeps the photo crisp behind your boards.</div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="text-sm font-medium mb-2">Accent color</div>
+              <div className="flex flex-wrap gap-3">
+                {ACCENT_CHOICES.map((choice) => {
+                  const active = settings.accent === choice.id;
+                  return (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      className={`accent-swatch pressable ${active ? 'accent-swatch--active' : ''}`}
+                      style={{
+                        "--swatch-color": choice.fill,
+                        "--swatch-ring": choice.ring,
+                        "--swatch-border": choice.border,
+                        "--swatch-border-active": choice.borderActive,
+                        "--swatch-shadow": choice.shadow,
+                        "--swatch-active-shadow": choice.shadowActive,
+                      } as React.CSSProperties}
+                      aria-label={choice.label}
+                      aria-pressed={active}
+                      onClick={() => setSettings({ accent: choice.id })}
+                    >
+                      <span className="sr-only">{choice.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {photoAccents.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  <div className="text-xs text-secondary uppercase tracking-[0.12em]">Photo accents</div>
+                  <div className="flex flex-wrap gap-3">
+                    {photoAccents.map((palette, index) => {
+                      const active = settings.accent === 'background' && settings.backgroundAccentIndex === index;
+                      return (
+                        <button
+                          key={`photo-accent-${index}`}
+                          type="button"
+                          className={`accent-swatch pressable ${active ? 'accent-swatch--active' : ''}`}
+                          style={{
+                            "--swatch-color": palette.fill,
+                            "--swatch-ring": palette.ring,
+                            "--swatch-border": palette.border,
+                            "--swatch-border-active": palette.borderActive,
+                            "--swatch-shadow": palette.shadow,
+                            "--swatch-active-shadow": palette.shadowActive,
+                          } as React.CSSProperties}
+                          aria-label={`Photo accent ${index + 1}`}
+                          aria-pressed={active}
+                          onClick={() => handleSelectPhotoAccent(index)}
+                        >
+                          <span className="sr-only">Photo accent {index + 1}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="text-xs text-secondary mt-2">
+                {photoAccents.length > 0
+                  ? settings.accent === 'background'
+                    ? 'Buttons, badges, and focus states now use the photo accent you chose.'
+                    : 'Choose one of your photo accents above or stick with the presets.'
+                  : 'Switch the highlight color used across buttons, badges, and focus states.'}
               </div>
             </div>
             <div>
@@ -6321,148 +6458,10 @@ function SettingsModal({
           {showViewAdvanced && (
             <div className="mt-4 border-t border-neutral-800 pt-4 space-y-4">
               <div>
-                <div className="text-sm font-medium mb-2">Background</div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    className="accent-button button-sm pressable"
-                    onClick={() => backgroundInputRef.current?.click()}
-                  >
-                    Upload image
-                  </button>
-                  {settings.backgroundImage && (
-                    <button
-                      className="ghost-button button-sm pressable"
-                      onClick={clearBackgroundImage}
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-                <input
-                  ref={backgroundInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(event) => {
-                    const file = event.target.files && event.target.files[0] ? event.target.files[0] : null;
-                    handleBackgroundImageSelection(file);
-                    event.currentTarget.value = "";
-                  }}
-                />
-                <div className="text-xs text-secondary mt-2">Upload a photo to replace the gradient background. Taskify blurs it and matches the accent color automatically.</div>
-                {settings.backgroundImage && (
-                  <div className="mt-3 space-y-3">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <div className="relative w-16 h-12 overflow-hidden rounded-xl border border-surface bg-surface-muted">
-                        <div
-                          className="absolute inset-0"
-                          style={{
-                            backgroundImage: `url(${settings.backgroundImage})`,
-                            backgroundSize: 'cover',
-                            backgroundPosition: 'center',
-                          }}
-                        />
-                      </div>
-                      {settings.backgroundAccent && backgroundAccentHex && (
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-secondary">
-                          <span className="inline-flex items-center gap-1 rounded-full border border-surface bg-surface-muted px-2 py-1">
-                            <span
-                              className="w-3 h-3 rounded-full"
-                              style={{
-                                background: settings.backgroundAccent.fill,
-                                border: '1px solid rgba(255, 255, 255, 0.35)',
-                              }}
-                            />
-                            <span>{backgroundAccentHex}</span>
-                          </span>
-                          <span>{settings.accent === 'background' ? 'Accent follows the photo color you picked.' : 'Pick a photo accent below to sync buttons and badges.'}</span>
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <div className="text-xs text-secondary mb-1">Background clarity</div>
-                      <div className="flex gap-2">
-                        <button
-                          className={pillButtonClass(settings.backgroundBlur !== 'sharp')}
-                          onClick={() => setSettings({ backgroundBlur: 'blurred' })}
-                        >
-                          Blurred
-                        </button>
-                        <button
-                          className={pillButtonClass(settings.backgroundBlur === 'sharp')}
-                          onClick={() => setSettings({ backgroundBlur: 'sharp' })}
-                        >
-                          Sharp
-                        </button>
-                      </div>
-                      <div className="text-xs text-secondary mt-2">Blur softens distractions; Sharp keeps the photo crisp behind your boards.</div>
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div>
-                <div className="text-sm font-medium mb-2">Accent color</div>
-                <div className="flex flex-wrap gap-3">
-                  {ACCENT_CHOICES.map((choice) => {
-                    const active = settings.accent === choice.id;
-                    return (
-                      <button
-                        key={choice.id}
-                        type="button"
-                        className={`accent-swatch pressable ${active ? 'accent-swatch--active' : ''}`}
-                        style={{
-                          "--swatch-color": choice.fill,
-                          "--swatch-ring": choice.ring,
-                          "--swatch-border": choice.border,
-                          "--swatch-border-active": choice.borderActive,
-                          "--swatch-shadow": choice.shadow,
-                          "--swatch-active-shadow": choice.shadowActive,
-                        } as React.CSSProperties}
-                        aria-label={choice.label}
-                        aria-pressed={active}
-                        onClick={() => setSettings({ accent: choice.id })}
-                      >
-                        <span className="sr-only">{choice.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                {photoAccents.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    <div className="text-xs text-secondary uppercase tracking-[0.12em]">Photo accents</div>
-                    <div className="flex flex-wrap gap-3">
-                      {photoAccents.map((palette, index) => {
-                        const active = settings.accent === 'background' && settings.backgroundAccentIndex === index;
-                        return (
-                          <button
-                            key={`photo-accent-${index}`}
-                            type="button"
-                            className={`accent-swatch pressable ${active ? 'accent-swatch--active' : ''}`}
-                            style={{
-                              "--swatch-color": palette.fill,
-                              "--swatch-ring": palette.ring,
-                              "--swatch-border": palette.border,
-                              "--swatch-border-active": palette.borderActive,
-                              "--swatch-shadow": palette.shadow,
-                              "--swatch-active-shadow": palette.shadowActive,
-                            } as React.CSSProperties}
-                            aria-label={`Photo accent ${index + 1}`}
-                            aria-pressed={active}
-                            onClick={() => handleSelectPhotoAccent(index)}
-                          >
-                            <span className="sr-only">Photo accent {index + 1}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                <div className="text-xs text-secondary mt-2">
-                  {photoAccents.length > 0
-                    ? settings.accent === 'background'
-                      ? 'Buttons, badges, and focus states now use the photo accent you chose.'
-                      : 'Choose one of your photo accents above or stick with the presets.'
-                    : 'Switch the highlight color used across buttons, badges, and focus states.'}
+                <div className="text-sm font-medium mb-2">Add tasks within lists</div>
+                <div className="flex gap-2">
+                  <button className={pillButtonClass(settings.inlineAdd)} onClick={() => setSettings({ inlineAdd: true })}>Inline</button>
+                  <button className={pillButtonClass(!settings.inlineAdd)} onClick={() => setSettings({ inlineAdd: false })}>Top bar</button>
                 </div>
               </div>
               <div>
@@ -6543,19 +6542,19 @@ function SettingsModal({
         <section className="wallet-section space-y-3">
           <div className="flex items-center gap-2 mb-3">
             <div className="text-sm font-medium">Push notifications</div>
-            <span className={`ml-auto text-xs ${pushPrefs.enabled ? 'text-emerald-400' : 'text-secondary'}`}>
-              {pushPrefs.enabled ? 'Enabled' : 'Disabled'}
-            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <span className={`text-xs ${pushPrefs.enabled ? 'text-emerald-400' : 'text-secondary'}`}>
+                {pushPrefs.enabled ? 'Enabled' : 'Disabled'}
+              </span>
+              <button
+                className="ghost-button button-sm pressable"
+                onClick={() => setShowPushAdvanced((v) => !v)}
+              >
+                {showPushAdvanced ? 'Hide advanced' : 'Advanced'}
+              </button>
+            </div>
           </div>
           <div className="space-y-4">
-            <div>
-              <div className="text-sm font-medium mb-2">Detected platform</div>
-              <div className="text-xs text-secondary">
-                {pushPrefs.platform === 'ios'
-                  ? 'Using Apple Push Notification service (Safari / iOS / macOS).'
-                  : 'Using the standard Web Push service (FCM-compatible browsers).'}
-              </div>
-            </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <button
                 className={`${pushPrefs.enabled ? 'ghost-button' : 'accent-button'} button-sm pressable w-full sm:w-auto`}
@@ -6564,27 +6563,41 @@ function SettingsModal({
               >
                 {pushBusy ? 'Working…' : pushPrefs.enabled ? 'Disable push' : 'Enable push'}
               </button>
-              <div className="text-xs text-secondary sm:ml-auto">
-                Permission: {permissionLabel}
-              </div>
+              {showPushAdvanced && (
+                <div className="text-xs text-secondary sm:ml-auto">
+                  Permission: {permissionLabel}
+                </div>
+              )}
             </div>
-            {!pushSupported && (
-              <div className="text-xs text-secondary">
-                {pushSupportHint}
-              </div>
-            )}
-            {(!workerConfigured || !vapidConfigured) && (
-              <div className="text-xs text-secondary">
-                Configure the Worker runtime (or set VITE_WORKER_BASE_URL and VITE_VAPID_PUBLIC_KEY) to enable push registration.
-              </div>
-            )}
-            {pushError && (
-              <div className="text-xs text-rose-400 break-words">{pushError}</div>
-            )}
-            {pushPrefs.enabled && pushPrefs.deviceId && (
-              <div className="text-xs text-secondary break-words">
-                Device ID: {pushPrefs.deviceId}
-              </div>
+            {showPushAdvanced && (
+              <>
+                <div>
+                  <div className="text-sm font-medium mb-2">Detected platform</div>
+                  <div className="text-xs text-secondary">
+                    {pushPrefs.platform === 'ios'
+                      ? 'Using Apple Push Notification service (Safari / iOS / macOS).'
+                      : 'Using the standard Web Push service (FCM-compatible browsers).'}
+                  </div>
+                </div>
+                {!pushSupported && (
+                  <div className="text-xs text-secondary">
+                    {pushSupportHint}
+                  </div>
+                )}
+                {(!workerConfigured || !vapidConfigured) && (
+                  <div className="text-xs text-secondary">
+                    Configure the Worker runtime (or set VITE_WORKER_BASE_URL and VITE_VAPID_PUBLIC_KEY) to enable push registration.
+                  </div>
+                )}
+                {pushError && (
+                  <div className="text-xs text-rose-400 break-words">{pushError}</div>
+                )}
+                {pushPrefs.enabled && pushPrefs.deviceId && (
+                  <div className="text-xs text-secondary break-words">
+                    Device ID: {pushPrefs.deviceId}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </section>

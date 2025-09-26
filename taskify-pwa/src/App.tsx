@@ -3845,6 +3845,8 @@ export default function App() {
           pushError={pushError}
           onEnablePush={enablePushNotifications}
           onDisablePush={disablePushNotifications}
+          workerBaseUrl={workerBaseUrl}
+          vapidPublicKey={vapidPublicKey}
           onShareBoard={(boardId, relayCsv) => {
             const r = (relayCsv || "").split(",").map(s=>s.trim()).filter(Boolean);
             const relays = r.length ? r : defaultRelays;
@@ -5347,6 +5349,8 @@ function SettingsModal({
   pushError,
   onEnablePush,
   onDisablePush,
+  workerBaseUrl,
+  vapidPublicKey,
 }: {
   settings: Settings;
   boards: Board[];
@@ -5369,6 +5373,8 @@ function SettingsModal({
   pushError: string | null;
   onEnablePush: (platform: PushPlatform) => Promise<void>;
   onDisablePush: () => Promise<void>;
+  workerBaseUrl: string;
+  vapidPublicKey: string;
 }) {
   const [newBoardName, setNewBoardName] = useState("");
   const [manageBoardId, setManageBoardId] = useState<string | null>(null);

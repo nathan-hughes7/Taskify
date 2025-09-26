@@ -33,3 +33,10 @@ id = "448d7dc7170c4aff81c2a58c5e07e739"
 [[kv_namespaces]]
 binding = "VAPID_PRIVATE_KEY"
 id = "45bbad6e354443ff9b101d61a27e5dd9"
+
+[[d1_databases]]
+binding = "TASKIFY_DB"
+database_name = "taskify-notifications"
+# TODO: replace with your D1 database ID after running `wrangler d1 create`
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "worker/migrations"

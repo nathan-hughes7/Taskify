@@ -1,9 +1,10 @@
 /* eslint-disable no-console */
 export interface Env {
   ASSETS: AssetFetcher;
-  TASKIFY_DEVICES: KVNamespace;
-  TASKIFY_REMINDERS: KVNamespace;
-  TASKIFY_PENDING: KVNamespace;
+  TASKIFY_DB: D1Database;
+  TASKIFY_DEVICES?: KVNamespace;
+  TASKIFY_REMINDERS?: KVNamespace;
+  TASKIFY_PENDING?: KVNamespace;
   VAPID_PUBLIC_KEY: string;
   VAPID_PRIVATE_KEY: string | KVNamespace;
   VAPID_SUBJECT: string;
@@ -49,24 +50,64 @@ type PendingReminder = {
   minutes: number;
 };
 
+type DeviceRow = {
+  device_id: string;
+  platform: PushPlatform;
+  endpoint: string;
+  endpoint_hash: string;
+  subscription_auth: string;
+  subscription_p256dh: string;
+  updated_at: number;
+};
+
+type ReminderRow = {
+  device_id: string;
+  reminder_key: string;
+  task_id: string;
+  board_id: string | null;
+  title: string;
+  due_iso: string;
+  minutes: number;
+  send_at: number;
+};
+
+type PendingRow = {
+  id: number;
+  device_id: string;
+  task_id: string;
+  board_id: string | null;
+  title: string;
+  due_iso: string;
+  minutes: number;
+  created_at: number;
+};
+
 interface AssetFetcher {
   fetch(request: Request): Promise<Response>;
-}
-
-interface KVNamespaceListKey {
-  name: string;
-}
-
-interface KVNamespaceListResult {
-  keys: KVNamespaceListKey[];
-  cursor?: string;
 }
 
 interface KVNamespace {
   get(key: string): Promise<string | null>;
   put(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
-  list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<KVNamespaceListResult>;
+}
+
+interface D1Result<T = unknown> {
+  success: boolean;
+  results?: T[];
+  error?: string;
+}
+
+interface D1PreparedStatement<T = unknown> {
+  bind(...values: unknown[]): D1PreparedStatement<T>;
+  first<U = T>(): Promise<U | null>;
+  all<U = T>(): Promise<D1Result<U>>;
+  run<U = T>(): Promise<D1Result<U>>;
+}
+
+interface D1Database {
+  prepare<T = unknown>(query: string): D1PreparedStatement<T>;
+  batch<T = unknown>(statements: D1PreparedStatement<T>[]): Promise<D1Result<T>[]>;
 }
 
 const JSON_HEADERS = {
@@ -182,22 +223,37 @@ async function handleRegisterDevice(request: Request, env: Env): Promise<Respons
     },
     endpointHash,
   };
-
-  await env.TASKIFY_DEVICES.put(deviceKey(deviceId), JSON.stringify(record));
-  await env.TASKIFY_DEVICES.put(endpointKey(endpointHash), deviceId);
+  await upsertDevice(env, record, Date.now());
 
   return jsonResponse({ subscriptionId: endpointHash });
 }
 
 async function handleDeleteDevice(deviceId: string, env: Env): Promise<Response> {
-  const existing = await env.TASKIFY_DEVICES.get(deviceKey(deviceId));
-  if (existing) {
-    const record = JSON.parse(existing) as DeviceRecord;
-    await env.TASKIFY_DEVICES.delete(endpointKey(record.endpointHash));
+  const existing = await env.TASKIFY_DB
+    .prepare<{ endpoint_hash: string | null }>(
+      `SELECT endpoint_hash
+       FROM devices
+       WHERE device_id = ?`,
+    )
+    .bind(deviceId)
+    .first<{ endpoint_hash: string | null }>();
+
+  await env.TASKIFY_DB.batch([
+    env.TASKIFY_DB.prepare("DELETE FROM pending_notifications WHERE device_id = ?").bind(deviceId),
+    env.TASKIFY_DB.prepare("DELETE FROM reminders WHERE device_id = ?").bind(deviceId),
+    env.TASKIFY_DB.prepare("DELETE FROM devices WHERE device_id = ?").bind(deviceId),
+  ]);
+
+  if (env.TASKIFY_DEVICES) {
+    await env.TASKIFY_DEVICES.delete(deviceKey(deviceId)).catch(() => {});
+    const endpointHash = existing?.endpoint_hash;
+    if (endpointHash) {
+      await env.TASKIFY_DEVICES.delete(endpointKey(endpointHash)).catch(() => {});
+    }
   }
-  await env.TASKIFY_DEVICES.delete(deviceKey(deviceId));
-  await env.TASKIFY_REMINDERS.delete(remindersKey(deviceId));
-  await env.TASKIFY_PENDING.delete(pendingKey(deviceId));
+  await env.TASKIFY_REMINDERS?.delete(remindersKey(deviceId)).catch(() => {});
+  await env.TASKIFY_PENDING?.delete(pendingKey(deviceId)).catch(() => {});
+
   return new Response(null, { status: 204, headers: JSON_HEADERS });
 }
 
@@ -207,8 +263,7 @@ async function handleSaveReminders(request: Request, env: Env): Promise<Response
   if (!deviceId || typeof deviceId !== "string") {
     return jsonResponse({ error: "deviceId is required" }, 400);
   }
-  const deviceRecordRaw = await env.TASKIFY_DEVICES.get(deviceKey(deviceId));
-  if (!deviceRecordRaw) {
+  if (!(await getDeviceRecord(env, deviceId))) {
     return jsonResponse({ error: "Unknown device" }, 404);
   }
   if (!Array.isArray(reminders)) {
@@ -241,13 +296,32 @@ async function handleSaveReminders(request: Request, env: Env): Promise<Response
     }
   }
 
+  const statements = [env.TASKIFY_DB.prepare("DELETE FROM reminders WHERE device_id = ?").bind(deviceId)];
   if (entries.length > 0) {
     entries.sort((a, b) => a.sendAt - b.sendAt);
-    await env.TASKIFY_REMINDERS.put(remindersKey(deviceId), JSON.stringify(entries));
-  } else {
-    await env.TASKIFY_REMINDERS.delete(remindersKey(deviceId));
+    for (const entry of entries) {
+      statements.push(
+        env.TASKIFY_DB
+          .prepare(
+            `INSERT INTO reminders (device_id, reminder_key, task_id, board_id, title, due_iso, minutes, send_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            deviceId,
+            entry.reminderKey,
+            entry.taskId,
+            entry.boardId ?? null,
+            entry.title,
+            entry.dueISO,
+            entry.minutes,
+            entry.sendAt,
+          ),
+      );
+    }
   }
-  await env.TASKIFY_PENDING.delete(pendingKey(deviceId));
+
+  await env.TASKIFY_DB.batch(statements);
+  await env.TASKIFY_DB.prepare("DELETE FROM pending_notifications WHERE device_id = ?").bind(deviceId).run();
 
   return new Response(null, { status: 204, headers: JSON_HEADERS });
 }
@@ -257,96 +331,354 @@ async function handlePollReminders(request: Request, env: Env): Promise<Response
   const { endpoint, deviceId } = body || {};
   let resolvedDeviceId = typeof deviceId === "string" ? deviceId : undefined;
   if (!resolvedDeviceId && typeof endpoint === "string") {
-    const hash = await hashEndpoint(endpoint);
-    const linkedDevice = await env.TASKIFY_DEVICES.get(endpointKey(hash));
-    if (linkedDevice) resolvedDeviceId = linkedDevice;
+    resolvedDeviceId = await findDeviceIdByEndpoint(env, endpoint);
   }
   if (!resolvedDeviceId) {
     return jsonResponse({ error: "Device not registered" }, 404);
   }
-  const pending = await env.TASKIFY_PENDING.get(pendingKey(resolvedDeviceId));
-  if (!pending) {
+  const pendingRows = await env.TASKIFY_DB
+    .prepare<PendingRow>(
+      `SELECT id, task_id, board_id, title, due_iso, minutes
+       FROM pending_notifications
+       WHERE device_id = ?
+       ORDER BY created_at, id`,
+    )
+    .bind(resolvedDeviceId)
+    .all<PendingRow>();
+
+  const rows = pendingRows.results ?? [];
+  if (!rows.length) {
     return jsonResponse([]);
   }
-  await env.TASKIFY_PENDING.delete(pendingKey(resolvedDeviceId));
-  return jsonResponse(JSON.parse(pending));
+  const deleteStatements = rows.map((row) => env.TASKIFY_DB.prepare("DELETE FROM pending_notifications WHERE id = ?").bind(row.id));
+  await env.TASKIFY_DB.batch(deleteStatements);
+
+  return jsonResponse(
+    rows.map((row) => ({
+      taskId: row.task_id,
+      boardId: row.board_id ?? undefined,
+      title: row.title,
+      dueISO: row.due_iso,
+      minutes: row.minutes,
+    })),
+  );
 }
 
 async function processDueReminders(env: Env): Promise<void> {
   const now = Date.now();
-  let cursor: string | undefined;
+  const batchSize = 256;
 
-  do {
-    const list = await env.TASKIFY_REMINDERS.list({ prefix: "reminders:", cursor, limit: 1000 });
-    cursor = list.cursor;
-    for (const entry of list.keys) {
-      const deviceId = entry.name.substring("reminders:".length);
-      const raw = await env.TASKIFY_REMINDERS.get(entry.name);
-      if (!raw) {
-        await env.TASKIFY_REMINDERS.delete(entry.name);
-        continue;
-      }
-      let reminders: ReminderEntry[];
-      try {
-        reminders = JSON.parse(raw) as ReminderEntry[];
-      } catch {
-        reminders = [];
-      }
-      if (!Array.isArray(reminders) || reminders.length === 0) {
-        await env.TASKIFY_REMINDERS.delete(entry.name);
-        continue;
-      }
+  // Process in batches to keep cron executions bounded.
+  while (true) {
+    const dueResult = await env.TASKIFY_DB
+      .prepare<ReminderRow>(
+        `SELECT device_id, reminder_key, task_id, board_id, title, due_iso, minutes, send_at
+         FROM reminders
+         WHERE send_at <= ?
+         ORDER BY send_at
+         LIMIT ?`,
+      )
+      .bind(now, batchSize)
+      .all<ReminderRow>();
 
-      const remaining: ReminderEntry[] = [];
-      const due: ReminderEntry[] = [];
-      for (const reminder of reminders) {
-        if (reminder.sendAt <= now) {
-          due.push(reminder);
-        } else {
-          remaining.push(reminder);
-        }
-      }
+    const dueReminders = dueResult.results ?? [];
+    if (!dueReminders.length) {
+      break;
+    }
 
-      if (remaining.length > 0) {
-        await env.TASKIFY_REMINDERS.put(entry.name, JSON.stringify(remaining));
+    const deleteStatements = dueReminders.map((reminder) =>
+      env.TASKIFY_DB
+        .prepare("DELETE FROM reminders WHERE device_id = ? AND reminder_key = ?")
+        .bind(reminder.device_id, reminder.reminder_key),
+    );
+    await env.TASKIFY_DB.batch(deleteStatements);
+
+    const grouped = new Map<string, ReminderRow[]>();
+    for (const reminder of dueReminders) {
+      const existing = grouped.get(reminder.device_id);
+      if (existing) {
+        existing.push(reminder);
       } else {
-        await env.TASKIFY_REMINDERS.delete(entry.name);
+        grouped.set(reminder.device_id, [reminder]);
       }
+    }
 
-      if (!due.length) continue;
-
-      const deviceRaw = await env.TASKIFY_DEVICES.get(deviceKey(deviceId));
-      if (!deviceRaw) {
-        await env.TASKIFY_PENDING.delete(pendingKey(deviceId));
+    for (const [deviceId, reminders] of grouped) {
+      const device = await getDeviceRecord(env, deviceId);
+      if (!device) {
+        await env.TASKIFY_DB.prepare("DELETE FROM pending_notifications WHERE device_id = ?").bind(deviceId).run();
         continue;
       }
-      const device = JSON.parse(deviceRaw) as DeviceRecord;
-      const pendingNotifications: PendingReminder[] = due.map((reminder) => ({
-        taskId: reminder.taskId,
-        boardId: reminder.boardId,
+      const pendingNotifications: PendingReminder[] = reminders.map((reminder) => ({
+        taskId: reminder.task_id,
+        boardId: reminder.board_id ?? undefined,
         title: reminder.title,
-        dueISO: reminder.dueISO,
+        dueISO: reminder.due_iso,
         minutes: reminder.minutes,
       }));
       await appendPending(env, deviceId, pendingNotifications);
       const ttlSeconds = computeReminderTTL(pendingNotifications, now);
       await sendPushPing(env, device, deviceId, ttlSeconds);
     }
-  } while (cursor);
+
+    if (dueReminders.length < batchSize) {
+      break;
+    }
+  }
 }
 
 async function appendPending(env: Env, deviceId: string, notifications: PendingReminder[]): Promise<void> {
-  const key = pendingKey(deviceId);
-  const existing = await env.TASKIFY_PENDING.get(key);
-  let payload: PendingReminder[] = [];
-  if (existing) {
-    try {
-      const parsed = JSON.parse(existing);
-      if (Array.isArray(parsed)) payload = parsed as PendingReminder[];
-    } catch {}
+  if (!notifications.length) return;
+  const now = Date.now();
+  const statements = notifications.map((notification) =>
+    env.TASKIFY_DB
+      .prepare(
+        `INSERT INTO pending_notifications (device_id, task_id, board_id, title, due_iso, minutes, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        deviceId,
+        notification.taskId,
+        notification.boardId ?? null,
+        notification.title,
+        notification.dueISO,
+        notification.minutes,
+        now,
+      ),
+  );
+  await env.TASKIFY_DB.batch(statements);
+}
+
+async function upsertDevice(env: Env, record: DeviceRecord, updatedAt: number): Promise<void> {
+  await env.TASKIFY_DB.batch([
+    env.TASKIFY_DB
+      .prepare(
+        `INSERT INTO devices (device_id, platform, endpoint, endpoint_hash, subscription_auth, subscription_p256dh, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(device_id) DO UPDATE SET
+           platform = excluded.platform,
+           endpoint = excluded.endpoint,
+           endpoint_hash = excluded.endpoint_hash,
+           subscription_auth = excluded.subscription_auth,
+           subscription_p256dh = excluded.subscription_p256dh,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(
+        record.deviceId,
+        record.platform,
+        record.subscription.endpoint,
+        record.endpointHash,
+        record.subscription.keys.auth,
+        record.subscription.keys.p256dh,
+        updatedAt,
+      ),
+  ]);
+}
+
+async function getDeviceRecord(env: Env, deviceId: string): Promise<DeviceRecord | null> {
+  const row = await env.TASKIFY_DB
+    .prepare<DeviceRow>(
+      `SELECT device_id, platform, endpoint, endpoint_hash, subscription_auth, subscription_p256dh
+       FROM devices
+       WHERE device_id = ?`,
+    )
+    .bind(deviceId)
+    .first<DeviceRow>();
+  if (!row) {
+    return migrateDeviceFromKv(env, deviceId);
   }
-  payload.push(...notifications);
-  await env.TASKIFY_PENDING.put(key, JSON.stringify(payload));
+  return {
+    deviceId: row.device_id,
+    platform: row.platform,
+    endpointHash: row.endpoint_hash,
+    subscription: {
+      endpoint: row.endpoint,
+      keys: {
+        auth: row.subscription_auth,
+        p256dh: row.subscription_p256dh,
+      },
+    },
+  };
+}
+
+async function findDeviceIdByEndpoint(env: Env, endpoint: string): Promise<string | undefined> {
+  const hash = await hashEndpoint(endpoint);
+  const row = await env.TASKIFY_DB
+    .prepare<{ device_id: string }>(
+      `SELECT device_id
+       FROM devices
+       WHERE endpoint_hash = ?`,
+    )
+    .bind(hash)
+    .first<{ device_id: string }>();
+  if (row?.device_id) {
+    return row.device_id;
+  }
+  if (!env.TASKIFY_DEVICES) {
+    return undefined;
+  }
+  const legacyDeviceId = await env.TASKIFY_DEVICES.get(endpointKey(hash));
+  if (!legacyDeviceId) {
+    return undefined;
+  }
+  await migrateDeviceFromKv(env, legacyDeviceId);
+  return legacyDeviceId;
+}
+
+async function migrateDeviceFromKv(env: Env, deviceId: string): Promise<DeviceRecord | null> {
+  const kvDevices = env.TASKIFY_DEVICES;
+  if (!kvDevices) return null;
+
+  const raw = await kvDevices.get(deviceKey(deviceId));
+  if (!raw) return null;
+
+  let parsed: DeviceRecord | null = null;
+  try {
+    const maybe = JSON.parse(raw) as DeviceRecord;
+    if (
+      maybe &&
+      typeof maybe.deviceId === "string" &&
+      (maybe.platform === "ios" || maybe.platform === "android") &&
+      maybe.subscription &&
+      typeof maybe.subscription.endpoint === "string" &&
+      maybe.subscription.keys &&
+      typeof maybe.subscription.keys.auth === "string" &&
+      typeof maybe.subscription.keys.p256dh === "string"
+    ) {
+      parsed = maybe;
+    }
+  } catch (err) {
+    console.warn("Failed to parse legacy device record", deviceId, err);
+    return null;
+  }
+
+  if (!parsed) return null;
+
+  if (!parsed.endpointHash) {
+    parsed.endpointHash = await hashEndpoint(parsed.subscription.endpoint);
+  }
+
+  await upsertDevice(env, parsed, Date.now());
+
+  await migrateRemindersFromKv(env, deviceId);
+  await migratePendingFromKv(env, deviceId);
+
+  await Promise.all([
+    kvDevices.delete(deviceKey(deviceId)).catch(() => {}),
+    parsed.endpointHash ? kvDevices.delete(endpointKey(parsed.endpointHash)).catch(() => {}) : Promise.resolve(),
+  ]);
+
+  return parsed;
+}
+
+async function migrateRemindersFromKv(env: Env, deviceId: string): Promise<void> {
+  const kvReminders = env.TASKIFY_REMINDERS;
+  if (!kvReminders) return;
+
+  const raw = await kvReminders.get(remindersKey(deviceId));
+  if (!raw) return;
+
+  let entries: ReminderEntry[] = [];
+  try {
+    const maybe = JSON.parse(raw);
+    if (Array.isArray(maybe)) {
+      entries = maybe as ReminderEntry[];
+    }
+  } catch (err) {
+    console.warn("Failed to parse legacy reminders", { deviceId, err });
+    entries = [];
+  }
+
+  if (!entries.length) {
+    await kvReminders.delete(remindersKey(deviceId)).catch(() => {});
+    return;
+  }
+
+  const statements = [env.TASKIFY_DB.prepare("DELETE FROM reminders WHERE device_id = ?").bind(deviceId)];
+  entries.sort((a, b) => (a?.sendAt ?? 0) - (b?.sendAt ?? 0));
+  for (const entry of entries) {
+    if (!entry || typeof entry.reminderKey !== "string" || typeof entry.taskId !== "string") continue;
+    if (typeof entry.title !== "string" || typeof entry.dueISO !== "string" || typeof entry.minutes !== "number") continue;
+    if (typeof entry.sendAt !== "number") continue;
+    statements.push(
+      env.TASKIFY_DB
+        .prepare(
+          `INSERT INTO reminders (device_id, reminder_key, task_id, board_id, title, due_iso, minutes, send_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+        .bind(
+          deviceId,
+          entry.reminderKey,
+          entry.taskId,
+          entry.boardId ?? null,
+          entry.title,
+          entry.dueISO,
+          entry.minutes,
+          entry.sendAt,
+        ),
+    );
+  }
+
+  if (statements.length > 1) {
+    await env.TASKIFY_DB.batch(statements);
+  } else {
+    await statements[0].run();
+  }
+
+  await kvReminders.delete(remindersKey(deviceId)).catch(() => {});
+}
+
+async function migratePendingFromKv(env: Env, deviceId: string): Promise<void> {
+  const kvPending = env.TASKIFY_PENDING;
+  if (!kvPending) return;
+
+  const raw = await kvPending.get(pendingKey(deviceId));
+  if (!raw) return;
+
+  let entries: PendingReminder[] = [];
+  try {
+    const maybe = JSON.parse(raw);
+    if (Array.isArray(maybe)) {
+      entries = maybe as PendingReminder[];
+    }
+  } catch (err) {
+    console.warn("Failed to parse legacy pending payload", { deviceId, err });
+    entries = [];
+  }
+
+  const normalized = entries.filter(
+    (entry) =>
+      entry &&
+      typeof entry.taskId === "string" &&
+      typeof entry.title === "string" &&
+      typeof entry.dueISO === "string" &&
+      typeof entry.minutes === "number",
+  );
+
+  if (!normalized.length) {
+    await kvPending.delete(pendingKey(deviceId)).catch(() => {});
+    return;
+  }
+
+  await env.TASKIFY_DB.prepare("DELETE FROM pending_notifications WHERE device_id = ?").bind(deviceId).run();
+  await appendPending(env, deviceId, normalized);
+  await kvPending.delete(pendingKey(deviceId)).catch(() => {});
+}
+
+function deviceKey(deviceId: string): string {
+  return `device:${deviceId}`;
+}
+
+function remindersKey(deviceId: string): string {
+  return `reminders:${deviceId}`;
+}
+
+function pendingKey(deviceId: string): string {
+  return `pending:${deviceId}`;
+}
+
+function endpointKey(hash: string): string {
+  return `endpoint:${hash}`;
 }
 
 function computeReminderTTL(reminders: PendingReminder[], now: number): number {
@@ -502,22 +834,6 @@ async function importRawVapidPrivateKey(env: Env, scalar: Uint8Array): Promise<C
     false,
     ["sign"],
   );
-}
-
-function deviceKey(deviceId: string): string {
-  return `device:${deviceId}`;
-}
-
-function remindersKey(deviceId: string): string {
-  return `reminders:${deviceId}`;
-}
-
-function pendingKey(deviceId: string): string {
-  return `pending:${deviceId}`;
-}
-
-function endpointKey(hash: string): string {
-  return `endpoint:${hash}`;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

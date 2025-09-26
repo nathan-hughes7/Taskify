@@ -113,8 +113,8 @@ const DEFAULT_PUSH_PREFERENCES: PushPreferences = {
 };
 
 const RAW_WORKER_BASE = (import.meta as any)?.env?.VITE_WORKER_BASE_URL || "";
-const WORKER_BASE_URL = RAW_WORKER_BASE ? String(RAW_WORKER_BASE).replace(/\/$/, "") : "";
-const VAPID_PUBLIC_KEY = (import.meta as any)?.env?.VITE_VAPID_PUBLIC_KEY || "";
+const FALLBACK_WORKER_BASE_URL = RAW_WORKER_BASE ? String(RAW_WORKER_BASE).replace(/\/$/, "") : "";
+const FALLBACK_VAPID_PUBLIC_KEY = (import.meta as any)?.env?.VITE_VAPID_PUBLIC_KEY || "";
 
 function sanitizeReminderList(value: unknown): ReminderPreset[] | undefined {
   if (!Array.isArray(value)) return undefined;
@@ -976,6 +976,36 @@ function useTasks() {
 /* ================= App ================= */
 export default function App() {
   const { show: showToast } = useToast();
+  const [workerBaseUrl, setWorkerBaseUrl] = useState<string>(FALLBACK_WORKER_BASE_URL);
+  const [vapidPublicKey, setVapidPublicKey] = useState<string>(FALLBACK_VAPID_PUBLIC_KEY);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadRuntimeConfig() {
+      try {
+        const response = await fetch("/api/config", { method: "GET" });
+        if (!response.ok) throw new Error(`Unexpected status ${response.status}`);
+        const data = await response.json();
+        if (cancelled || !data || typeof data !== "object") return;
+        if (typeof data.workerBaseUrl === "string" && data.workerBaseUrl.trim()) {
+          setWorkerBaseUrl(data.workerBaseUrl.trim().replace(/\/$/, ""));
+        } else if (!FALLBACK_WORKER_BASE_URL && typeof window !== "undefined") {
+          setWorkerBaseUrl(window.location.origin);
+        }
+        if (typeof data.vapidPublicKey === "string" && data.vapidPublicKey.trim()) {
+          setVapidPublicKey(data.vapidPublicKey.trim());
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.warn("Failed to load runtime config", err);
+          if (!FALLBACK_WORKER_BASE_URL && typeof window !== "undefined") {
+            setWorkerBaseUrl(window.location.origin);
+          }
+        }
+      }
+    }
+    loadRuntimeConfig();
+    return () => { cancelled = true; };
+  }, []);
   // Show toast on any successful clipboard write across the app
   useEffect(() => {
     const clip: any = (navigator as any).clipboard;
@@ -1781,7 +1811,7 @@ export default function App() {
       reminderPayloadRef.current = null;
       return;
     }
-    if (!WORKER_BASE_URL) {
+    if (!workerBaseUrl) {
       return;
     }
 
@@ -1811,7 +1841,7 @@ export default function App() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [reminderTasks, settings.pushNotifications]);
+  }, [reminderTasks, settings.pushNotifications, workerBaseUrl]);
 
   /* ---------- Helpers ---------- */
   function resolveQuickRule(): Recurrence {
@@ -2098,7 +2128,7 @@ export default function App() {
   }, [setTasks, tagValue]);
 
   async function syncRemindersToWorker(push: PushPreferences, reminderTasks: Task[], options?: { signal?: AbortSignal }) {
-    if (!WORKER_BASE_URL) throw new Error('Set VITE_WORKER_BASE_URL to enable push notifications');
+    if (!workerBaseUrl) throw new Error('Worker base URL is not configured');
     if (!push.deviceId || !push.subscriptionId) return;
     const remindersPayload = reminderTasks
       .map((task) => ({
@@ -2109,7 +2139,7 @@ export default function App() {
         minutesBefore: (task.reminders ?? []).map(reminderPresetToMinutes).sort((a, b) => a - b),
       }))
       .sort((a, b) => a.taskId.localeCompare(b.taskId));
-    const res = await fetch(`${WORKER_BASE_URL}/api/reminders`, {
+    const res = await fetch(`${workerBaseUrl}/api/reminders`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2132,11 +2162,11 @@ export default function App() {
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
         throw new Error('Push notifications are not supported on this device.');
       }
-      if (!VAPID_PUBLIC_KEY) {
-        throw new Error('Missing VAPID public key (VITE_VAPID_PUBLIC_KEY).');
+      if (!vapidPublicKey) {
+        throw new Error('Missing VAPID public key.');
       }
-      if (!WORKER_BASE_URL) {
-        throw new Error('Missing worker base URL (VITE_WORKER_BASE_URL).');
+      if (!workerBaseUrl) {
+        throw new Error('Missing worker base URL.');
       }
 
       const permission = await Notification.requestPermission();
@@ -2149,14 +2179,14 @@ export default function App() {
       if (!subscription) {
         subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
         });
       }
 
       const deviceId = settings.pushNotifications.deviceId || crypto.randomUUID();
       const subscriptionJson = subscription.toJSON();
 
-      const res = await fetch(`${WORKER_BASE_URL}/api/devices`, {
+      const res = await fetch(`${workerBaseUrl}/api/devices`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2224,9 +2254,9 @@ export default function App() {
         } catch {}
       }
 
-      if (WORKER_BASE_URL && settings.pushNotifications.deviceId) {
+      if (workerBaseUrl && settings.pushNotifications.deviceId) {
         try {
-          await fetch(`${WORKER_BASE_URL}/api/devices/${settings.pushNotifications.deviceId}`, {
+          await fetch(`${workerBaseUrl}/api/devices/${settings.pushNotifications.deviceId}`, {
             method: 'DELETE',
           });
         } catch {}
@@ -5370,8 +5400,8 @@ function SettingsModal({
   const backgroundAccentHex = settings.backgroundAccent ? settings.backgroundAccent.fill.toUpperCase() : null;
   const pushPrefs = settings.pushNotifications ?? DEFAULT_PUSH_PREFERENCES;
   const pushSupported = typeof window !== 'undefined' && 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
-  const workerConfigured = !!WORKER_BASE_URL;
-  const vapidConfigured = !!VAPID_PUBLIC_KEY;
+  const workerConfigured = !!workerBaseUrl;
+  const vapidConfigured = !!vapidPublicKey;
   const pushBusy = pushWorkState !== 'idle';
   const permissionLabel = pushPrefs.permission ?? (typeof Notification !== 'undefined' ? Notification.permission : 'default');
   
@@ -6342,7 +6372,7 @@ function SettingsModal({
             )}
             {(!workerConfigured || !vapidConfigured) && (
               <div className="text-xs text-secondary">
-                Configure VITE_WORKER_BASE_URL and VITE_VAPID_PUBLIC_KEY to enable push registration.
+                Configure the Worker runtime (or set VITE_WORKER_BASE_URL and VITE_VAPID_PUBLIC_KEY) to enable push registration.
               </div>
             )}
             {pushError && (

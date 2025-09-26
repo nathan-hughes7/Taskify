@@ -101,6 +101,12 @@ export default {
     const url = new URL(request.url);
 
     try {
+      if (url.pathname === "/api/config" && request.method === "GET") {
+        return jsonResponse({
+          workerBaseUrl: url.origin,
+          vapidPublicKey: env.VAPID_PUBLIC_KEY || "",
+        });
+      }
       if (url.pathname === "/api/devices" && request.method === "PUT") {
         return await handleRegisterDevice(request, env);
       }

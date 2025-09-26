@@ -79,11 +79,11 @@ function buildReminderTitle(item) {
   const raw = typeof item?.title === 'string' ? item.title : '';
   const cleaned = raw.trim();
   const base = cleaned || 'Task';
-  return `${base} from Taskify`;
+  const withoutSuffix = base.replace(/\s+from\s+taskify$/i, '').trim();
+  return withoutSuffix || 'Task';
 }
 
 function buildReminderBody(item) {
-  const title = typeof item?.title === 'string' ? item.title : 'Task';
   const minutes = Number(item?.minutes) || 0;
   let due = null;
   if (typeof item?.dueISO === 'string') {
@@ -94,14 +94,14 @@ function buildReminderBody(item) {
 
   if (minutes <= 0) {
     return timeString
-      ? `${title} is due now at ${timeString}.`
-      : `${title} is due now.`;
+      ? `is due now at ${timeString}`
+      : 'is due now';
   }
 
   const offset = formatOffset(minutes);
   return timeString
-    ? `${title} is due in ${offset} at ${timeString}.`
-    : `${title} is due in ${offset}.`;
+    ? `is due in ${offset} at ${timeString}`
+    : `is due in ${offset}`;
 }
 
 function formatOffset(minutes) {

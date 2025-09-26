@@ -32,27 +32,10 @@ self.addEventListener('push', (event) => {
 });
 
 async function handlePushEvent() {
-  let reminders = [];
-  try {
-    const registration = await self.registration;
-    const subscription = await registration.pushManager.getSubscription();
-    if (subscription) {
-      const response = await fetch('/api/reminders/poll', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: subscription.endpoint }),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (Array.isArray(data)) reminders = data;
-      }
-    }
-  } catch (err) {
-    console.warn('Failed to retrieve reminder payloads', err);
-  }
+  const reminders = await fetchPendingRemindersWithRetry();
 
   if (!reminders.length) {
-    await self.registration.showNotification('Taskify', {
+    await self.registration.showNotification('Task reminder', {
       body: 'You have an upcoming task.',
       tag: 'taskify_reminder',
     });
@@ -73,6 +56,39 @@ async function handlePushEvent() {
       },
     });
   }));
+}
+
+async function fetchPendingRemindersWithRetry(maxAttempts = 3, delayMs = 500) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const registration = await self.registration;
+      const subscription = await registration.pushManager.getSubscription();
+      if (!subscription) return [];
+      const response = await fetch('/api/reminders/poll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: subscription.endpoint }),
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        console.warn('Reminder poll failed', response.status);
+      } else {
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0) return data;
+        if (Array.isArray(data) && data.length === 0 && attempt === maxAttempts - 1) return data;
+      }
+    } catch (err) {
+      console.warn('Failed to retrieve reminder payloads', err);
+    }
+    if (attempt < maxAttempts - 1) {
+      await wait(delayMs);
+    }
+  }
+  return [];
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildReminderTitle(item) {

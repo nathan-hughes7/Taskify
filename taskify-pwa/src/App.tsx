@@ -4671,9 +4671,9 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
   const initialDate = isoDatePart(task.dueISO);
   const initialTime = isoTimePart(task.dueISO);
   const defaultHasTime = task.dueTimeEnabled ?? false;
-  const [hasDueTime, setHasDueTime] = useState<boolean>(defaultHasTime);
   const [scheduledDate, setScheduledDate] = useState(initialDate);
-  const [scheduledTime, setScheduledTime] = useState<string>(initialTime);
+  const [scheduledTime, setScheduledTime] = useState<string>(defaultHasTime ? initialTime : '');
+  const hasDueTime = scheduledTime.trim().length > 0;
   const [reminderSelection, setReminderSelection] = useState<ReminderPreset[]>(task.reminders ?? []);
   const [bountyAmount, setBountyAmount] = useState<number | "">(task.bounty?.amount ?? "");
   const [, setBountyState] = useState<Task["bounty"]["state"]>(task.bounty?.state || "locked");
@@ -4788,19 +4788,6 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
     reorderSubtasks(sourceHint, id, position);
   }, [reorderSubtasks]);
 
-  function handleDueTimeToggle(next: boolean) {
-    setHasDueTime(next);
-    if (next && !scheduledTime) {
-      if (initialTime) {
-        setScheduledTime(initialTime);
-      } else {
-        const now = new Date();
-        const fallback = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        setScheduledTime(fallback);
-      }
-    }
-  }
-
   function toggleReminder(id: ReminderPreset) {
     setReminderSelection((prev) => {
       const exists = prev.includes(id);
@@ -4811,7 +4798,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
 
   function buildTask(overrides: Partial<Task> = {}): Task {
     const baseDate = scheduledDate || isoDatePart(task.dueISO);
-    const hasTime = hasDueTime && !!scheduledTime;
+    const hasTime = hasDueTime;
     const dueISO = isoFromDateTime(baseDate, hasTime ? scheduledTime : undefined);
     const due = startOfDay(new Date(`${baseDate}T00:00`));
     const nowSow = startOfWeek(new Date(), weekStart);
@@ -4941,25 +4928,15 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
               className="pill-input flex-1 min-w-[10rem] sm:max-w-[13rem]"
               title="Scheduled date"
             />
-            <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-              <label className="flex items-center gap-2 text-xs sm:text-sm text-secondary whitespace-nowrap">
-                <input
-                  type="checkbox"
-                  checked={hasDueTime}
-                  onChange={(e) => handleDueTimeToggle(e.target.checked)}
-                />
-                Add due time
-              </label>
-              <input
-                type="time"
-                value={scheduledTime}
-                onChange={(e) => setScheduledTime(e.target.value)}
-                className="pill-input w-full sm:w-auto sm:min-w-[8.5rem]"
-                title="Scheduled time"
-                disabled={!hasDueTime}
-              />
-            </div>
+            <input
+              type="time"
+              value={scheduledTime}
+              onChange={(e) => setScheduledTime(e.target.value)}
+              className="pill-input flex-none min-w-[8rem] sm:min-w-[8.5rem]"
+              title="Scheduled time"
+            />
           </div>
+          <div className="mt-1 text-xs text-secondary">Leave the time blank if the task has no due time.</div>
         </div>
 
         <div className="wallet-section space-y-3">

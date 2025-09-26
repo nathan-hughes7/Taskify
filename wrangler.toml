@@ -29,8 +29,3 @@ id = "03a8da2b890b4d33b7ddc9273ada7868"
 [[kv_namespaces]]
 binding = "TASKIFY_PENDING"
 id = "448d7dc7170c4aff81c2a58c5e07e739"
-
-[[kv_namespaces]]
-binding = "VAPID_PRIVATE_KEY"
-id = "6c246da6c1154f80a230384ec31332bd"
-

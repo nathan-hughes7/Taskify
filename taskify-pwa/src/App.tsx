@@ -1843,6 +1843,89 @@ export default function App() {
     };
   }, [reminderTasks, settings.pushNotifications, workerBaseUrl]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const pushPrefs = settings.pushNotifications ?? DEFAULT_PUSH_PREFERENCES;
+    const permission = typeof Notification !== 'undefined' ? Notification.permission : pushPrefs.permission;
+
+    const applyUpdates = (patch: Partial<PushPreferences>): boolean => {
+      const keys = Object.keys(patch) as (keyof PushPreferences)[];
+      if (!keys.length) return false;
+      let changed = false;
+      for (const key of keys) {
+        if (patch[key] !== (pushPrefs as any)[key]) {
+          changed = true;
+          break;
+        }
+      }
+      if (!changed) return false;
+      setSettings({ pushNotifications: { ...pushPrefs, ...patch } });
+      return true;
+    };
+
+    const ensureDisabled = () => {
+      const patch: Partial<PushPreferences> = {};
+      if (pushPrefs.enabled) patch.enabled = false;
+      if (pushPrefs.subscriptionId !== undefined) patch.subscriptionId = undefined;
+      if (permission !== pushPrefs.permission) patch.permission = permission;
+      const changed = applyUpdates(patch);
+      if (changed) {
+        reminderPayloadRef.current = null;
+      }
+    };
+
+    if (!pushPrefs.enabled) {
+      if (permission !== pushPrefs.permission) {
+        applyUpdates({ permission });
+      }
+      return;
+    }
+
+    const pushApiSupported = 'serviceWorker' in navigator && 'PushManager' in window;
+    if (!pushApiSupported) {
+      ensureDisabled();
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      let registration: ServiceWorkerRegistration | null | undefined;
+      try {
+        registration = typeof navigator.serviceWorker.getRegistration === 'function'
+          ? await navigator.serviceWorker.getRegistration()
+          : undefined;
+      } catch {}
+      if (!registration) {
+        try {
+          registration = await navigator.serviceWorker.ready;
+        } catch {}
+      }
+      if (cancelled) return;
+      if (!registration) {
+        ensureDisabled();
+        return;
+      }
+
+      let subscription: PushSubscription | null = null;
+      try {
+        subscription = await registration.pushManager.getSubscription();
+      } catch {}
+      if (cancelled) return;
+      if (!subscription || permission !== 'granted') {
+        ensureDisabled();
+        return;
+      }
+
+      if (permission !== pushPrefs.permission) {
+        applyUpdates({ permission });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setSettings, settings.pushNotifications]);
+
   /* ---------- Helpers ---------- */
   function resolveQuickRule(): Recurrence {
     switch (quickRule) {
@@ -2248,9 +2331,23 @@ export default function App() {
     try {
       if ('serviceWorker' in navigator) {
         try {
-          const registration = await navigator.serviceWorker.ready;
-          const subscription = await registration.pushManager.getSubscription();
-          if (subscription) await subscription.unsubscribe();
+          let registration: ServiceWorkerRegistration | null | undefined = undefined;
+          if (typeof navigator.serviceWorker.getRegistration === 'function') {
+            try {
+              registration = await navigator.serviceWorker.getRegistration();
+            } catch {}
+          }
+          if (!registration) {
+            try {
+              registration = await navigator.serviceWorker.ready;
+            } catch {}
+          }
+          if (registration) {
+            try {
+              const subscription = await registration.pushManager.getSubscription();
+              if (subscription) await subscription.unsubscribe();
+            } catch {}
+          }
         } catch {}
       }
 
@@ -2262,12 +2359,16 @@ export default function App() {
         } catch {}
       }
 
+      const permission = typeof Notification !== 'undefined'
+        ? Notification.permission
+        : settings.pushNotifications.permission;
+
       setSettings({
         pushNotifications: {
           ...settings.pushNotifications,
           enabled: false,
           subscriptionId: undefined,
-          permission: (typeof Notification !== 'undefined' ? Notification.permission : settings.pushNotifications.permission),
+          permission,
         },
       });
       reminderPayloadRef.current = null;

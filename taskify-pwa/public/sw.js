@@ -60,10 +60,11 @@ async function handlePushEvent() {
   }
 
   await Promise.all(reminders.map(async (item) => {
+    const title = buildReminderTitle(item);
     const body = buildReminderBody(item);
     const tag = `taskify_${item.taskId || 'unknown'}_${item.minutes || 0}`;
     const url = item.taskId ? `/?task=${encodeURIComponent(item.taskId)}` : '/';
-    await self.registration.showNotification('Taskify', {
+    await self.registration.showNotification(title, {
       body,
       tag,
       data: {
@@ -72,6 +73,13 @@ async function handlePushEvent() {
       },
     });
   }));
+}
+
+function buildReminderTitle(item) {
+  const raw = typeof item?.title === 'string' ? item.title : '';
+  const cleaned = raw.trim();
+  const base = cleaned || 'Task';
+  return `${base} from Taskify`;
 }
 
 function buildReminderBody(item) {

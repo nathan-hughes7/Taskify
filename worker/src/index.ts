@@ -120,6 +120,79 @@ const MAX_LEAD_MS = 30 * 24 * 60 * MINUTE_MS; // 30 days
 
 let cachedPrivateKey: CryptoKey | null = null;
 const PRIVATE_KEY_KV_KEYS = ["VAPID_PRIVATE_KEY", "private-key", "key"] as const;
+let schemaReadyPromise: Promise<void> | null = null;
+
+function requireDb(env: Env): D1Database {
+  if (!env.TASKIFY_DB) {
+    throw new Error("TASKIFY_DB binding is not configured");
+  }
+  return env.TASKIFY_DB;
+}
+
+async function ensureSchema(env: Env): Promise<void> {
+  if (schemaReadyPromise) {
+    return schemaReadyPromise;
+  }
+  const db = requireDb(env);
+  const ready = (async () => {
+    try {
+      await db.prepare(`PRAGMA foreign_keys = ON`).run();
+    } catch {
+      // ignore; some environments may not support PRAGMA
+    }
+
+    await db.prepare(
+      `CREATE TABLE IF NOT EXISTS devices (
+         device_id TEXT PRIMARY KEY,
+         platform TEXT NOT NULL,
+         endpoint TEXT NOT NULL,
+         endpoint_hash TEXT NOT NULL UNIQUE,
+         subscription_auth TEXT NOT NULL,
+         subscription_p256dh TEXT NOT NULL,
+         updated_at INTEGER NOT NULL
+       )`,
+    ).run();
+
+    await db.prepare(
+      `CREATE TABLE IF NOT EXISTS reminders (
+         device_id TEXT NOT NULL,
+         reminder_key TEXT NOT NULL,
+         task_id TEXT NOT NULL,
+         board_id TEXT,
+         title TEXT NOT NULL,
+         due_iso TEXT NOT NULL,
+         minutes INTEGER NOT NULL,
+         send_at INTEGER NOT NULL,
+         PRIMARY KEY (device_id, reminder_key),
+         FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
+       )`,
+    ).run();
+
+    await db.prepare(
+      `CREATE TABLE IF NOT EXISTS pending_notifications (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         device_id TEXT NOT NULL,
+         task_id TEXT NOT NULL,
+         board_id TEXT,
+         title TEXT NOT NULL,
+         due_iso TEXT NOT NULL,
+         minutes INTEGER NOT NULL,
+         created_at INTEGER NOT NULL,
+         FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
+       )`,
+    ).run();
+
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_reminders_send_at ON reminders(send_at)`).run();
+    await db.prepare(`CREATE INDEX IF NOT EXISTS idx_pending_device ON pending_notifications(device_id)`).run();
+  })()
+    .catch((err) => {
+      schemaReadyPromise = null;
+      throw err;
+    });
+
+  schemaReadyPromise = ready;
+  return ready;
+}
 
 interface ScheduledEvent {
   scheduledTime: number;
@@ -145,6 +218,8 @@ export default {
     }
 
     const url = new URL(request.url);
+
+    await ensureSchema(env);
 
     try {
       if (url.pathname === "/api/config" && request.method === "GET") {
@@ -177,6 +252,7 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: SchedulerController): Promise<void> {
     const runner = async () => {
       try {
+        await ensureSchema(env);
         await processDueReminders(env);
       } catch (err) {
         console.error('Scheduled task failed', { cron: event?.cron, error: err instanceof Error ? err.message : String(err) });
@@ -229,7 +305,8 @@ async function handleRegisterDevice(request: Request, env: Env): Promise<Respons
 }
 
 async function handleDeleteDevice(deviceId: string, env: Env): Promise<Response> {
-  const existing = await env.TASKIFY_DB
+  const db = requireDb(env);
+  const existing = await db
     .prepare<{ endpoint_hash: string | null }>(
       `SELECT endpoint_hash
        FROM devices
@@ -238,10 +315,10 @@ async function handleDeleteDevice(deviceId: string, env: Env): Promise<Response>
     .bind(deviceId)
     .first<{ endpoint_hash: string | null }>();
 
-  await env.TASKIFY_DB.batch([
-    env.TASKIFY_DB.prepare("DELETE FROM pending_notifications WHERE device_id = ?").bind(deviceId),
-    env.TASKIFY_DB.prepare("DELETE FROM reminders WHERE device_id = ?").bind(deviceId),
-    env.TASKIFY_DB.prepare("DELETE FROM devices WHERE device_id = ?").bind(deviceId),
+  await db.batch([
+    db.prepare("DELETE FROM pending_notifications WHERE device_id = ?").bind(deviceId),
+    db.prepare("DELETE FROM reminders WHERE device_id = ?").bind(deviceId),
+    db.prepare("DELETE FROM devices WHERE device_id = ?").bind(deviceId),
   ]);
 
   if (env.TASKIFY_DEVICES) {
@@ -270,6 +347,7 @@ async function handleSaveReminders(request: Request, env: Env): Promise<Response
     return jsonResponse({ error: "reminders must be an array" }, 400);
   }
 
+  const db = requireDb(env);
   const now = Date.now();
   const entries: ReminderEntry[] = [];
   for (const item of reminders as ReminderTaskInput[]) {
@@ -296,12 +374,12 @@ async function handleSaveReminders(request: Request, env: Env): Promise<Response
     }
   }
 
-  const statements = [env.TASKIFY_DB.prepare("DELETE FROM reminders WHERE device_id = ?").bind(deviceId)];
+  const statements = [db.prepare("DELETE FROM reminders WHERE device_id = ?").bind(deviceId)];
   if (entries.length > 0) {
     entries.sort((a, b) => a.sendAt - b.sendAt);
     for (const entry of entries) {
       statements.push(
-        env.TASKIFY_DB
+        db
           .prepare(
             `INSERT INTO reminders (device_id, reminder_key, task_id, board_id, title, due_iso, minutes, send_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -320,8 +398,8 @@ async function handleSaveReminders(request: Request, env: Env): Promise<Response
     }
   }
 
-  await env.TASKIFY_DB.batch(statements);
-  await env.TASKIFY_DB.prepare("DELETE FROM pending_notifications WHERE device_id = ?").bind(deviceId).run();
+  await db.batch(statements);
+  await db.prepare("DELETE FROM pending_notifications WHERE device_id = ?").bind(deviceId).run();
 
   return new Response(null, { status: 204, headers: JSON_HEADERS });
 }
@@ -336,7 +414,8 @@ async function handlePollReminders(request: Request, env: Env): Promise<Response
   if (!resolvedDeviceId) {
     return jsonResponse({ error: "Device not registered" }, 404);
   }
-  const pendingRows = await env.TASKIFY_DB
+  const db = requireDb(env);
+  const pendingRows = await db
     .prepare<PendingRow>(
       `SELECT id, task_id, board_id, title, due_iso, minutes
        FROM pending_notifications
@@ -350,8 +429,8 @@ async function handlePollReminders(request: Request, env: Env): Promise<Response
   if (!rows.length) {
     return jsonResponse([]);
   }
-  const deleteStatements = rows.map((row) => env.TASKIFY_DB.prepare("DELETE FROM pending_notifications WHERE id = ?").bind(row.id));
-  await env.TASKIFY_DB.batch(deleteStatements);
+  const deleteStatements = rows.map((row) => db.prepare("DELETE FROM pending_notifications WHERE id = ?").bind(row.id));
+  await db.batch(deleteStatements);
 
   return jsonResponse(
     rows.map((row) => ({
@@ -367,10 +446,11 @@ async function handlePollReminders(request: Request, env: Env): Promise<Response
 async function processDueReminders(env: Env): Promise<void> {
   const now = Date.now();
   const batchSize = 256;
+  const db = requireDb(env);
 
   // Process in batches to keep cron executions bounded.
   while (true) {
-    const dueResult = await env.TASKIFY_DB
+    const dueResult = await db
       .prepare<ReminderRow>(
         `SELECT device_id, reminder_key, task_id, board_id, title, due_iso, minutes, send_at
          FROM reminders
@@ -387,11 +467,11 @@ async function processDueReminders(env: Env): Promise<void> {
     }
 
     const deleteStatements = dueReminders.map((reminder) =>
-      env.TASKIFY_DB
+      db
         .prepare("DELETE FROM reminders WHERE device_id = ? AND reminder_key = ?")
         .bind(reminder.device_id, reminder.reminder_key),
     );
-    await env.TASKIFY_DB.batch(deleteStatements);
+    await db.batch(deleteStatements);
 
     const grouped = new Map<string, ReminderRow[]>();
     for (const reminder of dueReminders) {
@@ -406,7 +486,7 @@ async function processDueReminders(env: Env): Promise<void> {
     for (const [deviceId, reminders] of grouped) {
       const device = await getDeviceRecord(env, deviceId);
       if (!device) {
-        await env.TASKIFY_DB.prepare("DELETE FROM pending_notifications WHERE device_id = ?").bind(deviceId).run();
+        await db.prepare("DELETE FROM pending_notifications WHERE device_id = ?").bind(deviceId).run();
         continue;
       }
       const pendingNotifications: PendingReminder[] = reminders.map((reminder) => ({
@@ -430,8 +510,9 @@ async function processDueReminders(env: Env): Promise<void> {
 async function appendPending(env: Env, deviceId: string, notifications: PendingReminder[]): Promise<void> {
   if (!notifications.length) return;
   const now = Date.now();
+  const db = requireDb(env);
   const statements = notifications.map((notification) =>
-    env.TASKIFY_DB
+    db
       .prepare(
         `INSERT INTO pending_notifications (device_id, task_id, board_id, title, due_iso, minutes, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -446,12 +527,13 @@ async function appendPending(env: Env, deviceId: string, notifications: PendingR
         now,
       ),
   );
-  await env.TASKIFY_DB.batch(statements);
+  await db.batch(statements);
 }
 
 async function upsertDevice(env: Env, record: DeviceRecord, updatedAt: number): Promise<void> {
-  await env.TASKIFY_DB.batch([
-    env.TASKIFY_DB
+  const db = requireDb(env);
+  await db.batch([
+    db
       .prepare(
         `INSERT INTO devices (device_id, platform, endpoint, endpoint_hash, subscription_auth, subscription_p256dh, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -476,7 +558,8 @@ async function upsertDevice(env: Env, record: DeviceRecord, updatedAt: number): 
 }
 
 async function getDeviceRecord(env: Env, deviceId: string): Promise<DeviceRecord | null> {
-  const row = await env.TASKIFY_DB
+  const db = requireDb(env);
+  const row = await db
     .prepare<DeviceRow>(
       `SELECT device_id, platform, endpoint, endpoint_hash, subscription_auth, subscription_p256dh
        FROM devices
@@ -503,7 +586,8 @@ async function getDeviceRecord(env: Env, deviceId: string): Promise<DeviceRecord
 
 async function findDeviceIdByEndpoint(env: Env, endpoint: string): Promise<string | undefined> {
   const hash = await hashEndpoint(endpoint);
-  const row = await env.TASKIFY_DB
+  const db = requireDb(env);
+  const row = await db
     .prepare<{ device_id: string }>(
       `SELECT device_id
        FROM devices
@@ -594,14 +678,15 @@ async function migrateRemindersFromKv(env: Env, deviceId: string): Promise<void>
     return;
   }
 
-  const statements = [env.TASKIFY_DB.prepare("DELETE FROM reminders WHERE device_id = ?").bind(deviceId)];
+  const db = requireDb(env);
+  const statements = [db.prepare("DELETE FROM reminders WHERE device_id = ?").bind(deviceId)];
   entries.sort((a, b) => (a?.sendAt ?? 0) - (b?.sendAt ?? 0));
   for (const entry of entries) {
     if (!entry || typeof entry.reminderKey !== "string" || typeof entry.taskId !== "string") continue;
     if (typeof entry.title !== "string" || typeof entry.dueISO !== "string" || typeof entry.minutes !== "number") continue;
     if (typeof entry.sendAt !== "number") continue;
     statements.push(
-      env.TASKIFY_DB
+      db
         .prepare(
           `INSERT INTO reminders (device_id, reminder_key, task_id, board_id, title, due_iso, minutes, send_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
@@ -620,7 +705,7 @@ async function migrateRemindersFromKv(env: Env, deviceId: string): Promise<void>
   }
 
   if (statements.length > 1) {
-    await env.TASKIFY_DB.batch(statements);
+    await db.batch(statements);
   } else {
     await statements[0].run();
   }
@@ -660,7 +745,8 @@ async function migratePendingFromKv(env: Env, deviceId: string): Promise<void> {
     return;
   }
 
-  await env.TASKIFY_DB.prepare("DELETE FROM pending_notifications WHERE device_id = ?").bind(deviceId).run();
+  const db = requireDb(env);
+  await db.prepare("DELETE FROM pending_notifications WHERE device_id = ?").bind(deviceId).run();
   await appendPending(env, deviceId, normalized);
   await kvPending.delete(pendingKey(deviceId)).catch(() => {});
 }

@@ -396,10 +396,14 @@ async function createVapidJWT(env: Env, aud: string): Promise<string> {
   if (!env.VAPID_PUBLIC_KEY || !env.VAPID_SUBJECT) {
     throw new Error("VAPID keys are not configured");
   }
+  const subject = normalizeVapidSubject(env.VAPID_SUBJECT);
+  if (!subject) {
+    throw new Error("VAPID subject is not configured");
+  }
   const now = Math.floor(Date.now() / 1000);
   const exp = now + 12 * 60 * 60; // 12 hours
   const header = base64UrlEncodeJSON({ alg: "ES256", typ: "JWT" });
-  const payload = base64UrlEncodeJSON({ aud, exp, sub: env.VAPID_SUBJECT });
+  const payload = base64UrlEncodeJSON({ aud, exp, sub: subject });
   const signingInput = `${header}.${payload}`;
   const key = await getPrivateKey(env);
   const signatureBuffer = await crypto.subtle.sign(
@@ -591,4 +595,21 @@ function base64UrlDecode(value: string): Uint8Array {
 function base64UrlEncodeJSON(value: unknown): string {
   const text = JSON.stringify(value);
   return base64UrlEncode(new TextEncoder().encode(text));
+}
+
+function normalizeVapidSubject(subjectRaw: string): string {
+  if (typeof subjectRaw !== "string") return "";
+  const trimmed = subjectRaw.trim();
+  if (!trimmed) return "";
+
+  if (/^mailto:/i.test(trimmed)) {
+    const mailto = trimmed.replace(/^mailto:/i, "").replace(/\s+/g, "");
+    return mailto ? `mailto:${mailto}` : "";
+  }
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed.replace(/\s+/g, "");
+  }
+
+  return trimmed;
 }

@@ -414,15 +414,27 @@ async function createVapidJWT(env: Env, aud: string): Promise<string> {
 async function getPrivateKey(env: Env): Promise<CryptoKey> {
   if (cachedPrivateKey) return cachedPrivateKey;
   const pem = await resolvePrivateKeyPem(env);
-  const raw = decodePemKey(pem);
-  cachedPrivateKey = await crypto.subtle.importKey(
-    "pkcs8",
-    raw,
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["sign"],
-  );
-  return cachedPrivateKey;
+  const keyBytes = decodePemKey(pem);
+  if (!keyBytes.length) {
+    throw new Error("VAPID private key material is empty");
+  }
+
+  try {
+    cachedPrivateKey = await crypto.subtle.importKey(
+      "pkcs8",
+      keyBytes,
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign"],
+    );
+    return cachedPrivateKey;
+  } catch (err) {
+    if (!shouldAttemptRawVapidImport(err, keyBytes)) {
+      throw err;
+    }
+    cachedPrivateKey = await importRawVapidPrivateKey(env, keyBytes);
+    return cachedPrivateKey;
+  }
 }
 
 async function resolvePrivateKeyPem(env: Env): Promise<string> {
@@ -445,6 +457,47 @@ async function resolvePrivateKeyPem(env: Env): Promise<string> {
   }
 
   throw new Error("VAPID private key is not configured");
+}
+
+function shouldAttemptRawVapidImport(err: unknown, keyBytes: Uint8Array): boolean {
+  if (!keyBytes || keyBytes.length !== 32) return false;
+  if (!err) return false;
+  const name = typeof (err as { name?: string }).name === "string" ? (err as { name?: string }).name : "";
+  if (name === "DataError") return true;
+  const message = typeof (err as Error).message === "string" ? (err as Error).message : "";
+  return /invalid pkcs8/i.test(message);
+}
+
+async function importRawVapidPrivateKey(env: Env, scalar: Uint8Array): Promise<CryptoKey> {
+  if (scalar.length !== 32) {
+    throw new Error("Raw VAPID private key must be 32 bytes");
+  }
+  if (!env.VAPID_PUBLIC_KEY) {
+    throw new Error("VAPID public key is required to import raw private key material");
+  }
+  const publicBytes = base64UrlDecode(env.VAPID_PUBLIC_KEY.trim());
+  if (publicBytes.length !== 65 || publicBytes[0] !== 4) {
+    throw new Error("VAPID public key is not a valid uncompressed P-256 point");
+  }
+  const xBytes = publicBytes.slice(1, 33);
+  const yBytes = publicBytes.slice(33, 65);
+  const jwk = {
+    kty: "EC",
+    crv: "P-256",
+    ext: false,
+    key_ops: ["sign"],
+    d: base64UrlEncode(scalar),
+    x: base64UrlEncode(xBytes),
+    y: base64UrlEncode(yBytes),
+  } as JsonWebKey;
+
+  return crypto.subtle.importKey(
+    "jwk",
+    jwk,
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign"],
+  );
 }
 
 function deviceKey(deviceId: string): string {
@@ -484,14 +537,35 @@ async function hashEndpoint(endpoint: string): Promise<string> {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function decodePemKey(pem: string): ArrayBuffer {
-  const cleaned = pem.replace(/-----BEGIN [^-----]+-----/g, "").replace(/-----END [^-----]+-----/g, "").replace(/\s+/g, "");
-  const binary = atob(cleaned);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < bytes.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
+function decodePemKey(pem: string): Uint8Array {
+  const trimmed = pem.trim();
+  if (!trimmed) return new Uint8Array();
+
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const nested = typeof parsed?.privateKey === "string"
+        ? parsed.privateKey
+        : typeof parsed?.key === "string"
+          ? parsed.key
+          : typeof parsed?.value === "string"
+            ? parsed.value
+            : undefined;
+      if (nested) {
+        return decodePemKey(nested);
+      }
+    } catch {
+      // fall through to base64 decoding
+    }
   }
-  return bytes.buffer;
+
+  const cleaned = trimmed
+    .replace(/-----BEGIN [^-----]+-----/g, "")
+    .replace(/-----END [^-----]+-----/g, "")
+    .replace(/\s+/g, "");
+
+  if (!cleaned) return new Uint8Array();
+  return base64UrlDecode(cleaned);
 }
 
 function base64UrlEncode(buffer: Uint8Array): string {
@@ -500,6 +574,18 @@ function base64UrlEncode(buffer: Uint8Array): string {
     string += String.fromCharCode(byte);
   });
   return btoa(string).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlDecode(value: string): Uint8Array {
+  if (!value) return new Uint8Array();
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.length % 4 === 0 ? normalized : `${normalized}${"=".repeat(4 - (normalized.length % 4))}`;
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < bytes.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
 function base64UrlEncodeJSON(value: unknown): string {

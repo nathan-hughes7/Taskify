@@ -6264,11 +6264,11 @@ function SettingsModal({
           <div className="space-y-4">
             <div>
               <div className="text-sm font-medium mb-2">Font size</div>
-              <div className="flex flex-wrap gap-2">
-                <button className={pillButtonClass(settings.baseFontSize == null)} onClick={() => setSettings({ baseFontSize: null })}>System</button>
-                <button className={pillButtonClass(settings.baseFontSize === 14)} onClick={() => setSettings({ baseFontSize: 14 })}>Small</button>
-                <button className={pillButtonClass(settings.baseFontSize === 20)} onClick={() => setSettings({ baseFontSize: 20 })}>Large</button>
-                <button className={pillButtonClass(settings.baseFontSize === 22)} onClick={() => setSettings({ baseFontSize: 22 })}>X-Large</button>
+              <div className="flex flex-wrap gap-1">
+                <button className={`${pillButtonClass(settings.baseFontSize == null)} button-xs`} onClick={() => setSettings({ baseFontSize: null })}>System</button>
+                <button className={`${pillButtonClass(settings.baseFontSize === 14)} button-xs`} onClick={() => setSettings({ baseFontSize: 14 })}>Sm</button>
+                <button className={`${pillButtonClass(settings.baseFontSize === 20)} button-xs`} onClick={() => setSettings({ baseFontSize: 20 })}>Lg</button>
+                <button className={`${pillButtonClass(settings.baseFontSize === 22)} button-xs`} onClick={() => setSettings({ baseFontSize: 22 })}>X-Lg</button>
               </div>
               <div className="text-xs text-secondary mt-2">Scales the entire UI. Defaults to a compact size.</div>
             </div>

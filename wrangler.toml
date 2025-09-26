@@ -30,7 +30,6 @@ id = "03a8da2b890b4d33b7ddc9273ada7868"
 binding = "TASKIFY_PENDING"
 id = "448d7dc7170c4aff81c2a58c5e07e739"
 
-[[secrets_store_secrets]]
+[[kv_namespaces]]
 binding = "VAPID_PRIVATE_KEY"
-store_id= "6c246da6c1154f80a230384ec31332bd"
-secret_name = "VAPID_PRIVATE_KEY"
+id = "45bbad6e354443ff9b101d61a27e5dd9"

@@ -2344,9 +2344,6 @@ export default function App() {
     }
     return changed ? out : arr;
   }
-
-<<<<<<< Updated upstream
-=======
   function buildImportedTask(raw: string, overrides: Partial<Task> = {}): Task | null {
     if (!currentBoard) return null;
     try {
@@ -2374,8 +2371,6 @@ export default function App() {
       return null;
     }
   }
-
->>>>>>> Stashed changes
   function addTask(keepKeyboard = false) {
     if (!currentBoard) return;
 
@@ -2383,37 +2378,6 @@ export default function App() {
 
     const raw = newTitle.trim();
     if (raw) {
-<<<<<<< Updated upstream
-      try {
-        const parsed: any = JSON.parse(raw);
-        if (parsed && typeof parsed === "object" && parsed.title && parsed.dueISO) {
-          const nextOrder = nextOrderForBoard(currentBoard.id, tasks);
-          const id = crypto.randomUUID();
-          const imported: Task = {
-            ...parsed,
-            id,
-            seriesId: parsed.recurrence ? (parsed.seriesId || id) : undefined,
-            boardId: currentBoard.id,
-            order: typeof parsed.order === "number" ? parsed.order : nextOrder,
-          };
-          applyHiddenForFuture(imported);
-          animateTaskArrival(originRect, imported, currentBoard);
-          setTasks(prev => {
-            const out = [...prev, imported];
-            return settings.showFullWeekRecurring && imported.recurrence ? ensureWeekRecurrences(out, [imported]) : out;
-          });
-          maybePublishTask(imported).catch(() => {});
-          setNewTitle("");
-          setNewImages([]);
-          setQuickRule("none");
-          setAddCustomRule(R_NONE);
-          setScheduleDate("");
-          if (keepKeyboard) newTitleRef.current?.focus();
-          else newTitleRef.current?.blur();
-          return;
-        }
-      } catch {}
-=======
       const imported = buildImportedTask(raw);
       if (imported) {
         applyHiddenForFuture(imported);
@@ -2433,7 +2397,6 @@ export default function App() {
         else newTitleRef.current?.blur();
         return;
       }
->>>>>>> Stashed changes
     }
 
     const title = raw || (newImages.length ? "Image" : "");

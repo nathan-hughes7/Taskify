@@ -2405,16 +2405,18 @@ export default function App() {
         throw new Error(`Failed to register device (${res.status})`);
       }
       let subscriptionId: string | undefined;
+      let resolvedDeviceId = deviceId;
       try {
         const data = await res.json();
         if (data && typeof data.subscriptionId === 'string') subscriptionId = data.subscriptionId;
+        if (data && typeof data.deviceId === 'string' && data.deviceId) resolvedDeviceId = data.deviceId;
       } catch {}
 
       const updated: PushPreferences = {
         ...settings.pushNotifications,
         enabled: true,
         platform: normalizedPlatform,
-        deviceId,
+        deviceId: resolvedDeviceId,
         subscriptionId,
         permission,
       };

@@ -287,8 +287,18 @@ async function handleRegisterDevice(request: Request, env: Env): Promise<Respons
   }
 
   const endpointHash = await hashEndpoint(subscription.endpoint);
+
+  let resolvedDeviceId = deviceId;
+  const existingById = await getDeviceRecord(env, deviceId);
+  if (!existingById) {
+    const existingByEndpoint = await findDeviceIdByEndpoint(env, subscription.endpoint);
+    if (existingByEndpoint) {
+      resolvedDeviceId = existingByEndpoint;
+    }
+  }
+
   const record: DeviceRecord = {
-    deviceId,
+    deviceId: resolvedDeviceId,
     platform,
     subscription: {
       endpoint: subscription.endpoint,
@@ -301,7 +311,7 @@ async function handleRegisterDevice(request: Request, env: Env): Promise<Respons
   };
   await upsertDevice(env, record, Date.now());
 
-  return jsonResponse({ subscriptionId: endpointHash });
+  return jsonResponse({ subscriptionId: endpointHash, deviceId: resolvedDeviceId });
 }
 
 async function handleDeleteDevice(deviceId: string, env: Env): Promise<Response> {

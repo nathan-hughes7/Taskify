@@ -52,7 +52,7 @@ async function handlePushEvent() {
   }
 
   if (!reminders.length) {
-    await self.registration.showNotification('Taskify reminder', {
+    await self.registration.showNotification('Taskify', {
       body: 'You have an upcoming task.',
       tag: 'taskify_reminder',
     });
@@ -63,7 +63,7 @@ async function handlePushEvent() {
     const body = buildReminderBody(item);
     const tag = `taskify_${item.taskId || 'unknown'}_${item.minutes || 0}`;
     const url = item.taskId ? `/?task=${encodeURIComponent(item.taskId)}` : '/';
-    await self.registration.showNotification('Task reminder', {
+    await self.registration.showNotification('Taskify', {
       body,
       tag,
       data: {
@@ -86,14 +86,14 @@ function buildReminderBody(item) {
 
   if (minutes <= 0) {
     return timeString
-      ? `“${title}” is due now (at ${timeString}).`
-      : `“${title}” is due now.`;
+      ? `${title} is due now at ${timeString}.`
+      : `${title} is due now.`;
   }
 
   const offset = formatOffset(minutes);
   return timeString
-    ? `In ${offset}, “${title}” is due at ${timeString}.`
-    : `In ${offset}, “${title}” is due soon.`;
+    ? `${title} is due in ${offset} at ${timeString}.`
+    : `${title} is due in ${offset}.`;
 }
 
 function formatOffset(minutes) {

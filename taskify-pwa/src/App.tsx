@@ -4932,17 +4932,17 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
 
         <div>
           <label htmlFor="edit-schedule" className="block mb-1 text-sm font-medium">Scheduled for</label>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-wrap items-center gap-2">
             <input
               id="edit-schedule"
               type="date"
               value={scheduledDate}
               onChange={e=>setScheduledDate(e.target.value)}
-              className="pill-input w-full sm:max-w-[13rem]"
+              className="pill-input flex-1 min-w-[10rem] sm:max-w-[13rem]"
               title="Scheduled date"
             />
             <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-              <label className="flex items-center gap-2 text-xs sm:text-sm text-secondary">
+              <label className="flex items-center gap-2 text-xs sm:text-sm text-secondary whitespace-nowrap">
                 <input
                   type="checkbox"
                   checked={hasDueTime}

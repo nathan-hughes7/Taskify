@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import { finalizeEvent, getPublicKey, generateSecretKey, type EventTemplate, nip19, nip04 } from "nostr-tools";
 import { CashuWalletModal } from "./components/CashuWalletModal";
+import { InstallPromptBanner } from "./components/InstallPromptBanner";
 import { useCashu } from "./context/CashuContext";
 import { LS_LIGHTNING_CONTACTS } from "./localStorageKeys";
 import { LS_NOSTR_RELAYS, LS_NOSTR_SK } from "./nostrKeys";
@@ -3491,6 +3492,7 @@ export default function App() {
           npubCashAutoClaim={settings.npubCashLightningAddressEnabled && settings.npubCashAutoClaim}
         />
       )}
+      <InstallPromptBanner />
     </div>
   );
 }

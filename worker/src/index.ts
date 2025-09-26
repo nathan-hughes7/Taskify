@@ -81,6 +81,10 @@ let cachedPrivateKey: CryptoKey | null = null;
 
 interface ScheduledEvent {
   scheduledTime: number;
+  cron: string;
+}
+
+interface SchedulerController {
   waitUntil(promise: Promise<unknown>): void;
 }
 
@@ -128,8 +132,23 @@ export default {
     return env.ASSETS.fetch(request);
   },
 
-  async scheduled(event: ScheduledEvent, env: Env): Promise<void> {
-    event.waitUntil(processDueReminders(env));
+  async scheduled(event: ScheduledEvent, env: Env, ctx: SchedulerController): Promise<void> {
+    const runner = async () => {
+      try {
+        await processDueReminders(env);
+      } catch (err) {
+        console.error('Scheduled task failed', { cron: event?.cron, error: err instanceof Error ? err.message : String(err) });
+        throw err;
+      }
+    };
+
+    if (ctx && typeof ctx.waitUntil === 'function') {
+      ctx.waitUntil(runner());
+    } else if (event && typeof (event as unknown as { waitUntil?: (promise: Promise<unknown>) => void }).waitUntil === 'function') {
+      (event as unknown as { waitUntil: (promise: Promise<unknown>) => void }).waitUntil(runner());
+    } else {
+      await runner();
+    }
   },
 };
 

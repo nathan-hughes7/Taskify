@@ -96,6 +96,27 @@ type PushPreferences = {
   permission?: NotificationPermission;
 };
 
+function detectPushPlatformFromNavigator(): PushPlatform {
+  if (typeof navigator === 'undefined') return 'ios';
+  const ua = typeof navigator.userAgent === 'string' ? navigator.userAgent.toLowerCase() : '';
+  const vendor = typeof navigator.vendor === 'string' ? navigator.vendor.toLowerCase() : '';
+  const platform = typeof navigator.platform === 'string' ? navigator.platform.toLowerCase() : '';
+  const isIosDevice = /\b(iphone|ipad|ipod)\b/.test(ua);
+  const isStandalonePwa = typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(display-mode: standalone)').matches;
+  const isSafariBrowser = /safari/.test(ua)
+    && !/chrome|crios|fxios|edge|edg\//.test(ua)
+    && !/android/.test(ua);
+  const isAppleWebkit = vendor.includes('apple');
+  if (isIosDevice || (isSafariBrowser && (platform.startsWith('mac') || isAppleWebkit)) || (isAppleWebkit && isStandalonePwa)) {
+    return 'ios';
+  }
+  return 'android';
+}
+
+const INFERRED_PUSH_PLATFORM: PushPlatform = detectPushPlatformFromNavigator();
+
 const REMINDER_PRESETS: ReadonlyArray<{ id: ReminderPreset; label: string; badge: string; minutes: number }> = [
   { id: "5m", label: "5 minutes before", badge: "5m", minutes: 5 },
   { id: "15m", label: "15 minutes before", badge: "15m", minutes: 15 },
@@ -108,7 +129,7 @@ const REMINDER_MINUTES = new Map<ReminderPreset, number>(REMINDER_PRESETS.map((o
 
 const DEFAULT_PUSH_PREFERENCES: PushPreferences = {
   enabled: false,
-  platform: "ios",
+  platform: INFERRED_PUSH_PLATFORM,
   permission: (typeof Notification !== 'undefined' ? Notification.permission : 'default') as NotificationPermission,
 };
 
@@ -135,17 +156,31 @@ function taskHasReminders(task: Task): boolean {
 }
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  if (!base64String || typeof base64String !== 'string') {
+    throw new Error('VAPID public key is missing.');
+  }
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
   const decode = typeof atob === 'function'
     ? atob
     : (() => { throw new Error('No base64 decoder available in this environment'); });
-  const rawData = decode(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; i += 1) {
-    outputArray[i] = rawData.charCodeAt(i);
+  try {
+    const rawData = decode(base64);
+    if (!rawData) throw new Error('Decoded key was empty');
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; i += 1) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    if (outputArray.length < 32) {
+      throw new Error('Decoded key is too short');
+    }
+    return outputArray;
+  } catch (err) {
+    if (err instanceof Error) {
+      throw new Error(`Invalid VAPID public key: ${err.message}`);
+    }
+    throw new Error('Invalid VAPID public key.');
   }
-  return outputArray;
 }
 
 type ListColumn = { id: string; name: string };
@@ -699,9 +734,15 @@ function useSettings() {
       const npubCashLightningAddressEnabled = parsed?.npubCashLightningAddressEnabled === true;
       const npubCashAutoClaim = npubCashLightningAddressEnabled && parsed?.npubCashAutoClaim === true;
       const pushRaw = parsed?.pushNotifications;
+      const inferredPlatform = detectPushPlatformFromNavigator();
+      const storedPlatform = pushRaw?.platform === "android"
+        ? "android"
+        : pushRaw?.platform === "ios"
+          ? "ios"
+          : inferredPlatform;
       const pushPreferences: PushPreferences = {
         enabled: pushRaw?.enabled === true,
-        platform: pushRaw?.platform === "android" ? "android" : "ios",
+        platform: storedPlatform,
         deviceId: typeof pushRaw?.deviceId === 'string' ? pushRaw.deviceId : undefined,
         subscriptionId: typeof pushRaw?.subscriptionId === 'string' ? pushRaw.subscriptionId : undefined,
         permission:
@@ -769,6 +810,10 @@ function useSettings() {
       const next = { ...prev, ...s };
       if (s.pushNotifications) {
         next.pushNotifications = { ...prev.pushNotifications, ...DEFAULT_PUSH_PREFERENCES, ...s.pushNotifications };
+        const detectedPlatform = detectPushPlatformFromNavigator();
+        next.pushNotifications.platform = next.pushNotifications.platform === 'android'
+          ? 'android'
+          : detectedPlatform;
       }
       if (!next.backgroundImage) {
         next.backgroundImage = null;
@@ -1030,6 +1075,12 @@ export default function App() {
   }, [showToast]);
   const [boards, setBoards] = useBoards();
   const [settings, setSettings] = useSettings();
+  useEffect(() => {
+    const detected = detectPushPlatformFromNavigator();
+    if (settings.pushNotifications.platform !== detected) {
+      setSettings({ pushNotifications: { ...settings.pushNotifications, platform: detected } });
+    }
+  }, [settings.pushNotifications, setSettings]);
   const [currentBoardId, setCurrentBoardId] = useState(() => pickStartupBoard(boards, settings.startBoardByDay));
   const currentBoard = boards.find(b => b.id === currentBoardId);
   const visibleBoards = useMemo(() => boards.filter(b => !b.archived && !b.hidden), [boards]);
@@ -2237,6 +2288,76 @@ export default function App() {
     }
   }
 
+  function normalizePushError(err: unknown): string {
+    if (!(err instanceof Error)) return 'Failed to enable push notifications.';
+    const message = err.message || 'Failed to enable push notifications.';
+    const lower = message.toLowerCase();
+    if (lower.includes('push service error')) {
+      return 'The browser\'s push service rejected the registration. Check that notifications are allowed for this site (Safari → Settings → Websites → Notifications on macOS) and try again.';
+    }
+    if (lower.includes('not allowed')) {
+      return 'The browser blocked the subscription request. Grant notification permission and try again.';
+    }
+    if (lower.includes('secure context')) {
+      return 'Push notifications require HTTPS (or localhost during development). Reload the app over a secure origin and try again.';
+    }
+    if (lower.includes('invalid vapid public key')) {
+      return 'The configured VAPID public key appears to be invalid. Update both the Worker and the app with matching VAPID keys.';
+    }
+    return message;
+  }
+
+  function isRecoverablePushError(err: unknown): boolean {
+    if (!err) return false;
+    const message = typeof (err as any)?.message === 'string' ? (err as any).message.toLowerCase() : '';
+    if (!message) return false;
+    return message.includes('push service error')
+      || message.includes('not allowed')
+      || message.includes('denied')
+      || message.includes('aborted');
+  }
+
+  async function purgeExistingPushSubscriptions(): Promise<void> {
+    if (!navigator.serviceWorker) return;
+    const hasGetRegistrations = typeof navigator.serviceWorker.getRegistrations === 'function';
+    const registrations: ServiceWorkerRegistration[] = [];
+    try {
+      if (hasGetRegistrations) {
+        registrations.push(...await navigator.serviceWorker.getRegistrations());
+      } else if (typeof navigator.serviceWorker.getRegistration === 'function') {
+        const single = await navigator.serviceWorker.getRegistration();
+        if (single) registrations.push(single);
+      }
+    } catch {
+      return;
+    }
+    await Promise.all(registrations.map(async (registration) => {
+      try {
+        const sub = await registration.pushManager.getSubscription();
+        if (sub) await sub.unsubscribe();
+      } catch {}
+    }));
+  }
+
+  async function subscribeWithRecovery(
+    registration: ServiceWorkerRegistration,
+    applicationServerKey: Uint8Array,
+  ): Promise<PushSubscription> {
+    try {
+      return await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey,
+      });
+    } catch (err) {
+      if (!isRecoverablePushError(err)) throw err;
+      await purgeExistingPushSubscriptions();
+      return await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey,
+      });
+    }
+  }
+
   async function enablePushNotifications(platform: PushPlatform): Promise<void> {
     if (pushWorkState === 'enabling') return;
     setPushWorkState('enabling');
@@ -2244,6 +2365,9 @@ export default function App() {
     try {
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
         throw new Error('Push notifications are not supported on this device.');
+      }
+      if (typeof window !== 'undefined' && !window.isSecureContext) {
+        throw new Error('Push notifications require HTTPS (or localhost).');
       }
       if (!vapidPublicKey) {
         throw new Error('Missing VAPID public key.');
@@ -2258,23 +2382,22 @@ export default function App() {
       }
 
       const registration = await navigator.serviceWorker.ready;
+      const applicationServerKey = urlBase64ToUint8Array(vapidPublicKey.trim());
       let subscription = await registration.pushManager.getSubscription();
       if (!subscription) {
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-        });
+        subscription = await subscribeWithRecovery(registration, applicationServerKey);
       }
 
       const deviceId = settings.pushNotifications.deviceId || crypto.randomUUID();
       const subscriptionJson = subscription.toJSON();
+      const normalizedPlatform: PushPlatform = platform === 'android' ? 'android' : 'ios';
 
       const res = await fetch(`${workerBaseUrl}/api/devices`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           deviceId,
-          platform,
+          platform: normalizedPlatform,
           subscription: subscriptionJson,
         }),
       });
@@ -2290,7 +2413,7 @@ export default function App() {
       const updated: PushPreferences = {
         ...settings.pushNotifications,
         enabled: true,
-        platform,
+        platform: normalizedPlatform,
         deviceId,
         subscriptionId,
         permission,
@@ -2313,7 +2436,7 @@ export default function App() {
 
       setSettings({ pushNotifications: updated });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to enable push notifications';
+      const message = normalizePushError(err);
       setPushError(message);
       if (typeof Notification !== 'undefined') {
         setSettings({ pushNotifications: { ...settings.pushNotifications, permission: Notification.permission } });
@@ -5506,12 +5629,20 @@ function SettingsModal({
   const backgroundInputRef = useRef<HTMLInputElement | null>(null);
   const backgroundAccentHex = settings.backgroundAccent ? settings.backgroundAccent.fill.toUpperCase() : null;
   const pushPrefs = settings.pushNotifications ?? DEFAULT_PUSH_PREFERENCES;
-  const pushSupported = typeof window !== 'undefined' && 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
+  const secureContext = typeof window !== 'undefined' ? window.isSecureContext : false;
+  const pushSupported = typeof window !== 'undefined'
+    && secureContext
+    && 'Notification' in window
+    && 'serviceWorker' in navigator
+    && 'PushManager' in window;
   const workerConfigured = !!workerBaseUrl;
   const vapidConfigured = !!vapidPublicKey;
   const pushBusy = pushWorkState !== 'idle';
   const permissionLabel = pushPrefs.permission ?? (typeof Notification !== 'undefined' ? Notification.permission : 'default');
-  
+  const pushSupportHint = !secureContext
+    ? 'Push notifications require HTTPS (or localhost during development).'
+    : 'Push notifications need a browser with Service Worker and Push API support.';
+
   const handleBackgroundImageSelection = useCallback(async (file: File | null) => {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
@@ -5542,10 +5673,6 @@ function SettingsModal({
       }
     }
   }, [setSettings, showToast]);
-
-  const updatePush = useCallback((patch: Partial<PushPreferences>) => {
-    setSettings({ pushNotifications: { ...pushPrefs, ...patch } });
-  }, [pushPrefs, setSettings]);
 
   const handleEnablePush = useCallback(async () => {
     try {
@@ -6445,19 +6572,11 @@ function SettingsModal({
           </div>
           <div className="space-y-4">
             <div>
-              <div className="text-sm font-medium mb-2">Platform</div>
-              <div className="flex gap-2">
-                <button
-                  className={pillButtonClass(pushPrefs.platform === 'ios')}
-                  onClick={() => updatePush({ platform: 'ios' })}
-                >iOS</button>
-                <button
-                  className={pillButtonClass(pushPrefs.platform === 'android')}
-                  onClick={() => updatePush({ platform: 'android' })}
-                >Android</button>
-              </div>
-              <div className="text-xs text-secondary mt-2">
-                Pick the platform where you plan to install Taskify as a PWA.
+              <div className="text-sm font-medium mb-2">Detected platform</div>
+              <div className="text-xs text-secondary">
+                {pushPrefs.platform === 'ios'
+                  ? 'Using Apple Push Notification service (Safari / iOS / macOS).'
+                  : 'Using the standard Web Push service (FCM-compatible browsers).'}
               </div>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -6474,7 +6593,7 @@ function SettingsModal({
             </div>
             {!pushSupported && (
               <div className="text-xs text-secondary">
-                Push notifications require installing Taskify on iOS or Android and using a browser that supports the Push API.
+                {pushSupportHint}
               </div>
             )}
             {(!workerConfigured || !vapidConfigured) && (

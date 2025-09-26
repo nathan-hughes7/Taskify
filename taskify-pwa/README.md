@@ -6,7 +6,7 @@ Taskify is an offline-friendly personal task board built with React, TypeScript,
 
 - 💡 Set due **date + time** on any task from the editor.
 - ⏰ Attach reminder presets (5m, 15m, 1h, 1 day) per task; combine multiple offsets.
-- 🔔 Push notification toggle in Settings with iOS/Android platform targeting.
+- 🔔 Push notification toggle in Settings with automatic platform detection.
 - ☁️ Cloudflare Worker API stores subscriptions, schedules reminders, and pings devices via VAPID-secured Web Push.
 - 📦 Worker also serves the static Vite build, so the full app runs on Workers instead of Pages.
 
@@ -100,7 +100,7 @@ The Worker lives in `worker/src/index.ts` and shares this repository. It serves 
 
 ## Using push notifications
 
-1. Sign in to Taskify, open **Settings → Push notifications**, pick the platform (iOS or Android), and enable push.
+1. Sign in to Taskify, open **Settings → Push notifications**, and enable push — the app automatically selects the appropriate push service for your browser.
 2. The browser prompts for notification permission and registers the device with the Worker.
 3. Edit any task, add a due time and one or more reminder offsets. When the Worker’s cron job reaches the scheduled send time it fires a push ping.
 4. The service worker fetches reminder details on receipt and shows user-friendly notifications with links back into Taskify.

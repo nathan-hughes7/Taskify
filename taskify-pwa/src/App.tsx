@@ -84,8 +84,7 @@ type Task = {
   reminders?: ReminderPreset[];   // preset reminder offsets before due time
 };
 
-type ReminderPresetId = "5m" | "15m" | "30m" | "1h" | "1d";
-type ReminderPreset = ReminderPresetId | `custom:${number}`;
+type ReminderPreset = "5m" | "15m" | "1h" | "1d";
 
 type PushPlatform = "ios" | "android";
 
@@ -118,60 +117,15 @@ function detectPushPlatformFromNavigator(): PushPlatform {
 
 const INFERRED_PUSH_PLATFORM: PushPlatform = detectPushPlatformFromNavigator();
 
-const REMINDER_PRESETS: ReadonlyArray<{ id: ReminderPresetId; label: string; badge: string; minutes: number }> = [
+const REMINDER_PRESETS: ReadonlyArray<{ id: ReminderPreset; label: string; badge: string; minutes: number }> = [
   { id: "5m", label: "5 minutes before", badge: "5m", minutes: 5 },
   { id: "15m", label: "15 minutes before", badge: "15m", minutes: 15 },
-  { id: "30m", label: "30 minutes before", badge: "30m", minutes: 30 },
   { id: "1h", label: "1 hour before", badge: "1h", minutes: 60 },
   { id: "1d", label: "1 day before", badge: "1d", minutes: 1440 },
 ];
 
-const REMINDER_IDS = new Set<ReminderPresetId>(REMINDER_PRESETS.map((opt) => opt.id));
-const REMINDER_MINUTES = new Map<ReminderPresetId, number>(REMINDER_PRESETS.map((opt) => [opt.id, opt.minutes] as const));
-
-const MAX_CUSTOM_REMINDER_MINUTES = 7 * 24 * 60; // One week
-
-function isCustomReminderValue(value: ReminderPreset | string): value is `custom:${number}` {
-  return typeof value === 'string' && /^custom:(\d+)$/.test(value);
-}
-
-function getCustomReminderMinutes(value: `custom:${number}` | string): number | null {
-  if (!isCustomReminderValue(value)) return null;
-  const [, raw] = value.split(':');
-  const parsed = Number.parseInt(raw ?? '', 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  const clamped = Math.min(Math.floor(parsed), MAX_CUSTOM_REMINDER_MINUTES);
-  return clamped;
-}
-
-function makeCustomReminder(minutes: number): ReminderPreset | null {
-  if (!Number.isFinite(minutes)) return null;
-  const floored = Math.floor(minutes);
-  if (floored <= 0) return null;
-  const normalized = Math.min(floored, MAX_CUSTOM_REMINDER_MINUTES);
-  return `custom:${normalized}` as ReminderPreset;
-}
-
-function formatReminderMinutes(minutes: number): string {
-  if (minutes % 1440 === 0) {
-    const days = minutes / 1440;
-    return `${days}d`;
-  }
-  if (minutes % 60 === 0 && minutes >= 60) {
-    const hours = minutes / 60;
-    return `${hours}h`;
-  }
-  return `${minutes}m`;
-}
-
-function formatReminderBadge(id: ReminderPreset): string {
-  if (isCustomReminderValue(id)) {
-    const minutes = getCustomReminderMinutes(id);
-    return minutes ? formatReminderMinutes(minutes) : 'custom';
-  }
-  const preset = REMINDER_PRESETS.find((opt) => opt.id === id);
-  return preset?.badge ?? id;
-}
+const REMINDER_IDS = new Set<ReminderPreset>(REMINDER_PRESETS.map((opt) => opt.id as ReminderPreset));
+const REMINDER_MINUTES = new Map<ReminderPreset, number>(REMINDER_PRESETS.map((opt) => [opt.id, opt.minutes] as const));
 
 const DEFAULT_PUSH_PREFERENCES: PushPreferences = {
   enabled: false,
@@ -188,24 +142,12 @@ function sanitizeReminderList(value: unknown): ReminderPreset[] | undefined {
   const dedup = new Set<ReminderPreset>();
   for (const item of value) {
     if (typeof item !== 'string') continue;
-    if (REMINDER_IDS.has(item as ReminderPresetId)) {
-      dedup.add(item as ReminderPresetId);
-      continue;
-    }
-    if (isCustomReminderValue(item)) {
-      const minutes = getCustomReminderMinutes(item);
-      if (!minutes) continue;
-      const normalized = makeCustomReminder(minutes);
-      if (normalized) dedup.add(normalized);
-    }
+    if (REMINDER_IDS.has(item as ReminderPreset)) dedup.add(item as ReminderPreset);
   }
   return [...dedup];
 }
 
 function reminderPresetToMinutes(id: ReminderPreset): number {
-  if (isCustomReminderValue(id)) {
-    return getCustomReminderMinutes(id) ?? 0;
-  }
   return REMINDER_MINUTES.get(id) ?? 0;
 }
 
@@ -4733,10 +4675,6 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
   const [scheduledTime, setScheduledTime] = useState<string>(defaultHasTime ? initialTime : '');
   const hasDueTime = scheduledTime.trim().length > 0;
   const [reminderSelection, setReminderSelection] = useState<ReminderPreset[]>(task.reminders ?? []);
-  const [customReminderMinutes, setCustomReminderMinutes] = useState<number | null>(() => {
-    const customValue = (task.reminders ?? []).find(isCustomReminderValue);
-    return customValue ? getCustomReminderMinutes(customValue) : null;
-  });
   const [bountyAmount, setBountyAmount] = useState<number | "">(task.bounty?.amount ?? "");
   const [, setBountyState] = useState<Task["bounty"]["state"]>(task.bounty?.state || "locked");
   const [encryptWhenAttach, setEncryptWhenAttach] = useState(true);
@@ -4850,52 +4788,13 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
     reorderSubtasks(sourceHint, id, position);
   }, [reorderSubtasks]);
 
-  function toggleReminder(id: ReminderPresetId) {
+  function toggleReminder(id: ReminderPreset) {
     setReminderSelection((prev) => {
       const exists = prev.includes(id);
       const next = exists ? prev.filter((item) => item !== id) : [...prev, id];
-      return [...next].sort((a, b) => reminderPresetToMinutes(a) - reminderPresetToMinutes(b));
+      return [...next].sort((a, b) => (REMINDER_MINUTES.get(a) ?? 0) - (REMINDER_MINUTES.get(b) ?? 0));
     });
   }
-
-  function handleCustomReminderClick() {
-    if (!hasDueTime) return;
-    const existing = reminderSelection.find(isCustomReminderValue);
-    if (existing) {
-      const minutes = getCustomReminderMinutes(existing) ?? customReminderMinutes;
-      setCustomReminderMinutes(minutes ?? null);
-      setReminderSelection((prev) => prev.filter((item) => item !== existing));
-      return;
-    }
-    const defaultValue = customReminderMinutes ?? 30;
-    const raw = window.prompt('Remind me how many minutes before the due time?', String(defaultValue));
-    if (raw === null) return;
-    const parsed = Number.parseInt(raw, 10);
-    const customValue = makeCustomReminder(parsed);
-    if (!customValue) {
-      alert('Enter a positive number of minutes.');
-      return;
-    }
-    const minutes = getCustomReminderMinutes(customValue);
-    setCustomReminderMinutes(minutes);
-    setReminderSelection((prev) => {
-      const withoutCustom = prev.filter((item) => !isCustomReminderValue(item));
-      const next = [...withoutCustom, customValue];
-      next.sort((a, b) => reminderPresetToMinutes(a) - reminderPresetToMinutes(b));
-      return next;
-    });
-  }
-
-  const activeCustomReminder = reminderSelection.find(isCustomReminderValue) ?? null;
-  const activeCustomMinutes = activeCustomReminder ? getCustomReminderMinutes(activeCustomReminder) : null;
-  const customButtonClass = `${activeCustomReminder ? 'accent-button' : 'ghost-button'} button-sm pressable`;
-  const customButtonTitle = !hasDueTime
-    ? 'Set a due time to enable reminders.'
-    : activeCustomMinutes
-      ? `Custom reminder (${formatReminderMinutes(activeCustomMinutes)} before due time)`
-      : activeCustomReminder
-        ? 'Custom reminder'
-        : 'Add a custom reminder…';
 
   function buildTask(overrides: Partial<Task> = {}): Task {
     const baseDate = scheduledDate || isoDatePart(task.dueISO);
@@ -5045,7 +4944,7 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
             <div className="text-sm font-medium">Notifications</div>
             {reminderSelection.length > 0 && (
               <div className="ml-auto text-xs text-secondary">
-                {reminderSelection.map((id) => formatReminderBadge(id)).join(', ')}
+                {reminderSelection.map((id) => REMINDER_PRESETS.find((opt) => opt.id === id)?.badge || id).join(', ')}
               </div>
             )}
           </div>
@@ -5066,15 +4965,6 @@ function EditModal({ task, onCancel, onDelete, onSave, weekStart, onRedeemCoins 
                 </button>
               );
             })}
-            <button
-              type="button"
-              className={customButtonClass}
-              onClick={handleCustomReminderClick}
-              disabled={!hasDueTime}
-              title={customButtonTitle}
-            >
-              Custom
-            </button>
           </div>
           {!hasDueTime && (
             <div className="text-xs text-secondary">Set a due time to enable reminders.</div>

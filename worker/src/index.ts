@@ -309,7 +309,8 @@ async function processDueReminders(env: Env): Promise<void> {
         minutes: reminder.minutes,
       }));
       await appendPending(env, deviceId, pendingNotifications);
-      await sendPushPing(env, device, deviceId);
+      const ttlSeconds = computeReminderTTL(pendingNotifications, now);
+      await sendPushPing(env, device, deviceId, ttlSeconds);
     }
   } while (cursor);
 }
@@ -328,7 +329,19 @@ async function appendPending(env: Env, deviceId: string, notifications: PendingR
   await env.TASKIFY_PENDING.put(key, JSON.stringify(payload));
 }
 
-async function sendPushPing(env: Env, device: DeviceRecord, deviceId: string): Promise<void> {
+function computeReminderTTL(reminders: PendingReminder[], now: number): number {
+  let ttl = 300; // minimum of 5 minutes to give the device time to wake
+  for (const reminder of reminders) {
+    if (!reminder || typeof reminder.dueISO !== "string") continue;
+    const due = Date.parse(reminder.dueISO);
+    if (Number.isNaN(due)) continue;
+    const secondsUntilDue = Math.max(0, Math.ceil((due - now) / 1000));
+    ttl = Math.max(ttl, secondsUntilDue + 120); // allow a small buffer past due time
+  }
+  return Math.max(300, Math.min(86400, ttl));
+}
+
+async function sendPushPing(env: Env, device: DeviceRecord, deviceId: string, ttlSeconds: number): Promise<void> {
   try {
     const endpoint = device.subscription.endpoint;
     const url = new URL(endpoint);
@@ -337,7 +350,7 @@ async function sendPushPing(env: Env, device: DeviceRecord, deviceId: string): P
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
-        TTL: "60",
+        TTL: String(ttlSeconds),
         Authorization: `WebPush ${token}`,
         "Crypto-Key": `p256ecdsa=${env.VAPID_PUBLIC_KEY}`,
         "Content-Length": "0",

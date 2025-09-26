@@ -5,7 +5,7 @@ export interface Env {
   TASKIFY_REMINDERS: KVNamespace;
   TASKIFY_PENDING: KVNamespace;
   VAPID_PUBLIC_KEY: string;
-  VAPID_PRIVATE_KEY: string;
+  VAPID_PRIVATE_KEY: string | KVNamespace;
   VAPID_SUBJECT: string;
 }
 
@@ -78,6 +78,7 @@ const MINUTE_MS = 60_000;
 const MAX_LEAD_MS = 30 * 24 * 60 * MINUTE_MS; // 30 days
 
 let cachedPrivateKey: CryptoKey | null = null;
+const PRIVATE_KEY_KV_KEYS = ["VAPID_PRIVATE_KEY", "private-key", "key"] as const;
 
 interface ScheduledEvent {
   scheduledTime: number;
@@ -392,7 +393,7 @@ async function sendPushPing(env: Env, device: DeviceRecord, deviceId: string, tt
 }
 
 async function createVapidJWT(env: Env, aud: string): Promise<string> {
-  if (!env.VAPID_PRIVATE_KEY || !env.VAPID_PUBLIC_KEY || !env.VAPID_SUBJECT) {
+  if (!env.VAPID_PUBLIC_KEY || !env.VAPID_SUBJECT) {
     throw new Error("VAPID keys are not configured");
   }
   const now = Math.floor(Date.now() / 1000);
@@ -412,7 +413,8 @@ async function createVapidJWT(env: Env, aud: string): Promise<string> {
 
 async function getPrivateKey(env: Env): Promise<CryptoKey> {
   if (cachedPrivateKey) return cachedPrivateKey;
-  const raw = decodePemKey(env.VAPID_PRIVATE_KEY);
+  const pem = await resolvePrivateKeyPem(env);
+  const raw = decodePemKey(pem);
   cachedPrivateKey = await crypto.subtle.importKey(
     "pkcs8",
     raw,
@@ -421,6 +423,28 @@ async function getPrivateKey(env: Env): Promise<CryptoKey> {
     ["sign"],
   );
   return cachedPrivateKey;
+}
+
+async function resolvePrivateKeyPem(env: Env): Promise<string> {
+  const binding = env.VAPID_PRIVATE_KEY as unknown;
+  if (typeof binding === "string") {
+    const trimmed = binding.trim();
+    if (trimmed) return trimmed;
+  }
+
+  const maybeKv = binding as KVNamespace | undefined;
+  if (maybeKv && typeof maybeKv.get === "function") {
+    for (const candidate of PRIVATE_KEY_KV_KEYS) {
+      try {
+        const value = await maybeKv.get(candidate);
+        if (value && value.trim()) return value.trim();
+      } catch {
+        // ignore and try next candidate
+      }
+    }
+  }
+
+  throw new Error("VAPID private key is not configured");
 }
 
 function deviceKey(deviceId: string): string {
